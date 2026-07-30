@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Absensi Biometrik Wajah 1-to-1 Verification</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- face-api.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <!-- Main Application Script -->
+  <script defer src="app.js"></script>
+</head>
+<body>
+
+  <!-- Header Navbar -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <i class="fa-solid fa-face-smile"></i>
+      </div>
+      <div class="brand-text">
+        <h1>Absensi Biometrik Wajah</h1>
+      </div>
+    </div>
+
+    <!-- Nav Tabs (Register Master Removed as requested) -->
+    <div class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-verify">
+        <i class="fa-solid fa-camera-retro"></i> Absensi Wajah
+      </button>
+      <button class="tab-btn" data-tab="tab-employees">
+        <i class="fa-solid fa-users"></i> Data Karyawan
+      </button>
+      <button class="tab-btn" data-tab="tab-logs">
+        <i class="fa-solid fa-clock-rotate-left"></i> Log Absensi
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main>
+
+    <!-- TAB 1: ABSENSI WAJAH -->
+    <section id="tab-verify" class="tab-content active">
+      <div style="max-width: 680px; margin: 0 auto;">
+
+        <!-- Panel Main Absensi -->
+        <div class="glass-card">
+          <div class="card-title">
+            <i class="fa-solid fa-user-check" style="color: var(--accent-cyan);"></i>
+            Identifikasi NIK / ID Karyawan & Kamera
+          </div>
+
+          <div class="form-group">
+            <label for="verify-employee-select">Pilih Karyawan / Scan NIK</label>
+            <select id="verify-employee-select">
+              <option value="">-- Pilih Karyawan --</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="verify-nik-input">Atau Ketik / Scan NIK Manual</label>
+            <input type="text" id="verify-nik-input" placeholder="Contoh: EMP-001">
+          </div>
+
+          <!-- Live Face Status Badge -->
+          <div id="live-face-info" style="margin-bottom: 1rem; background: rgba(15,23,42,0.6); padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: var(--text-muted);">Status Kamera:</span>
+            <strong id="face-detect-badge" style="color: var(--accent-warning);">Menunggu Kamera...</strong>
+            <span id="vector-status" style="display:none;">Float32 Array [128-dim]</span>
+          </div>
+
+          <!-- Video Webcam Feed -->
+          <div class="form-group">
+            <label>Live Camera Capture</label>
+            <div class="webcam-wrapper">
+              <video id="verify-video" autoplay muted playsinline></video>
+              <canvas id="verify-canvas" class="overlay-canvas"></canvas>
+              <div id="verify-loader" class="loading-overlay">
+                <div class="spinner"></div>
+                <span id="model-status-text">Memuat Model AI Biometrik Wajah...</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Status Absensi Hari Ini -->
+          <div id="attendance-status-bar" style="display:none; margin-top: 10px; padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <span style="color: var(--text-muted);">Status Hari Ini:</span>
+              <strong id="attendance-status-label" style="color: #34d399;">—</strong>
+            </div>
+            <div id="checkin-time-row" style="display:none; margin-top:4px; font-size:0.8rem; color: var(--text-muted);">
+              Check-In pukul: <span id="checkin-time-display" style="color:#f8fafc; font-weight:600;"></span>
+            </div>
+          </div>
+
+          <!-- Smart Tombol Absensi: hanya tampil 1 sesuai status -->
+          <div style="margin-top: 10px;">
+            <button id="btn-do-checkin" class="btn btn-success" disabled>
+              <i class="fa-solid fa-right-to-bracket"></i> Check-In (Masuk)
+            </button>
+            <button id="btn-do-checkout" class="btn" disabled style="display:none; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff;">
+              <i class="fa-solid fa-right-from-bracket"></i> Check-Out (Keluar)
+            </button>
+          </div>
+
+          <!-- Alert Result Box (Shadcn UI Alert Style dengan Metrics di Bagian Atas) -->
+          <div id="verify-result" class="shadcn-alert" style="display: none; margin-top: 1.25rem; flex-direction: column; gap: 8px;">
+            
+            <!-- Metrics Info di Bagian ATAS -->
+            <div class="result-metrics" style="width: 100%; margin-bottom: 6px; margin-top: 0; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); padding: 10px 14px; border-radius: 8px;">
+              <div class="metric-item">
+                <span class="metric-label">Euclidean Distance</span>
+                <span class="metric-value" id="metric-distance">-</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Max Threshold</span>
+                <span class="metric-value" id="metric-threshold">0.5500</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Tipe Absensi</span>
+                <span class="metric-value" id="metric-type">CHECK-IN</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Timestamp</span>
+                <span class="metric-value" id="metric-time">-</span>
+              </div>
+            </div>
+
+            <!-- Pesan Alert Shadcn UI (Title & Description) -->
+            <div style="display: flex; gap: 12px; align-items: flex-start; width: 100%;">
+              <div id="result-icon" class="alert-icon" style="font-size: 1.25rem;">
+                <i class="fa-solid fa-circle-check" style="color: #34d399;"></i>
+              </div>
+              <div class="alert-content">
+                <div class="alert-title" id="result-title" style="font-size: 1.05rem; font-weight: 800; letter-spacing: -0.01em;">
+                  VERIFIKASI BERHASIL
+                </div>
+                <div class="alert-description" id="result-message" style="font-size: 0.92rem; font-weight: 500; margin-top: 2px;">
+                  Absensi Berhasil! Selamat Datang, STEVE.
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: DATA KARYAWAN & REGISTER WAJAH MASTER -->
+    <section id="tab-employees" class="tab-content">
+      <div class="grid-2">
+        
+        <!-- Form Tambah Karyawan & Capture/Upload Foto Master -->
+        <div class="glass-card">
+          <div class="card-title">
+            <i class="fa-solid fa-user-plus" style="color: var(--accent-cyan);"></i>
+            Input Data & Biometrik Wajah Karyawan
+          </div>
+
+          <form id="form-add-employee">
+            <div class="form-group">
+              <label for="emp-nik">NIK / Employee ID</label>
+              <input type="text" id="emp-nik" placeholder="Contoh: EMP-004" required>
+            </div>
+            <div class="form-group">
+              <label for="emp-name">Nama Lengkap</label>
+              <input type="text" id="emp-name" placeholder="Contoh: Dewi Lestari" required>
+            </div>
+            <div class="form-group">
+              <label for="emp-dept">Departemen / Divisi</label>
+              <input type="text" id="emp-dept" placeholder="Contoh: Finance & Operation" required>
+            </div>
+
+            <!-- Kamera Live & Option Upload Foto Biometrik Master -->
+            <div class="form-group" style="margin-top: 1.25rem;">
+              <label><i class="fa-solid fa-camera"></i> Foto Wajah Master (Kamera / Unggah Berkas)</label>
+              
+              <!-- Tab Mode Foto: Kamera / Upload File -->
+              <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                <button type="button" id="btn-mode-camera" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;">
+                  <i class="fa-solid fa-video"></i> Gunakan Kamera
+                </button>
+                <button type="button" id="btn-mode-file" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.1); color: #fff;">
+                  <i class="fa-solid fa-upload"></i> Unggah File Foto
+                </button>
+              </div>
+
+              <!-- Mode Kamera Live -->
+              <div id="emp-camera-wrapper" class="webcam-wrapper" style="aspect-ratio: 4/3;">
+                <video id="emp-reg-video" autoplay muted playsinline></video>
+                <canvas id="emp-reg-canvas" class="overlay-canvas"></canvas>
+              </div>
+
+              <!-- Mode Upload File Photo -->
+              <div id="emp-file-wrapper" style="display: none; background: rgba(15,23,42,0.8); border: 1px dashed var(--border-color); padding: 1.5rem; border-radius: 10px; text-align: center;">
+                <input type="file" id="emp-photo-input" accept="image/*" style="display: none;">
+                <button type="button" class="btn" style="background: rgba(99,102,241,0.2); border: 1px solid var(--accent-primary); color: #fff; width: auto;" onclick="document.getElementById('emp-photo-input').click()">
+                  <i class="fa-solid fa-image"></i> Pilih File Foto Wajah
+                </button>
+                <div id="emp-photo-filename" style="margin-top: 8px; font-size: 0.82rem; color: var(--text-muted);">Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)</div>
+                <img id="emp-photo-preview" style="max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 10px; display: none;" alt="Preview Foto Master">
+              </div>
+
+              <!-- Status Ekstraksi Biometrik -->
+              <div style="margin-top: 8px; font-size: 0.82rem; display: flex; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 6px;">
+                <span>Status Biometrik Master:</span>
+                <strong id="emp-face-status" style="color: var(--accent-warning);">Menunggu Capture / Foto...</strong>
+              </div>
+            </div>
+
+            <button type="submit" id="btn-submit-emp" class="btn btn-success" style="margin-top: 1rem;">
+              <i class="fa-solid fa-floppy-disk"></i> Simpan Karyawan & Master Biometrik
+            </button>
+          </form>
+
+          <div id="emp-form-msg" class="result-box" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Tabel Daftar Karyawan Terdaftar -->
+        <div class="glass-card">
+          <div class="card-title">
+            <i class="fa-solid fa-address-book" style="color: var(--accent-primary);"></i>
+            Daftar Karyawan Terdaftar
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>NIK</th>
+                  <th>Nama</th>
+                  <th>Departemen</th>
+                  <th>Biometrik Master</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="employee-table-body">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Memuat data...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 3: LOG ABSENSI -->
+    <section id="tab-logs" class="tab-content">
+      <div class="glass-card" style="padding: 0; overflow: hidden;">
+
+        <!-- Table Header / Caption Area -->
+        <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h3 style="font-size: 1rem; font-weight: 700; color: #fff; display:flex; gap:8px; align-items:center;">
+              <i class="fa-solid fa-list-check" style="color: var(--accent-cyan);"></i>
+              Riwayat Log Absensi Biometrik
+            </h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">Pencatatan seluruh percobaan absensi Check-In & Check-Out beserta durasi kerja.</p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-refresh-logs" class="btn-action edit" style="padding: 8px 14px; font-size: 0.82rem;">
+              <i class="fa-solid fa-arrows-rotate"></i> Refresh Log
+            </button>
+            <button id="btn-clear-all-logs" class="btn-action delete" style="padding: 8px 14px; font-size: 0.82rem;">
+              <i class="fa-solid fa-trash-can"></i> Hapus Semua Log
+            </button>
+          </div>
+        </div>
+
+        <!-- shadcn UI Table -->
+        <div class="table-container" style="margin-top: 0;">
+          <table class="shadcn-table">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Tipe</th>
+                <th>NIK</th>
+                <th>Nama Karyawan</th>
+                <th>Departemen</th>
+                <th>Durasi Kerja</th>
+                <th>Status</th>
+                <th>Lokasi</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="logs-table-body">
+              <tr class="shadcn-tr-empty">
+                <td colspan="9">
+                  <div style="display:flex; flex-direction:column; align-items:center; gap:8px; padding: 2rem 0; color: var(--text-muted);">
+                    <i class="fa-regular fa-clock" style="font-size: 1.8rem; opacity:0.4;"></i>
+                    <span>Belum ada data log absensi.</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+            <tfoot id="logs-table-footer" style="display:none;">
+              <tr>
+                <td colspan="9" style="padding: 10px 16px; font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-color); background: rgba(15,23,42,0.5);">
+                  Total <strong id="logs-total-count">0</strong> entri tercatat hari ini &amp; historis.
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal Edit Data Karyawan -->
+  <div id="modal-edit-emp" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+    <div class="glass-card" style="max-width: 500px; width: 100%; border: 1px solid var(--accent-primary); box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+      <div class="card-title" style="display: flex; justify-content: space-between;">
+        <span><i class="fa-solid fa-user-pen" style="color: var(--accent-cyan);"></i> Edit Data Karyawan</span>
+        <button type="button" id="btn-close-edit-modal" style="background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer;">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="form-edit-employee">
+        <input type="hidden" id="edit-emp-id">
+        <div class="form-group">
+          <label for="edit-emp-nik">NIK / Employee ID</label>
+          <input type="text" id="edit-emp-nik" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-emp-name">Nama Lengkap</label>
+          <input type="text" id="edit-emp-name" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-emp-dept">Departemen / Divisi</label>
+          <input type="text" id="edit-emp-dept" required>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 1.5rem;">
+          <button type="button" id="btn-cancel-edit" class="btn" style="background: rgba(255,255,255,0.1); color: #fff;">
+            Batal
+          </button>
+          <button type="submit" id="btn-save-edit" class="btn btn-primary">
+            <i class="fa-solid fa-floppy-disk"></i> Simpan Perubahan
+          </button>
+        </div>
+      </form>
+      <div id="edit-form-msg" class="result-box" style="margin-top: 1rem;"></div>
+    </div>
+  </div>
+
+  <!-- Modal Custom Confirmation (Ganti Alert/Confirm Bawaan Browser) -->
+  <div id="modal-confirm" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(10px); z-index: 2000; align-items: center; justify-content: center; padding: 1rem;">
+    <div class="glass-card" style="max-width: 440px; width: 100%; border: 1px solid rgba(239, 68, 68, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.6); animation: fadeInUp 0.25s ease;">
+      
+      <div style="display: flex; gap: 14px; align-items: flex-start;">
+        <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 id="confirm-title" style="font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 6px;">Konfirmasi Hapus Data</h3>
+          <p id="confirm-message" style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5;"></p>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 1.5rem; justify-content: flex-end;">
+        <button type="button" id="btn-confirm-cancel" class="btn" style="width: auto; padding: 10px 18px; background: rgba(255,255,255,0.08); color: #fff; font-size: 0.88rem;">
+          Batal
+        </button>
+        <button type="button" id="btn-confirm-action" class="btn" style="width: auto; padding: 10px 20px; background: linear-gradient(135deg, #ef4444, #dc2626); color: #fff; font-size: 0.88rem; box-shadow: 0 4px 14px rgba(239,68,68,0.4);">
+          <i class="fa-solid fa-trash"></i> Hapus Data
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast Alert Floating Container (Shadcn UI Style) -->
+  <div id="custom-toast-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 3000; display: flex; flex-direction: column; gap: 10px; max-width: 400px; width: calc(100% - 48px); pointer-events: none;"></div>
+
+  <!-- Footer -->
+  <footer>
+    <p>Sistem Absensi Biometrik Wajah berbasis 1-to-1 Verification Engine &copy; 2026. Powered by face-api.js & Supabase Cloud.</p>
+  </footer>
+
+</body>
+</html>
