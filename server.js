@@ -582,6 +582,20 @@ app.delete('/api/attendance/logs', async (req, res) => {
   }
 });
 
+// SPA Fallback Route: Serve dist/index.html for client-side routing
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  const distIndex = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
+  const publicIndex = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(publicIndex)) {
+    return res.sendFile(publicIndex);
+  }
+  next();
+});
+
 // Process Error Handlers for Server Resilience
 process.on('uncaughtException', (err) => {
   console.error('[SERVER UNCAUGHT EXCEPTION]:', err);
