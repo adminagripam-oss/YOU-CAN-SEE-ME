@@ -1,0 +1,26 @@
+{
+  "name": "biometric-face-attendance-1to1",
+  "version": "1.0.0",
+  "description": "Sistem Absensi Biometrik Wajah berbasis Metode 1-to-1 Verification",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "vite",
+    "server": "node server.js",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
+    "@vladmandic/face-api": "^1.7.15",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.4",
+    "vite": "^8.1.5"
+  }
+}
