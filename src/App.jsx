@@ -1,23 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { API_BASE_URL } from './config';
 import { getUnsyncedLogs } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
-import Header from './components/Header';
-import NetworkStatusBar from './components/NetworkStatusBar';
-import LoginPage from './components/LoginPage';
-import TabFaceVerification from './components/TabFaceVerification';
-import TabEmployeeManagement from './components/TabEmployeeManagement';
-import TabAttendanceLogs from './components/TabAttendanceLogs';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import PublicRoute from './components/PublicRoute';
+import AuthLayout from './layouts/AuthLayout';
+import DashboardLayout from './layouts/DashboardLayout';
+import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import AbsensiPage from './pages/AbsensiPage';
+import KaryawanPage from './pages/KaryawanPage';
+import LogsPage from './pages/LogsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 
-export default function App() {
+function AppContent() {
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelStatusText, setModelStatusText] = useState('Memuat Model AI Biometrik Wajah...');
   const [toasts, setToasts] = useState([]);
-  
+
   // Theme State (Dark / Light)
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('app-theme') || 'light';
@@ -37,17 +42,6 @@ export default function App() {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // User Auth & Page Routing State
-  const [currentUser, setCurrentUser] = useState(() => {
-    const saved = localStorage.getItem('logged_in_employee');
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  const [activeTab, setActiveTab] = useState(() => {
-    const saved = localStorage.getItem('logged_in_employee');
-    return saved ? 'tab-verify' : 'tab-login';
-  });
-
   const [confirmModalConfig, setConfirmModalConfig] = useState({
     isOpen: false,
     title: '',
@@ -56,11 +50,10 @@ export default function App() {
     onConfirm: null,
   });
 
-  // Floating Toast Notification Helper
+  // Toast Helper
   const showToast = useCallback((title, description, type = 'info') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, title, description, type }]);
-
     setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 4500);
@@ -110,7 +103,7 @@ export default function App() {
     }
   }, []);
 
-  // Check Unsynced Logs Count from IndexedDB
+  // Check Unsynced Count from IndexedDB
   const refreshUnsyncedCount = useCallback(async () => {
     try {
       const items = await getUnsyncedLogs();
@@ -198,37 +191,9 @@ export default function App() {
     loadFaceApiModels();
   }, [fetchEmployees, fetchLogs]);
 
-  // Handle Login User Success
-  const handleLoginSuccess = (user) => {
-    setCurrentUser(user);
-    localStorage.setItem('logged_in_employee', JSON.stringify(user));
-    setActiveTab('tab-verify');
-  };
-
-  // Handle Logout
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem('logged_in_employee');
-    setActiveTab('tab-login');
-    showToast('Logout', 'Anda telah keluar dari akun.', 'info');
-  };
-
-  // Route Switch Handler with Auth Guard
-  const handleTabChange = (targetTab) => {
-    if (!currentUser && targetTab !== 'tab-login') {
-      showToast('Otentikasi Diperlukan', 'Silakan pilih profil & login terlebih dahulu di Portal Akun!', 'warning');
-      setActiveTab('tab-login');
-      return;
-    }
-    setActiveTab(targetTab);
-  };
-
   return (
     <>
-      {/* Toast Notifications */}
       <ShadcnToast toasts={toasts} />
-
-      {/* Confirmation Modal */}
       <ConfirmModal
         isOpen={confirmModalConfig.isOpen}
         title={confirmModalConfig.title}
@@ -238,87 +203,100 @@ export default function App() {
         onCancel={closeConfirmModal}
       />
 
-      {/* Network Online / Offline Status Pill */}
-      <NetworkStatusBar
-        isOnline={isOnline}
-        unsyncedCount={unsyncedCount}
-        isSyncing={isSyncing}
-        onManualSync={handleManualSync}
-      />
-
-      {/* Navigation Header */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={handleTabChange}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
-
-      {/* Main Tab Content */}
-      <main>
-        {activeTab === 'tab-login' && (
-          <section className="tab-content active">
-            <LoginPage
-              employees={employees}
-              currentUser={currentUser}
-              onLoginSuccess={handleLoginSuccess}
-              showToast={showToast}
-              onNavigateToApp={() => setActiveTab('tab-verify')}
-              theme={theme}
-              toggleTheme={toggleTheme}
+      <Routes>
+        {/* PUBLIC ROUTES (Auth Layout) */}
+        <Route element={<PublicRoute />}>
+          <Route element={<AuthLayout theme={theme} toggleTheme={toggleTheme} />}>
+            <Route
+              path="/login"
+              element={
+                <LoginPage
+                  employees={employees}
+                  showToast={showToast}
+                  theme={theme}
+                  toggleTheme={toggleTheme}
+                />
+              }
             />
-          </section>
-        )}
+          </Route>
+        </Route>
 
-        {activeTab === 'tab-verify' && (
-          <section className="tab-content active">
-            <TabFaceVerification
-              employees={employees}
-              modelsLoaded={modelsLoaded}
-              modelStatusText={modelStatusText}
-              showToast={showToast}
-              currentUser={currentUser}
-              onVerificationSuccess={() => {
-                fetchLogs();
-                refreshUnsyncedCount();
-              }}
+        {/* PROTECTED ROUTES (Dashboard Layout + Auth Guard) */}
+        <Route element={<ProtectedRoute />}>
+          <Route
+            element={
+              <DashboardLayout
+                isOnline={isOnline}
+                unsyncedCount={unsyncedCount}
+                isSyncing={isSyncing}
+                onManualSync={handleManualSync}
+                theme={theme}
+                toggleTheme={toggleTheme}
+              />
+            }
+          >
+            <Route
+              path="/dashboard"
+              element={
+                <DashboardPage
+                  employees={employees}
+                  logs={logs}
+                  modelsLoaded={modelsLoaded}
+                />
+              }
             />
-          </section>
-        )}
-
-        {activeTab === 'tab-employees' && (
-          <section className="tab-content active">
-            <TabEmployeeManagement
-              employees={employees}
-              modelsLoaded={modelsLoaded}
-              showToast={showToast}
-              refreshEmployees={fetchEmployees}
-              openConfirmModal={openConfirmModal}
+            <Route
+              path="/absensi"
+              element={
+                <AbsensiPage
+                  employees={employees}
+                  modelsLoaded={modelsLoaded}
+                  modelStatusText={modelStatusText}
+                  showToast={showToast}
+                  refreshLogs={fetchLogs}
+                />
+              }
             />
-          </section>
-        )}
-
-        {activeTab === 'tab-logs' && (
-          <section className="tab-content active">
-            <TabAttendanceLogs
-              logs={logs}
-              onRefreshLogs={fetchLogs}
-              showToast={showToast}
-              openConfirmModal={openConfirmModal}
-              refreshLogs={fetchLogs}
+            <Route
+              path="/karyawan"
+              element={
+                <KaryawanPage
+                  employees={employees}
+                  modelsLoaded={modelsLoaded}
+                  showToast={showToast}
+                  refreshEmployees={fetchEmployees}
+                  openConfirmModal={openConfirmModal}
+                />
+              }
             />
-          </section>
-        )}
-      </main>
+            <Route
+              path="/logs"
+              element={
+                <LogsPage
+                  logs={logs}
+                  refreshLogs={fetchLogs}
+                  showToast={showToast}
+                  openConfirmModal={openConfirmModal}
+                />
+              }
+            />
+          </Route>
+        </Route>
 
-      {/* Footer */}
-      <footer>
-        <p>
-          Aplikasi Absensi Mobile Biometrik Wajah (Offline-First &amp; Auto-Sync PWA) &copy; 2026.
-        </p>
-      </footer>
+        {/* Fallback Index Route */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
