@@ -10,6 +10,11 @@ const PORT = process.env.PORT || 8080;
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+const apiRouter = express.Router();
+app.use('/api', apiRouter);
+app.use('/YOU-CAN-SEE-ME/api', apiRouter);
+
 const fs = require('fs');
 const distPath = path.join(__dirname, 'dist');
 if (fs.existsSync(distPath)) {
@@ -88,7 +93,7 @@ function isValidDescriptor(descriptor) {
 // ==========================================
 
 // 1. GET /api/employees - List all employees with biometric status
-app.get('/api/employees', async (req, res) => {
+apiRouter.get('/employees', async (req, res) => {
   try {
     const { data: employees, error: empErr } = await supabase
       .from('employees')
@@ -117,7 +122,7 @@ app.get('/api/employees', async (req, res) => {
 });
 
 // 2. POST /api/employees - Register new employee
-app.post('/api/employees', async (req, res) => {
+apiRouter.post('/employees', async (req, res) => {
   try {
     const { nik, name, department } = req.body;
     if (!nik || !name || !department) {
@@ -151,7 +156,7 @@ app.post('/api/employees', async (req, res) => {
 });
 
 // 2b. PUT /api/employees/:id - Update existing employee
-app.put('/api/employees/:id', async (req, res) => {
+apiRouter.put('/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { nik, name, department } = req.body;
@@ -185,7 +190,7 @@ app.put('/api/employees/:id', async (req, res) => {
 });
 
 // 2c. DELETE /api/employees/:id - Delete employee and cascade biometrics & logs
-app.delete('/api/employees/:id', async (req, res) => {
+apiRouter.delete('/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -207,7 +212,7 @@ app.delete('/api/employees/:id', async (req, res) => {
 });
 
 // 3. POST /api/biometrics/register - Save / update master biometric descriptor (128 Float32)
-app.post('/api/biometrics/register', async (req, res) => {
+apiRouter.post('/biometrics/register', async (req, res) => {
   try {
     const { employee_id, descriptor } = req.body;
 
@@ -297,7 +302,7 @@ app.post('/api/biometrics/register', async (req, res) => {
 });
 
 // 4. POST /api/attendance/verify - Core 1-to-1 Matching Endpoint (Check-In / Check-Out)
-app.post('/api/attendance/verify', async (req, res) => {
+apiRouter.post('/attendance/verify', async (req, res) => {
   try {
     const { employee_id, nik, scan_descriptor, location = 'Kantor Pusat', attendance_type = 'CHECK_IN' } = req.body;
 
@@ -425,7 +430,7 @@ app.post('/api/attendance/verify', async (req, res) => {
 });
 
 // 5. GET /api/attendance/logs - Retrieve attendance history with duration
-app.get('/api/attendance/logs', async (req, res) => {
+apiRouter.get('/attendance/logs', async (req, res) => {
   try {
     const { data: logs, error: logsErr } = await supabase
       .from('attendance_logs')
@@ -494,8 +499,7 @@ app.get('/api/attendance/logs', async (req, res) => {
 });
 
 // 6. GET /api/attendance/status/:employeeId - Check today's attendance state
-// Returns: { checked_in: bool, checked_out: bool, check_in_time, check_out_time }
-app.get('/api/attendance/status/:employeeId', async (req, res) => {
+apiRouter.get('/attendance/status/:employeeId', async (req, res) => {
   try {
     const { employeeId } = req.params;
 
@@ -545,7 +549,7 @@ app.get('/api/attendance/status/:employeeId', async (req, res) => {
 });
 
 // 7. DELETE /api/attendance/logs/:id - Delete single attendance log entry
-app.delete('/api/attendance/logs/:id', async (req, res) => {
+apiRouter.delete('/attendance/logs/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { error } = await supabase
@@ -564,7 +568,7 @@ app.delete('/api/attendance/logs/:id', async (req, res) => {
 });
 
 // 8. DELETE /api/attendance/logs - Clear ALL attendance logs from Supabase
-app.delete('/api/attendance/logs', async (req, res) => {
+apiRouter.delete('/attendance/logs', async (req, res) => {
   try {
     // Delete all rows where id is not null (effectively clears all log rows)
     const { error } = await supabase
@@ -583,8 +587,14 @@ app.delete('/api/attendance/logs', async (req, res) => {
 });
 
 // SPA Fallback Route: Serve dist/index.html for client-side routing
+app.use((req, res, next) => {
+  if (req.path.includes('/api/')) {
+    return res.status(404).json({ success: false, message: `API Endpoint tidak ditemukan: ${req.method} ${req.path}` });
+  }
+  next();
+});
+
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
   const distIndex = path.join(__dirname, 'dist', 'index.html');
   if (fs.existsSync(distIndex)) {
     return res.sendFile(distIndex);
