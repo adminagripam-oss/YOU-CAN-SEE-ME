@@ -1,0 +1,17 @@
+{
+  "short_name": "AbsenBiometrik",
+  "name": "Aplikasi Absensi Mobile Biometrik Wajah",
+  "description": "Aplikasi Absensi Biometrik Wajah Offline-First & Auto-Sync",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/svgs/solid/face-smile.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "./",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait"
+}

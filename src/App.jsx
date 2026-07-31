@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from './config';
+import { getUnsyncedLogs } from './db';
+import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import Header from './components/Header';
+import NetworkStatusBar from './components/NetworkStatusBar';
+import LoginModal from './components/LoginModal';
 import TabFaceVerification from './components/TabFaceVerification';
 import TabEmployeeManagement from './components/TabEmployeeManagement';
 import TabAttendanceLogs from './components/TabAttendanceLogs';
@@ -14,6 +18,18 @@ export default function App() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelStatusText, setModelStatusText] = useState('Memuat Model AI Biometrik Wajah...');
   const [toasts, setToasts] = useState([]);
+  
+  // Offline PWA & Auto-Sync State
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [unsyncedCount, setUnsyncedCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // User Auth & Offline Cache State
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('logged_in_employee');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   const [confirmModalConfig, setConfirmModalConfig] = useState({
     isOpen: false,
     title: '',
@@ -76,6 +92,64 @@ export default function App() {
     }
   }, []);
 
+  // Check Unsynced Logs Count from IndexedDB
+  const refreshUnsyncedCount = useCallback(async () => {
+    try {
+      const items = await getUnsyncedLogs();
+      setUnsyncedCount(items ? items.length : 0);
+    } catch {
+      setUnsyncedCount(0);
+    }
+  }, []);
+
+  // Manual Trigger Auto-Sync
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    await syncPendingAttendanceLogs(showToast, () => {
+      fetchLogs();
+      refreshUnsyncedCount();
+    });
+    setIsSyncing(false);
+  };
+
+  // Service Worker Registration for PWA & Network Listener Setup
+  useEffect(() => {
+    // 1. Register PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('./sw.js')
+        .then((reg) => console.log('[PWA SW Registered]', reg.scope))
+        .catch((err) => console.warn('[PWA SW Register Error]', err));
+    }
+
+    // 2. Network Online / Offline State
+    const updateOnlineStatus = () => {
+      setIsOnline(navigator.onLine);
+      if (navigator.onLine) {
+        showToast('Koneksi Terhubung', 'Internet kembali aktif. Memulai Auto-Sync IndexedDB...', 'info');
+      } else {
+        showToast('Mode Offline', 'Tidak ada internet. Absensi akan disimpan di IndexedDB HP.', 'info');
+      }
+    };
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+
+    // 3. Auto Sync Engine Listener
+    const cleanupSync = initAutoSyncListener(showToast, () => {
+      fetchLogs();
+      refreshUnsyncedCount();
+    });
+
+    refreshUnsyncedCount();
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+      cleanupSync();
+    };
+  }, [fetchLogs, refreshUnsyncedCount, showToast]);
+
   // Initial Data & face-api Model Loading
   useEffect(() => {
     fetchEmployees();
@@ -108,6 +182,19 @@ export default function App() {
     loadFaceApiModels();
   }, [fetchEmployees, fetchLogs]);
 
+  // Handle Login User Success
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    localStorage.setItem('logged_in_employee', JSON.stringify(user));
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('logged_in_employee');
+    showToast('Logout', 'Anda telah keluar dari sesi lokal.', 'info');
+  };
+
   return (
     <>
       {/* Toast Notifications */}
@@ -123,8 +210,29 @@ export default function App() {
         onCancel={closeConfirmModal}
       />
 
+      {/* Login Modal for User Selection & Pre-Caching */}
+      <LoginModal
+        employees={employees}
+        currentUser={currentUser}
+        onLoginSuccess={handleLoginSuccess}
+        showToast={showToast}
+      />
+
+      {/* Network Online / Offline Status Pill */}
+      <NetworkStatusBar
+        isOnline={isOnline}
+        unsyncedCount={unsyncedCount}
+        isSyncing={isSyncing}
+        onManualSync={handleManualSync}
+      />
+
       {/* Navigation Header */}
-      <Header activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Header
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
 
       {/* Main Tab Content */}
       <main>
@@ -135,7 +243,10 @@ export default function App() {
               modelsLoaded={modelsLoaded}
               modelStatusText={modelStatusText}
               showToast={showToast}
-              onVerificationSuccess={fetchLogs}
+              onVerificationSuccess={() => {
+                fetchLogs();
+                refreshUnsyncedCount();
+              }}
             />
           </section>
         )}
@@ -168,7 +279,7 @@ export default function App() {
       {/* Footer */}
       <footer>
         <p>
-          Sistem Absensi Biometrik Wajah berbasis 1-to-1 Verification Engine &copy; 2026. Powered by React, face-api.js &amp; Supabase Cloud.
+          Aplikasi Absensi Mobile Biometrik Wajah (Offline-First &amp; Auto-Sync PWA) &copy; 2026.
         </p>
       </footer>
     </>
