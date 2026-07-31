@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginPage({ employees = [], showToast, theme, toggleTheme }) {
+export default function LoginPage({ employees = [], showToast, theme, toggleTheme, refreshEmployees }) {
   const { login } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState('account');
   const [selectedEmpId, setSelectedEmpId] = useState('');
@@ -9,6 +9,23 @@ export default function LoginPage({ employees = [], showToast, theme, toggleThem
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Auto trigger employee fetch if list is empty on mount
+  useEffect(() => {
+    if ((!employees || employees.length === 0) && refreshEmployees) {
+      refreshEmployees();
+    }
+  }, [employees, refreshEmployees]);
+
+  const handleManualRefresh = async () => {
+    if (refreshEmployees) {
+      setIsRefreshing(true);
+      await refreshEmployees();
+      setIsRefreshing(false);
+      if (showToast) showToast('Muat Data', 'Memperbarui daftar karyawan dari Supabase Cloud...', 'info');
+    }
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -97,7 +114,30 @@ export default function LoginPage({ employees = [], showToast, theme, toggleThem
             <div className="ui-card-content">
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div className="form-group">
-                  <label htmlFor="login-emp-select">Pilih Akun Karyawan</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label htmlFor="login-emp-select" style={{ marginBottom: 0 }}>Pilih Akun Karyawan</label>
+                    <button
+                      type="button"
+                      onClick={handleManualRefresh}
+                      disabled={isRefreshing}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: 0
+                      }}
+                      title="Muat Ulang Data Karyawan dari Supabase Cloud"
+                    >
+                      <i className={`fa-solid ${isRefreshing ? 'fa-spinner fa-spin' : 'fa-arrows-rotate'}`}></i>
+                      <span>{isRefreshing ? 'Muat...' : 'Refresh Supabase'}</span>
+                    </button>
+                  </div>
                   <select
                     id="login-emp-select"
                     value={selectedEmpId}
@@ -111,6 +151,12 @@ export default function LoginPage({ employees = [], showToast, theme, toggleThem
                       </option>
                     ))}
                   </select>
+                  {(!employees || employees.length === 0) && (
+                    <p style={{ fontSize: '0.76rem', color: 'var(--accent-warning)', marginTop: '5px' }}>
+                      <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '4px' }}></i>
+                      Menghubungkan ke Supabase Cloud... Klik "Refresh Supabase" di atas jika daftar belum muncul.
+                    </p>
+                  )}
                 </div>
 
                 <div className="form-group">
