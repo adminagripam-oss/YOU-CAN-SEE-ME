@@ -1,27 +1,37 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
-import NetworkStatusBar from '../components/NetworkStatusBar';
 
 export default function DashboardLayout({ isOnline, unsyncedCount, isSyncing, onManualSync, theme, toggleTheme }) {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
   return (
     <div className="dashboard-layout-container">
-      {/* Network Online / Offline Status Banner */}
-      <NetworkStatusBar
-        isOnline={isOnline}
-        unsyncedCount={unsyncedCount}
-        isSyncing={isSyncing}
-        onManualSync={onManualSync}
-      />
+      <div className={`dashboard-body ${sidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
+        {/* Overlay for mobile when sidebar is open */}
+        {sidebarOpen && (
+          <div
+            className="sidebar-overlay"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
-      <div className="dashboard-body">
         {/* Persistent Sidebar */}
-        <Sidebar />
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         {/* Main Workspace Area */}
         <div className="dashboard-main-area">
-          <Topbar theme={theme} toggleTheme={toggleTheme} />
+          <Topbar
+            theme={theme}
+            toggleTheme={toggleTheme}
+            isOnline={isOnline}
+            unsyncedCount={unsyncedCount}
+            isSyncing={isSyncing}
+            onManualSync={onManualSync}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+          />
 
           <main className="dashboard-content-outlet">
             <Outlet />
