@@ -213,6 +213,16 @@ export default function App() {
     showToast('Logout', 'Anda telah keluar dari akun.', 'info');
   };
 
+  // Route Switch Handler with Auth Guard
+  const handleTabChange = (targetTab) => {
+    if (!currentUser && targetTab !== 'tab-login') {
+      showToast('Otentikasi Diperlukan', 'Silakan pilih profil & login terlebih dahulu di Portal Akun!', 'warning');
+      setActiveTab('tab-login');
+      return;
+    }
+    setActiveTab(targetTab);
+  };
+
   return (
     <>
       {/* Toast Notifications */}
@@ -239,7 +249,7 @@ export default function App() {
       {/* Navigation Header */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleTabChange}
         currentUser={currentUser}
         onLogout={handleLogout}
         theme={theme}
@@ -256,6 +266,8 @@ export default function App() {
               onLoginSuccess={handleLoginSuccess}
               showToast={showToast}
               onNavigateToApp={() => setActiveTab('tab-verify')}
+              theme={theme}
+              toggleTheme={toggleTheme}
             />
           </section>
         )}
