@@ -19,6 +19,20 @@ export default function App() {
   const [modelStatusText, setModelStatusText] = useState('Memuat Model AI Biometrik Wajah...');
   const [toasts, setToasts] = useState([]);
   
+  // Theme State (Dark / Light)
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('app-theme') || 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('app-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   // Offline PWA & Auto-Sync State
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [unsyncedCount, setUnsyncedCount] = useState(0);
@@ -232,6 +246,8 @@ export default function App() {
         setActiveTab={setActiveTab}
         currentUser={currentUser}
         onLogout={handleLogout}
+        theme={theme}
+        toggleTheme={toggleTheme}
       />
 
       {/* Main Tab Content */}
