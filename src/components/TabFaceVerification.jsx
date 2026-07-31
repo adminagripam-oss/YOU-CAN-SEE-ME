@@ -96,11 +96,13 @@ export default function TabFaceVerification({
             window.faceapi &&
             modelsLoaded
           ) {
+            const detectorOptions =
+              window.faceapi.nets.tinyFaceDetector && window.faceapi.nets.tinyFaceDetector.isLoaded
+                ? new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+                : new window.faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+
             const detection = await window.faceapi
-              .detectSingleFace(
-                videoRef.current,
-                new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
-              )
+              .detectSingleFace(videoRef.current, detectorOptions)
               .withFaceLandmarks()
               .withFaceDescriptor();
 
@@ -390,18 +392,9 @@ export default function TabFaceVerification({
 
         {/* Status Absensi Hari Ini */}
         {attendanceStatus.loaded && (
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(0,0,0,0.3)',
-            }}
-          >
+          <div className="attendance-status-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Status Hari Ini:</span>
+              <span className="status-label">Status Hari Ini:</span>
               <strong>
                 {attendanceStatus.checkedIn ? (
                   <span className="status-badge success">
@@ -416,9 +409,9 @@ export default function TabFaceVerification({
             </div>
 
             {attendanceStatus.checkedIn && attendanceStatus.checkInTime && (
-              <div style={{ marginTop: '4px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              <div className="status-time">
                 Check-In pukul:{' '}
-                <span style={{ color: '#f8fafc', fontWeight: 600 }}>
+                <span className="status-time-val">
                   {new Date(attendanceStatus.checkInTime).toLocaleTimeString('id-ID', {
                     hour: '2-digit',
                     minute: '2-digit',

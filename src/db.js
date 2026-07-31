@@ -22,7 +22,12 @@ db.version(1).stores({
  */
 export async function cacheUserMasterVector(user) {
   try {
-    const existing = await db.user_master.where('employee_id').equals(user.employee_id || user.id).first();
+    const empId = user.employee_id || user.id;
+    if (!empId) return;
+
+    const allMasters = await db.user_master.toArray();
+    const existing = allMasters.find((m) => String(m.employee_id) === String(empId));
+
     if (existing) {
       await db.user_master.update(existing.id, {
         nik: user.nik,
@@ -33,7 +38,7 @@ export async function cacheUserMasterVector(user) {
       });
     } else {
       await db.user_master.add({
-        employee_id: user.employee_id || user.id,
+        employee_id: empId,
         nik: user.nik,
         name: user.name,
         department: user.department,
@@ -52,7 +57,9 @@ export async function cacheUserMasterVector(user) {
  */
 export async function getCachedUserMasterVector(employeeId) {
   try {
-    return await db.user_master.where('employee_id').equals(parseInt(employeeId)).first();
+    if (!employeeId) return null;
+    const allMasters = await db.user_master.toArray();
+    return allMasters.find((m) => String(m.employee_id) === String(employeeId)) || null;
   } catch (err) {
     console.error('[IndexedDB Get Master Error]:', err);
     return null;
@@ -90,10 +97,12 @@ export async function queueOfflineAttendance(logData) {
 
 /**
  * Get all unsynced logs from IndexedDB
+ * Safely fetches items without IDBKeyRange boolean error
  */
 export async function getUnsyncedLogs() {
   try {
-    return await db.attendance_sync_queue.where('is_synced').equals(0).or('is_synced').equals(false).toArray();
+    const allQueue = await db.attendance_sync_queue.toArray();
+    return allQueue.filter((item) => !item.is_synced || item.is_synced === 0);
   } catch (err) {
     console.error('[IndexedDB Get Unsynced Error]:', err);
     return [];
@@ -105,6 +114,7 @@ export async function getUnsyncedLogs() {
  */
 export async function removeSyncedLogs(ids) {
   try {
+    if (!ids || ids.length === 0) return;
     await db.attendance_sync_queue.bulkDelete(ids);
   } catch (err) {
     console.error('[IndexedDB Delete Synced Error]:', err);
