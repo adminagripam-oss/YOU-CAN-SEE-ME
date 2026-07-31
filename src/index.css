@@ -1036,6 +1036,13 @@ footer {
   z-index: 90;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
 .topbar-left .brand-text-mobile {
   display: none;
   align-items: center;
@@ -1128,70 +1135,72 @@ footer {
 .sidebar-toggle-btn {
   width: 36px;
   height: 36px;
-  background: var(--bg-primary);
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   color: var(--text-main);
-  font-size: 1rem;
-  display: flex;
+  font-size: 0.95rem;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
 }
 
 .sidebar-toggle-btn:hover {
-  background: var(--accent-primary);
-  color: #ffffff;
-  border-color: var(--accent-primary);
-  transform: scale(1.07);
+  background: var(--bg-primary);
+  border-color: var(--border-hover);
 }
 
 /* ============================================
-   TOPBAR: LIVE / OFFLINE BADGE
+   TOPBAR: LIVE / OFFLINE BADGE (SHADCN UI SPEC)
    ============================================ */
 
 .topbar-live-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border-radius: 20px;
+  gap: 6px;
+  padding: 4px 10px;
+  height: 28px;
+  border-radius: 9999px;
   font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
+  line-height: 1;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
 .topbar-live-badge.online {
-  background: rgba(16, 185, 129, 0.14);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
 }
 
 [data-theme="dark"] .topbar-live-badge.online {
+  background: rgba(6, 78, 59, 0.4);
   color: #34d399;
-  background: rgba(16, 185, 129, 0.18);
-  border-color: rgba(16, 185, 129, 0.45);
+  border: 1px solid rgba(52, 211, 153, 0.35);
 }
 
 .topbar-live-badge.offline {
-  background: rgba(245, 158, 11, 0.14);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
 }
 
 [data-theme="dark"] .topbar-live-badge.offline {
+  background: rgba(120, 53, 15, 0.4);
   color: #fbbf24;
-  background: rgba(245, 158, 11, 0.18);
-  border-color: rgba(245, 158, 11, 0.45);
+  border: 1px solid rgba(251, 191, 36, 0.35);
 }
 
 /* Animated pulse dot inside LIVE badge */
 .live-pulse-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
   display: inline-block;
@@ -1201,7 +1210,7 @@ footer {
 
 @keyframes livePulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.65); }
+  50% { opacity: 0.35; transform: scale(0.7); }
 }
 
 /* ============================================
