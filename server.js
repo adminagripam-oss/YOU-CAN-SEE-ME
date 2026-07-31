@@ -4,14 +4,20 @@ const cors = require('cors');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
+const cookieParser = require('cookie-parser');
+const authRoutes = require('./backend/routes/auth.routes');
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
 // Middleware
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 
 const apiRouter = express.Router();
+apiRouter.use('/auth', authRoutes);
+
 app.use('/api', apiRouter);
 app.use('/YOU-CAN-SEE-ME/api', apiRouter);
 
