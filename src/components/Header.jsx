@@ -1,8 +1,8 @@
 import React from 'react';
 
-export default function Header({ activeTab, setActiveTab, currentUser, onLogout }) {
+export default function Header({ activeTab, setActiveTab, currentUser, onLogout, theme, toggleTheme }) {
   return (
-    <header>
+    <header className="app-header">
       <div className="brand">
         <div className="brand-icon">
           <i className="fa-solid fa-face-smile"></i>
@@ -13,21 +13,15 @@ export default function Header({ activeTab, setActiveTab, currentUser, onLogout 
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="header-actions">
         {currentUser && (
-          <div className="badge-o1">
+          <div className="user-badge">
             <i className="fa-solid fa-user-check"></i>
-            <span>{currentUser.name} ({currentUser.nik})</span>
+            <span className="user-name">{currentUser.name} ({currentUser.nik})</span>
             {onLogout && (
               <button
+                className="btn-icon-logout"
                 onClick={onLogout}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#ef4444',
-                  cursor: 'pointer',
-                  marginLeft: '6px',
-                }}
                 title="Keluar / Ganti Akun"
               >
                 <i className="fa-solid fa-right-from-bracket"></i>
@@ -36,24 +30,37 @@ export default function Header({ activeTab, setActiveTab, currentUser, onLogout 
           </div>
         )}
 
+        {/* Dark / Light Mode Toggle Button */}
+        <button
+          className="theme-toggle-btn"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Ganti ke Mode Terang (Light)' : 'Ganti ke Mode Gelap (Dark)'}
+        >
+          <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
+          <span className="theme-toggle-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+        </button>
+
         <div className="nav-tabs">
           <button
             className={`tab-btn ${activeTab === 'tab-verify' ? 'active' : ''}`}
             onClick={() => setActiveTab('tab-verify')}
           >
-            <i className="fa-solid fa-camera-retro"></i> Absensi Wajah
+            <i className="fa-solid fa-camera-retro"></i>
+            <span className="tab-label">Absensi</span>
           </button>
           <button
             className={`tab-btn ${activeTab === 'tab-employees' ? 'active' : ''}`}
             onClick={() => setActiveTab('tab-employees')}
           >
-            <i className="fa-solid fa-users"></i> Data Karyawan
+            <i className="fa-solid fa-users"></i>
+            <span className="tab-label">Karyawan</span>
           </button>
           <button
             className={`tab-btn ${activeTab === 'tab-logs' ? 'active' : ''}`}
             onClick={() => setActiveTab('tab-logs')}
           >
-            <i className="fa-solid fa-clock-rotate-left"></i> Log Absensi
+            <i className="fa-solid fa-clock-rotate-left"></i>
+            <span className="tab-label">Log Absensi</span>
           </button>
         </div>
       </div>
