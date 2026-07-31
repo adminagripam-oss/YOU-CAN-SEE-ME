@@ -14,6 +14,7 @@ import DashboardPage from './pages/DashboardPage';
 import AbsensiPage from './pages/AbsensiPage';
 import KaryawanPage from './pages/KaryawanPage';
 import LogsPage from './pages/LogsPage';
+import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 
@@ -293,6 +294,8 @@ function AppContent() {
             />
           </Route>
         </Route>
+
+        <Route path="/analytics" element={<EnterpriseAnalyticsPage />} />
 
         {/* PROTECTED ROUTES (Dashboard Layout + Auth Guard) */}
         <Route element={<ProtectedRoute />}>

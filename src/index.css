@@ -758,21 +758,23 @@ tr:hover {
   margin-top: 4px;
 }
 
-/* Dedicated LoginPage Styling */
+/* Dedicated LoginPage & Figma Frame 57 Layout Specs */
 .login-page-container {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: calc(100vh - 220px);
-  padding: 1.5rem 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  width: 100%;
+  min-height: calc(100vh - 120px);
 }
 
 .login-pattern-wrapper {
-  max-width: 440px;
-  width: 100%;
+  width: 404px;
+  max-width: 100%;
+  min-height: 583px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  box-sizing: border-box;
 }
 
 .ui-tabs-list {
@@ -782,6 +784,8 @@ tr:hover {
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ui-tabs-trigger {
@@ -807,17 +811,25 @@ tr:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
+/* Glass UI Card Styling */
 .ui-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 1.75rem 1.5rem;
+  padding: 2rem 1.75rem;
   box-shadow: var(--shadow-subtle);
   animation: fadeIn 0.3s ease;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .ui-card-header {
   margin-bottom: 1.25rem;
+  width: 100%;
 }
 
 .ui-card-title {
@@ -836,7 +848,10 @@ tr:hover {
 .ui-card-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .login-active-alert {
@@ -863,15 +878,22 @@ footer {
 }
 
 /* ============================================
-   AUTH LAYOUT & PUBLIC GLASSMORPHISM STYLES
+   AUTH LAYOUT (LEFT 50% FORM & RIGHT 50% BANNER)
    ============================================ */
 
 .auth-layout-container {
+  width: 100vw;
+  height: 100vh;
   min-height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   background: var(--bg-primary);
   position: relative;
+  box-sizing: border-box;
 }
 
 .auth-theme-floating {
@@ -882,11 +904,54 @@ footer {
 }
 
 .auth-layout-main {
-  flex: 1;
+  width: 50vw;
+  height: 100vh;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 2rem 1rem;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  z-index: 20;
+  padding-left: 100px;
+}
+
+/* Desktop layout: aligned to the left of the left 50vw column */
+@media (min-width: 1280px) {
+  .auth-layout-main {
+    width: 50vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 120px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .auth-layout-main {
+    width: 50vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 60px;
+  }
+}
+
+/* Mobile & Tablet layout: auto-centered single column */
+@media (max-width: 1023px) {
+  .auth-layout-container {
+    height: auto;
+    min-height: 100vh;
+    max-height: none;
+    overflow: auto;
+  }
+  .auth-layout-main {
+    width: 100vw;
+    min-height: 100vh;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
 }
 
 .auth-footer {
@@ -901,38 +966,49 @@ footer {
 .glass-login-wrapper {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: center;
   width: 100%;
 }
 
 .glass-login-title {
-  text-align: center;
-  margin-bottom: 1.5rem;
+  text-align: left;
+  margin-bottom: 1.25rem;
+  width: 100%;
+}
+
+.login-pattern-container {
+  width: 380px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
 }
 
 .brand-icon-lg {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   background: var(--accent-primary);
   color: #ffffff;
-  border-radius: 16px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
-  margin: 0 auto 12px;
+  font-size: 26px;
+  margin-bottom: 12px;
   box-shadow: 0 8px 20px rgba(79, 70, 229, 0.3);
 }
 
 .glass-login-title h1 {
-  font-size: 1.5rem;
+  font-size: 1.45rem;
   font-weight: 800;
   color: var(--text-main);
   letter-spacing: -0.02em;
 }
 
 .glass-login-title p {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   color: var(--text-muted);
   margin-top: 4px;
 }
@@ -1337,4 +1413,132 @@ footer {
     padding: 1rem 0.85rem;
   }
 }
+
+/* ============================================
+   FIGMA SPECIFICATION: SIDE BANNER & LOGIN FORM
+   ============================================ */
+
+.auth-side-banner {
+  position: absolute;
+  width: 50vw;
+  height: 100vh;
+  right: 0px;
+  top: 0px;
+  background-image: url('/BACKGROUNDHARVESTING.jpeg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 45px 0px 0px 45px;
+  z-index: 10;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 1023px) {
+  .auth-side-banner {
+    display: none;
+  }
+}
+
+.figma-login-title {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  letter-spacing: -0.03em;
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+}
+
+.figma-login-subtitle {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  margin: 0 0 20px 0;
+}
+
+.figma-form-label {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-main, #1e293b);
+  margin-bottom: 6px;
+  display: block;
+}
+
+.figma-input-select, .figma-input-text {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-card, #ffffff);
+  color: var(--text-main, #0f172a);
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.figma-input-select:focus, .figma-input-text:focus {
+  border-color: #3b6528;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 101, 40, 0.15);
+}
+
+.figma-refresh-btn {
+  background: none;
+  border: none;
+  color: #3b6528;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+}
+
+.figma-remember-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 16px 0;
+  font-size: 0.84rem;
+  color: var(--text-muted, #475569);
+  font-weight: 500;
+}
+
+.figma-remember-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b6528;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.figma-btn-login {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: 12px;
+  border: none;
+  background: #3b6528;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(59, 101, 40, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.figma-btn-login:hover:not(:disabled) {
+  background: #2d501e;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(59, 101, 40, 0.35);
+}
+
+.figma-btn-login:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 
