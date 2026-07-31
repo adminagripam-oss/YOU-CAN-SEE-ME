@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function TabFaceVerification({
   employees,
@@ -43,7 +44,7 @@ export default function TabFaceVerification({
   // Fetch today's attendance status for employee
   const fetchAttendanceStatus = async (empId) => {
     try {
-      const res = await fetch(`/api/attendance/status/${empId}`);
+      const res = await fetch(`${API_BASE_URL}/api/attendance/status/${empId}`);
       const data = await res.json();
       if (data.success) {
         setAttendanceStatus({
@@ -155,7 +156,7 @@ export default function TabFaceVerification({
         attendance_type: attendanceType,
       };
 
-      const res = await fetch('/api/attendance/verify', {
+      const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
