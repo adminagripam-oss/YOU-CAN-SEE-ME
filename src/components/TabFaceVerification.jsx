@@ -17,12 +17,14 @@ export default function TabFaceVerification({
   modelsLoaded,
   modelStatusText,
   showToast,
+  currentUser,
   onVerificationSuccess,
 }) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [nikInput, setNikInput] = useState('');
   const [faceDetectBadge, setFaceDetectBadge] = useState('Menunggu Kamera...');
   const [faceBadgeColor, setFaceBadgeColor] = useState('var(--accent-warning)');
+  const [vectorSample, setVectorSample] = useState(null);
   const [attendanceStatus, setAttendanceStatus] = useState({
     checkedIn: false,
     checkInTime: null,
@@ -36,6 +38,19 @@ export default function TabFaceVerification({
   const canvasRef = useRef(null);
   const currentDescriptorRef = useRef(null);
   const streamRef = useRef(null);
+
+  // Auto-Select Current Logged In User
+  useEffect(() => {
+    if (currentUser && employees.length > 0 && !selectedEmployeeId) {
+      const empId = currentUser.employee_id || currentUser.id;
+      const emp = employees.find((e) => String(e.id) === String(empId) || String(e.nik) === String(currentUser.nik));
+      if (emp) {
+        setSelectedEmployeeId(String(emp.id));
+        setNikInput(emp.nik || '');
+        fetchAttendanceStatus(emp.id);
+      }
+    }
+  }, [currentUser, employees]);
 
   // Sync selected employee NIK
   const handleEmployeeSelect = async (e) => {
@@ -69,7 +84,7 @@ export default function TabFaceVerification({
     }
   };
 
-  // Start Live Camera
+  // Start Live Camera & Face Detection Loop
   useEffect(() => {
     let intervalId = null;
 
@@ -107,11 +122,13 @@ export default function TabFaceVerification({
               .withFaceDescriptor();
 
             if (detection) {
-              currentDescriptorRef.current = Array.from(detection.descriptor);
-              setFaceDetectBadge('✓ Wajah Terdeteksi & Vektor Siap!');
+              const descriptorArray = Array.from(detection.descriptor);
+              currentDescriptorRef.current = descriptorArray;
+              setVectorSample(descriptorArray.slice(0, 5).map((n) => n.toFixed(3)).join(', '));
+              setFaceDetectBadge('✓ Biometrik Wajah Terdeteksi (128-Vektor)');
               setFaceBadgeColor('var(--accent-success)');
 
-              // Draw Bounding Box
+              // Draw Facial Box & Biometric Landmark Mesh
               if (canvasRef.current && videoRef.current) {
                 const displaySize = {
                   width: videoRef.current.clientWidth,
@@ -123,9 +140,11 @@ export default function TabFaceVerification({
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.clearRect(0, 0, displaySize.width, displaySize.height);
                 window.faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+                window.faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetections);
               }
             } else {
               currentDescriptorRef.current = null;
+              setVectorSample(null);
               setFaceDetectBadge('Posisikan Wajah di Depan Kamera');
               setFaceBadgeColor('var(--accent-warning)');
               if (canvasRef.current) {
@@ -134,7 +153,7 @@ export default function TabFaceVerification({
               }
             }
           }
-        }, 300);
+        }, 250);
       } catch (err) {
         console.error('[CAMERA ERROR]:', err);
         setFaceDetectBadge('Izin Kamera Ditolak / Tidak Ditemukan');
@@ -152,7 +171,7 @@ export default function TabFaceVerification({
     };
   }, [modelsLoaded]);
 
-  // Submit Face Verification & Attendance
+  // Submit Face Verification & Attendance Handler
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
     if (!selectedEmployeeId && !nikInput.trim()) {
       showToast('Form Tidak Lengkap', 'Pilih karyawan atau masukkan NIK!', 'error');
@@ -162,7 +181,7 @@ export default function TabFaceVerification({
     if (!currentDescriptorRef.current) {
       showToast(
         'Deteksi Wajah Gagal',
-        'Wajah tidak terdeteksi oleh kamera! Pastikan wajah Anda terlihat jelas.',
+        'Wajah belum terdeteksi oleh kamera! Posisikan wajah Anda di depan kamera.',
         'error'
       );
       return;
@@ -173,11 +192,11 @@ export default function TabFaceVerification({
     const targetEmp = employees.find((e) => String(e.id) === String(selectedEmployeeId)) || {
       id: selectedEmployeeId,
       nik: nikInput,
-      name: 'Karyawan',
-      department: 'Umum',
+      name: currentUser ? currentUser.name : 'Karyawan',
+      department: currentUser ? currentUser.department : 'Umum',
     };
 
-    // Get Geolocation if available
+    // Geolocation API
     let locationStr = 'HP Mobile';
     let userLat = null;
     let userLng = null;
@@ -194,14 +213,14 @@ export default function TabFaceVerification({
       }
     }
 
-    // Try ONLINE Verification first
+    // ONLINE Flow
     if (navigator.onLine) {
       try {
         const payload = {
           employee_id: selectedEmployeeId ? parseInt(selectedEmployeeId) : null,
           nik: nikInput.trim() || null,
           scan_descriptor: currentDescriptorRef.current,
-          location: `${locationStr} - Lobby Absensi`,
+          location: `${locationStr} - Scanner`,
           attendance_type: attendanceType,
         };
 
@@ -245,11 +264,11 @@ export default function TabFaceVerification({
         setIsSubmitting(false);
         return;
       } catch (err) {
-        console.warn('[ONLINE VERIFY FETCH FAILED - FALLBACK TO OFFLINE INDEXEDDB]:', err);
+        console.warn('[ONLINE VERIFY FAILED - FALLBACK TO OFFLINE INDEXEDDB]:', err);
       }
     }
 
-    // OFFLINE 1-to-1 MATCHING & INDEXEDDB QUEUE FALLBACK
+    // OFFLINE Flow
     try {
       const cachedMaster = await getCachedUserMasterVector(selectedEmployeeId);
       let isVerified = false;
@@ -262,7 +281,6 @@ export default function TabFaceVerification({
         distance = calculateEuclideanDistance(currentDescriptorRef.current, masterVec);
         isVerified = distance < THRESHOLD;
       } else {
-        // Assume verified offline for registered local user if master vector is unavailable offline
         isVerified = true;
         distance = 0.25;
       }
@@ -271,7 +289,6 @@ export default function TabFaceVerification({
         ? `VERIFIKASI BERHASIL (${typeLabel}) [OFFLINE]`
         : `VERIFIKASI GAGAL (${typeLabel}) [OFFLINE]`;
 
-      // Save to IndexedDB Queue
       await queueOfflineAttendance({
         employee_id: targetEmp.id,
         nik: targetEmp.nik,
@@ -307,6 +324,14 @@ export default function TabFaceVerification({
         isVerified ? 'success' : 'error'
       );
 
+      if (isVerified) {
+        setAttendanceStatus({
+          checkedIn: attendanceType === 'CHECK_IN',
+          checkInTime: new Date().toISOString(),
+          loaded: true,
+        });
+      }
+
       if (onVerificationSuccess) {
         onVerificationSuccess();
       }
@@ -318,196 +343,212 @@ export default function TabFaceVerification({
     }
   };
 
+  // Alias for button onClick
+  const handleVerify = handleVerifySubmit;
+
   return (
-    <div style={{ maxWidth: '680px', margin: '0 auto' }}>
-      <div className="glass-card">
-        <div className="card-title">
-          <i className="fa-solid fa-user-check" style={{ color: 'var(--accent-cyan)' }}></i>
-          Identifikasi NIK / ID Karyawan &amp; Kamera
-        </div>
+    <div className="glass-card">
+      <div className="card-title">
+        <i className="fa-solid fa-camera-retro"></i> Pemindai Absensi Biometrik Wajah 1-to-1
+      </div>
 
-        {/* Dropdown Karyawan */}
-        <div className="form-group">
-          <label htmlFor="verify-employee-select">Pilih Karyawan / Scan NIK</label>
-          <select
-            id="verify-employee-select"
-            value={selectedEmployeeId}
-            onChange={handleEmployeeSelect}
-          >
-            <option value="">-- Pilih Karyawan --</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.nik} - {emp.name} ({emp.department}){' '}
-                {emp.has_master_biometric ? ' (Siap)' : ' (Belum)'}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Manual NIK Input */}
-        <div className="form-group">
-          <label htmlFor="verify-nik-input">Atau Ketik / Scan NIK Manual</label>
-          <input
-            type="text"
-            id="verify-nik-input"
-            placeholder="Contoh: EMP-001"
-            value={nikInput}
-            onChange={(e) => setNikInput(e.target.value)}
-          />
-        </div>
-
-        {/* Status Kamera & Wajah */}
-        <div
-          style={{
-            marginBottom: '1rem',
-            background: 'rgba(15,23,42,0.6)',
-            padding: '10px 14px',
-            borderRadius: '8px',
-            fontSize: '0.85rem',
-            border: '1px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span style={{ color: 'var(--text-muted)' }}>Status Kamera:</span>
-          <strong style={{ color: faceBadgeColor }}>{faceDetectBadge}</strong>
-        </div>
-
-        {/* Camera Stream Video */}
-        <div className="form-group">
-          <label>Live Camera Capture</label>
-          <div className="webcam-wrapper">
-            <video ref={videoRef} autoPlay muted playsInline></video>
-            <canvas ref={canvasRef} className="overlay-canvas"></canvas>
-
-            {!modelsLoaded && (
-              <div className="loading-overlay">
-                <div className="spinner"></div>
-                <span>{modelStatusText}</span>
-              </div>
-            )}
+      <div className="grid-2">
+        {/* Panel Form & Visual Biometrik */}
+        <div>
+          {/* Employee Select */}
+          <div className="form-group">
+            <label htmlFor="verify-emp-select">Pilih Karyawan yang Absen</label>
+            <select
+              id="verify-emp-select"
+              value={selectedEmployeeId}
+              onChange={handleEmployeeSelect}
+            >
+              <option value="">-- Pilih Nama Karyawan --</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.nik} - {emp.name} ({emp.department})
+                </option>
+              ))}
+            </select>
           </div>
-        </div>
 
-        {/* Status Absensi Hari Ini */}
-        {attendanceStatus.loaded && (
-          <div className="attendance-status-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-              <span className="status-label">Status Hari Ini:</span>
-              <strong>
-                {attendanceStatus.checkedIn ? (
-                  <span className="status-badge success">
-                    <i className="fa-solid fa-right-to-bracket"></i> Sudah Check-In
-                  </span>
-                ) : (
-                  <span className="status-badge fail">
-                    <i className="fa-solid fa-circle-xmark"></i> Belum Check-In Hari Ini
-                  </span>
-                )}
-              </strong>
+          {/* Manual NIK Input */}
+          <div className="form-group">
+            <label htmlFor="verify-nik-input">Atau Ketik / Scan NIK Manual</label>
+            <input
+              type="text"
+              id="verify-nik-input"
+              placeholder="Contoh: EMP-001"
+              value={nikInput}
+              onChange={(e) => setNikInput(e.target.value)}
+            />
+          </div>
+
+          {/* Status Kamera & Biometrik Wajah */}
+          <div
+            style={{
+              marginBottom: '1rem',
+              background: 'var(--bg-primary)',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              border: '1px solid var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="status-label">Status Biometrik:</span>
+              <strong style={{ color: faceBadgeColor }}>{faceDetectBadge}</strong>
             </div>
 
-            {attendanceStatus.checkedIn && attendanceStatus.checkInTime && (
-              <div className="status-time">
-                Check-In pukul:{' '}
-                <span className="status-time-val">
-                  {new Date(attendanceStatus.checkInTime).toLocaleTimeString('id-ID', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Smart Button Absensi */}
-        <div style={{ marginTop: '10px' }}>
-          {!attendanceStatus.checkedIn ? (
-            <button
-              type="button"
-              className="btn btn-success"
-              disabled={isSubmitting || !faceDetectBadge.includes('Terdeteksi')}
-              onClick={() => handleVerify('CHECK_IN')}
-            >
-              <i className="fa-solid fa-right-to-bracket"></i> Check-In (Masuk)
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn"
-              style={{
-                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                color: '#fff',
-              }}
-              disabled={isSubmitting || !faceDetectBadge.includes('Terdeteksi')}
-              onClick={() => handleVerify('CHECK_OUT')}
-            >
-              <i className="fa-solid fa-right-from-bracket"></i> Check-Out (Keluar)
-            </button>
-          )}
-        </div>
-
-        {/* Result Metrics & Shadcn Alert */}
-        {verifyResult && (
-          <div
-            className={`shadcn-alert ${verifyResult.success ? 'success' : 'error'}`}
-            style={{ marginTop: '1.25rem', flexDirection: 'column', gap: '8px' }}
-          >
-            {verifyMetrics && (
+            {/* Feature Biometrik Vector Indicator */}
+            {vectorSample && (
               <div
-                className="result-metrics"
                 style={{
-                  width: '100%',
-                  marginBottom: '6px',
-                  marginTop: 0,
-                  background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  padding: '10px 14px',
-                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  color: 'var(--accent-primary)',
+                  fontFamily: 'monospace',
+                  background: 'var(--bg-card)',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
                 }}
               >
-                <div className="metric-item">
-                  <span className="metric-label">Euclidean Distance</span>
-                  <span className="metric-value">{verifyMetrics.distance}</span>
-                </div>
-                <div className="metric-item">
-                  <span className="metric-label">Max Threshold</span>
-                  <span className="metric-value">{verifyMetrics.threshold}</span>
-                </div>
-                <div className="metric-item">
-                  <span className="metric-label">Tipe Absensi</span>
-                  <span className="metric-value">{verifyMetrics.type}</span>
-                </div>
-                <div className="metric-item">
-                  <span className="metric-label">Timestamp</span>
-                  <span className="metric-value">{verifyMetrics.time}</span>
-                </div>
+                <i className="fa-solid fa-fingerprint"></i> 128-Float Vector: [{vectorSample}, ...]
               </div>
             )}
+          </div>
 
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
-              <div className="alert-icon" style={{ fontSize: '1.25rem' }}>
-                <i
-                  className={`fa-solid ${
-                    verifyResult.success ? 'fa-circle-check' : 'fa-circle-xmark'
-                  }`}
-                  style={{ color: verifyResult.success ? '#34d399' : '#f87171' }}
-                ></i>
-              </div>
-              <div className="alert-content">
-                <div className="alert-title" style={{ fontSize: '1.05rem', fontWeight: 800 }}>
-                  {verifyResult.title}
+          {/* Camera Stream Video */}
+          <div className="form-group">
+            <label>Live Camera Biometric Capture (68 Mesh Points)</label>
+            <div className="webcam-wrapper">
+              <video ref={videoRef} autoPlay muted playsInline></video>
+              <canvas ref={canvasRef} className="overlay-canvas"></canvas>
+
+              {!modelsLoaded && (
+                <div className="loading-overlay">
+                  <div className="spinner"></div>
+                  <span>{modelStatusText}</span>
                 </div>
-                <div className="alert-description" style={{ fontSize: '0.92rem', fontWeight: 500, marginTop: '2px' }}>
-                  {verifyResult.message}
-                </div>
-              </div>
+              )}
             </div>
           </div>
-        )}
+
+          {/* Status Absensi Hari Ini Card */}
+          {attendanceStatus.loaded && (
+            <div className="attendance-status-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <span className="status-label">Status Absensi Hari Ini:</span>
+                <strong>
+                  {attendanceStatus.checkedIn ? (
+                    <span className="status-badge success">
+                      <i className="fa-solid fa-right-to-bracket"></i> Sudah Check-In
+                    </span>
+                  ) : (
+                    <span className="status-badge fail">
+                      <i className="fa-solid fa-circle-xmark"></i> Belum Check-In Hari Ini
+                    </span>
+                  )}
+                </strong>
+              </div>
+
+              {attendanceStatus.checkedIn && attendanceStatus.checkInTime && (
+                <div className="status-time">
+                  Check-In pukul:{' '}
+                  <span className="status-time-val">
+                    {new Date(attendanceStatus.checkInTime).toLocaleTimeString('id-ID', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Smart Action Buttons Check-In / Check-Out */}
+          <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {!attendanceStatus.checkedIn ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={isSubmitting || !currentDescriptorRef.current}
+                onClick={() => handleVerifySubmit('CHECK_IN')}
+              >
+                <i className="fa-solid fa-right-to-bracket"></i> CHECK-IN (MASUK)
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                style={{
+                  background: 'linear-gradient(135deg, #d97706, #b45309)',
+                  color: '#ffffff',
+                }}
+                disabled={isSubmitting || !currentDescriptorRef.current}
+                onClick={() => handleVerifySubmit('CHECK_OUT')}
+              >
+                <i className="fa-solid fa-right-from-bracket"></i> CHECK-OUT (KELUAR)
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Panel Hasil Verification Metrics */}
+        <div>
+          <div className="card-title" style={{ fontSize: '1rem' }}>
+            <i className="fa-solid fa-square-poll-vertical"></i> Hasil Deteksi &amp; Metrics 1-to-1
+          </div>
+
+          {verifyResult ? (
+            <div className={`result-box ${verifyResult.success ? 'success' : 'error'}`}>
+              <div className="result-title">
+                <i className={`fa-solid ${verifyResult.success ? 'fa-circle-check' : 'fa-circle-xmark'}`}></i>
+                {verifyResult.title}
+              </div>
+              <p style={{ fontSize: '0.88rem', margin: '6px 0 10px' }}>{verifyResult.message}</p>
+
+              {verifyMetrics && (
+                <div className="result-metrics">
+                  <div>
+                    <div className="metric-label">Euclidean Distance</div>
+                    <div className="metric-value">{verifyMetrics.distance}</div>
+                  </div>
+                  <div>
+                    <div className="metric-label">Threshold Target</div>
+                    <div className="metric-value">&le; {verifyMetrics.threshold}</div>
+                  </div>
+                  <div>
+                    <div className="metric-label">Tipe Absensi</div>
+                    <div className="metric-value">{verifyMetrics.type}</div>
+                  </div>
+                  <div>
+                    <div className="metric-label">Waktu Scan</div>
+                    <div className="metric-value">{verifyMetrics.time}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: '2rem 1rem',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+                background: 'var(--bg-primary)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px border var(--border-color)',
+              }}
+            >
+              <i className="fa-solid fa-face-smile" style={{ fontSize: '40px', marginBottom: '10px', opacity: 0.5 }}></i>
+              <p>Posisikan wajah Anda di depan kamera HP dan tekan tombol Check-In / Check-Out di sebelah kiri.</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

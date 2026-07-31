@@ -267,6 +267,7 @@ export default function App() {
               modelsLoaded={modelsLoaded}
               modelStatusText={modelStatusText}
               showToast={showToast}
+              currentUser={currentUser}
               onVerificationSuccess={() => {
                 fetchLogs();
                 refreshUnsyncedCount();
