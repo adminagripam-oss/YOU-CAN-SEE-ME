@@ -1077,6 +1077,174 @@ footer {
 }
 
 /* ============================================
+   SIDEBAR COLLAPSE MECHANICS
+   ============================================ */
+
+.app-sidebar {
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.22s ease;
+  overflow: hidden;
+}
+
+.app-sidebar.sidebar-open {
+  width: 240px;
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.app-sidebar.sidebar-closed {
+  width: 0;
+  transform: translateX(-240px);
+  opacity: 0;
+  padding: 0;
+  border: none;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* Sidebar overlay for mobile */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 70;
+}
+
+/* ============================================
+   TOPBAR: SIDEBAR TOGGLE BUTTON
+   ============================================ */
+
+.sidebar-toggle-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+  transform: scale(1.07);
+}
+
+/* ============================================
+   TOPBAR: LIVE / OFFLINE BADGE
+   ============================================ */
+
+.topbar-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.topbar-live-badge.online {
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+[data-theme="dark"] .topbar-live-badge.online {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.topbar-live-badge.offline {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+[data-theme="dark"] .topbar-live-badge.offline {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+/* Animated pulse dot inside LIVE badge */
+.live-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+  animation: livePulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.65); }
+}
+
+/* ============================================
+   TOPBAR: PENDING SYNC BUTTON
+   ============================================ */
+
+.topbar-sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--accent-primary);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.topbar-sync-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+
+.topbar-sync-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   TABLE: NIK CELL THEME-AWARE COLOR
+   ============================================ */
+
+.nik-cell {
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+}
+
+/* ============================================
    MOBILE RESPONSIVE BREAKPOINTS
    ============================================ */
 
@@ -1117,4 +1285,47 @@ footer {
     width: calc(100% - 20px);
     maxWidth: 100%;
   }
+
+  /* Sidebar floats as overlay drawer on mobile */
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 80;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
+  }
+
+  .app-sidebar.sidebar-open {
+    width: 240px;
+    transform: translateX(0);
+  }
+
+  .app-sidebar.sidebar-closed {
+    width: 240px;
+    transform: translateX(-260px);
+    opacity: 1;
+    padding: 1.25rem 1rem;
+    border: initial;
+  }
+
+  /* Show the dim overlay on mobile when sidebar is open */
+  .sidebar-expanded .sidebar-overlay {
+    display: block;
+  }
+
+  /* Hide user name text on mobile to save space */
+  .user-name {
+    display: none;
+  }
+
+  /* Hide "Pending" label text on very small screens */
+  .topbar-sync-btn span {
+    display: none;
+  }
+
+  .dashboard-content-outlet {
+    padding: 1rem 0.85rem;
+  }
 }
+

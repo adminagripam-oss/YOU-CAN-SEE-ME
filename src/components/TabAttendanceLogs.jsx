@@ -1,6 +1,59 @@
 import React from 'react';
 import { API_BASE_URL } from '../config';
 
+/**
+ * Converts a duration string or seconds into "Xj Ym Zd" (jam, menit, detik) format
+ * Accepts:
+ *  - "2j 30m" style strings (passthrough, enhanced)
+ *  - "2h 30m" style
+ *  - raw seconds number
+ *  - "0j 0m" → still show as "0j 0m 0d"
+ */
+function formatDurasi(durasi) {
+  if (!durasi) return null;
+
+  // If already a number (seconds), convert directly
+  if (typeof durasi === 'number') {
+    const totalSec = Math.round(durasi);
+    const jam = Math.floor(totalSec / 3600);
+    const menit = Math.floor((totalSec % 3600) / 60);
+    const detik = totalSec % 60;
+    return `${jam}j ${menit}m ${detik}d`;
+  }
+
+  const str = String(durasi).trim();
+
+  // Match "Xj Ym" or "Xj Ym Zd" pattern already in Indonesian
+  const idMatch = str.match(/^(\d+)j\s*(\d+)m(?:\s*(\d+)d)?$/);
+  if (idMatch) {
+    const jam = parseInt(idMatch[1], 10);
+    const menit = parseInt(idMatch[2], 10);
+    const detik = idMatch[3] ? parseInt(idMatch[3], 10) : 0;
+    return `${jam}j ${menit}m ${detik}d`;
+  }
+
+  // Match "Xh Ym" or "X hours Y minutes" style
+  const enMatch = str.match(/(\d+)\s*h(?:ours?)?\s*(\d+)\s*m(?:in(?:utes?)?)?/i);
+  if (enMatch) {
+    const jam = parseInt(enMatch[1], 10);
+    const menit = parseInt(enMatch[2], 10);
+    return `${jam}j ${menit}m 0d`;
+  }
+
+  // Match pure seconds "3600s" or "3600 seconds"
+  const secMatch = str.match(/^(\d+)\s*(?:s|sec(?:onds?)?)?$/i);
+  if (secMatch) {
+    const totalSec = parseInt(secMatch[1], 10);
+    const jam = Math.floor(totalSec / 3600);
+    const menit = Math.floor((totalSec % 3600) / 60);
+    const detik = totalSec % 60;
+    return `${jam}j ${menit}m ${detik}d`;
+  }
+
+  // Fallback: return as is but append "d" if possible
+  return str;
+}
+
 export default function TabAttendanceLogs({
   logs,
   onRefreshLogs,
@@ -70,10 +123,12 @@ export default function TabAttendanceLogs({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
         }}
       >
         <div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', gap: '8px', alignItems: 'center' }}>
             <i className="fa-solid fa-list-check" style={{ color: 'var(--accent-cyan)' }}></i>
             Riwayat Log Absensi Biometrik
           </h3>
@@ -177,11 +232,13 @@ export default function TabAttendanceLogs({
                   </span>
                 );
 
+                // Build durasi cell with jam/menit/detik format
                 let durasiCell = <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>;
                 if (isCheckOut && log.durasi) {
+                  const formatted = formatDurasi(log.durasi);
                   durasiCell = (
                     <span className="durasi-badge">
-                      <i className="fa-regular fa-clock"></i> {log.durasi}
+                      <i className="fa-regular fa-clock"></i> {formatted}
                     </span>
                   );
                 } else if (!isCheckOut && isSuccess) {
@@ -203,7 +260,8 @@ export default function TabAttendanceLogs({
                       </div>
                     </td>
                     <td>{typeBadge}</td>
-                    <td style={{ fontWeight: 600, color: '#e2e8f0' }}>{log.nik}</td>
+                    {/* NIK uses CSS variable for theme-aware color */}
+                    <td className="nik-cell">{log.nik}</td>
                     <td>{log.name}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{log.department}</td>
                     <td>{durasiCell}</td>
@@ -238,7 +296,7 @@ export default function TabAttendanceLogs({
                     fontSize: '0.8rem',
                     color: 'var(--text-muted)',
                     borderTop: '1px solid var(--border-color)',
-                    background: 'rgba(15,23,42,0.5)',
+                    background: 'var(--bg-secondary)',
                   }}
                 >
                   Total <strong>{logs.length}</strong> entri tercatat hari ini &amp; historis.
