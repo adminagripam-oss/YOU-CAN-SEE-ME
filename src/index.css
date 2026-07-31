@@ -8,17 +8,17 @@
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
   --bg-input: #ffffff;
-  --border-color: #e2e8f0;
-  --border-hover: #cbd5e1;
-  --border-focus: #818cf8;
+  --border-color: #cbd5e1;
+  --border-hover: #94a3b8;
+  --border-focus: #4f46e5;
   --accent-primary: #4f46e5;
   --accent-primary-hover: #4338ca;
   --accent-cyan: #0284c7;
   --accent-success: #10b981;
   --accent-error: #ef4444;
-  --accent-warning: #f59e0b;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
+  --accent-warning: #d97706;
+  --text-main: #000000;
+  --text-muted: #334155;
   --radius-lg: 16px;
   --radius-md: 10px;
   --shadow-subtle: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
@@ -26,19 +26,19 @@
 
   /* Alert Toast Tints (Light Mode) */
   --alert-success-bg: #ecfdf5;
-  --alert-success-border: #a7f3d0;
-  --alert-success-text: #065f46;
-  --alert-success-icon: #10b981;
+  --alert-success-border: #6ee7b7;
+  --alert-success-text: #064e3b;
+  --alert-success-icon: #059669;
 
   --alert-error-bg: #fef2f2;
-  --alert-error-border: #fecaca;
-  --alert-error-text: #991b1b;
-  --alert-error-icon: #ef4444;
+  --alert-error-border: #fca5a5;
+  --alert-error-text: #7f1d1d;
+  --alert-error-icon: #dc2626;
 
   --alert-info-bg: #eef2ff;
-  --alert-info-border: #c7d2fe;
-  --alert-info-text: #3730a3;
-  --alert-info-icon: #6366f1;
+  --alert-info-border: #a5b4fc;
+  --alert-info-text: #1e1b4b;
+  --alert-info-icon: #4f46e5;
 }
 
 /* 2. DARK THEME VARIABLES */
@@ -47,8 +47,8 @@
   --bg-secondary: #1e293b;
   --bg-card: #1e293b;
   --bg-input: #0f172a;
-  --border-color: rgba(255, 255, 255, 0.12);
-  --border-hover: rgba(255, 255, 255, 0.25);
+  --border-color: rgba(255, 255, 255, 0.15);
+  --border-hover: rgba(255, 255, 255, 0.3);
   --border-focus: #6366f1;
   --accent-primary: #6366f1;
   --accent-primary-hover: #4f46e5;
@@ -56,8 +56,8 @@
   --accent-success: #10b981;
   --accent-error: #ef4444;
   --accent-warning: #f59e0b;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
+  --text-main: #ffffff;
+  --text-muted: #cbd5e1;
   --radius-lg: 16px;
   --radius-md: 10px;
   --shadow-subtle: 0 10px 30px rgba(0, 0, 0, 0.3);
