@@ -1,4 +1,5 @@
 import React from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function TabAttendanceLogs({
   logs,
@@ -18,7 +19,7 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Session',
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/attendance/logs/${log.id}`, { method: 'DELETE' });
+          const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${log.id}`, { method: 'DELETE' });
           const data = await res.json();
           if (data.success) {
             showToast('Log Dihapus', data.message, 'success');
@@ -43,7 +44,7 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Semua Log',
       onConfirm: async () => {
         try {
-          const res = await fetch('/api/attendance/logs', { method: 'DELETE' });
+          const res = await fetch(`${API_BASE_URL}/api/attendance/logs`, { method: 'DELETE' });
           const data = await res.json();
           if (data.success) {
             showToast('Seluruh Log Berhasil Dihapus', data.message, 'success');

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { API_BASE_URL } from './config';
 import Header from './components/Header';
 import TabFaceVerification from './components/TabFaceVerification';
 import TabEmployeeManagement from './components/TabEmployeeManagement';
@@ -52,7 +53,7 @@ export default function App() {
   // Fetch Employees
   const fetchEmployees = useCallback(async () => {
     try {
-      const res = await fetch('/api/employees');
+      const res = await fetch(`${API_BASE_URL}/api/employees`);
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data || []);
@@ -65,7 +66,7 @@ export default function App() {
   // Fetch Attendance Logs
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/attendance/logs');
+      const res = await fetch(`${API_BASE_URL}/api/attendance/logs`);
       const data = await res.json();
       if (data.success) {
         setLogs(data.data || []);

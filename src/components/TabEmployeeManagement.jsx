@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function TabEmployeeManagement({
   employees,
@@ -167,7 +168,7 @@ export default function TabEmployeeManagement({
 
     try {
       // 1. Add Employee Record
-      const resEmp = await fetch('/api/employees', {
+      const resEmp = await fetch(`${API_BASE_URL}/api/employees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,7 +188,7 @@ export default function TabEmployeeManagement({
 
       // 2. Save Master Biometrics if Descriptor Available
       if (currentEmpDescriptorRef.current && currentEmpDescriptorRef.current.length === 128) {
-        const resBio = await fetch('/api/biometrics/register', {
+        const resBio = await fetch(`${API_BASE_URL}/api/biometrics/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -198,7 +199,7 @@ export default function TabEmployeeManagement({
         const dataBio = await resBio.json();
         if (!dataBio.success) {
           // Rollback: Hapus data karyawan yang baru dibuat agar tidak meninggalkan record tanpa biometrik / duplikat
-          await fetch(`/api/employees/${createdEmpId}`, { method: 'DELETE' });
+          await fetch(`${API_BASE_URL}/api/employees/${createdEmpId}`, { method: 'DELETE' });
           showToast('Registrasi Biometrik Gagal', dataBio.message, 'error');
           return;
         }
@@ -247,7 +248,7 @@ export default function TabEmployeeManagement({
     }
 
     try {
-      const res = await fetch(`/api/employees/${editingEmp.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/employees/${editingEmp.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +284,7 @@ export default function TabEmployeeManagement({
       confirmText: 'Hapus Karyawan',
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/employees/${emp.id}`, { method: 'DELETE' });
+          const res = await fetch(`${API_BASE_URL}/api/employees/${emp.id}`, { method: 'DELETE' });
           const data = await res.json();
           if (data.success) {
             showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah berhasil dihapus.`, 'success');
