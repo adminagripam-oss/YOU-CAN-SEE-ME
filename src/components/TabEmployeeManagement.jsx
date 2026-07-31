@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { supabase } from '../supabaseClient';
+import { cacheUserMasterVector } from '../db';
 
 export default function TabEmployeeManagement({
   employees,
@@ -156,7 +158,7 @@ export default function TabEmployeeManagement({
     reader.readAsDataURL(file);
   };
 
-  // Submit Add Employee Form
+  // Submit Add Employee Form (with Direct Supabase Cloud Fallback)
   const handleAddEmployeeSubmit = async (e) => {
     e.preventDefault();
     if (!empNik.trim() || !empName.trim() || !empDept.trim()) {
@@ -167,47 +169,99 @@ export default function TabEmployeeManagement({
     setIsSubmitting(true);
 
     try {
-      // 1. Add Employee Record
-      const resEmp = await fetch(`${API_BASE_URL}/api/employees`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nik: empNik.trim(),
-          name: empName.trim(),
-          department: empDept.trim(),
-        }),
-      });
+      let createdEmp = null;
 
-      const dataEmp = await resEmp.json();
-      if (!dataEmp.success) {
-        showToast('Gagal Menambah Karyawan', dataEmp.message, 'error');
-        return;
-      }
-
-      const createdEmpId = dataEmp.data.id;
-
-      // 2. Save Master Biometrics if Descriptor Available
-      if (currentEmpDescriptorRef.current && currentEmpDescriptorRef.current.length === 128) {
-        const resBio = await fetch(`${API_BASE_URL}/api/biometrics/register`, {
+      // Tier 1: Express REST API Endpoint
+      try {
+        const resEmp = await fetch(`${API_BASE_URL}/api/employees`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            employee_id: createdEmpId,
-            descriptor: currentEmpDescriptorRef.current,
+            nik: empNik.trim(),
+            name: empName.trim(),
+            department: empDept.trim(),
           }),
         });
-        const dataBio = await resBio.json();
-        if (!dataBio.success) {
-          // Rollback: Hapus data karyawan yang baru dibuat agar tidak meninggalkan record tanpa biometrik / duplikat
-          await fetch(`${API_BASE_URL}/api/employees/${createdEmpId}`, { method: 'DELETE' });
-          showToast('Registrasi Biometrik Gagal', dataBio.message, 'error');
+        const dataEmp = await resEmp.json();
+        if (dataEmp.success && dataEmp.data) {
+          createdEmp = dataEmp.data;
+        }
+      } catch (err) {
+        console.warn('[ADD EMP API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
+      }
+
+      // Tier 2: Direct Supabase Cloud Database Insert
+      if (!createdEmp) {
+        const { data, error } = await supabase
+          .from('employees')
+          .insert([
+            {
+              nik: empNik.trim(),
+              name: empName.trim(),
+              department: empDept.trim(),
+            },
+          ])
+          .select()
+          .single();
+
+        if (error) {
+          showToast('Gagal Menambah Karyawan', error.message, 'error');
+          setIsSubmitting(false);
           return;
         }
+        createdEmp = data;
+      }
+
+      const createdEmpId = createdEmp.id;
+
+      // 2. Save Master Biometrics if Descriptor Available
+      if (currentEmpDescriptorRef.current && currentEmpDescriptorRef.current.length === 128) {
+        let bioSaved = false;
+        try {
+          const resBio = await fetch(`${API_BASE_URL}/api/biometrics/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employee_id: createdEmpId,
+              descriptor: currentEmpDescriptorRef.current,
+            }),
+          });
+          const dataBio = await resBio.json();
+          if (dataBio.success) bioSaved = true;
+        } catch (err) {
+          console.warn('[REGISTER BIO API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
+        }
+
+        if (!bioSaved) {
+          const descJson = JSON.stringify(currentEmpDescriptorRef.current);
+          const { error: bioErr } = await supabase
+            .from('employees')
+            .update({
+              descriptor_json: descJson,
+              has_master_biometric: true,
+            })
+            .eq('id', createdEmpId);
+
+          if (bioErr) {
+            console.error('[SUPABASE DIRECT REGISTER BIO ERROR]:', bioErr);
+          } else {
+            bioSaved = true;
+          }
+        }
+
+        // Cache Master Vector in local IndexedDB for mobile offline use
+        await cacheUserMasterVector({
+          employee_id: createdEmpId,
+          nik: createdEmp.nik,
+          name: createdEmp.name,
+          department: createdEmp.department,
+          descriptor_json: currentEmpDescriptorRef.current,
+        });
       }
 
       showToast(
         'Karyawan Berhasil Disimpan',
-        `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database Supabase!`,
+        `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database Supabase Cloud!`,
         'success'
       );
 

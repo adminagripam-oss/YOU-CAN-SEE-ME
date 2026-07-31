@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { API_BASE_URL } from './config';
-import { getUnsyncedLogs } from './db';
+import { supabase } from './supabaseClient';
+import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -77,29 +78,100 @@ function AppContent() {
     setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
   };
 
-  // Fetch Employees
+  // Fetch Employees (3-Tier Fallback: Express API -> Direct Supabase -> IndexedDB Cache)
   const fetchEmployees = useCallback(async () => {
+    let empData = null;
+
+    // Tier 1: Express REST API Endpoint
     try {
       const res = await fetch(`${API_BASE_URL}/api/employees`);
       const data = await res.json();
-      if (data.success) {
-        setEmployees(data.data || []);
+      if (data.success && data.data && data.data.length > 0) {
+        empData = data.data;
       }
     } catch (err) {
-      console.error('[FETCH EMPLOYEES ERROR]:', err);
+      console.warn('[FETCH EMPLOYEES API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
+    }
+
+    // Tier 2: Direct Supabase Cloud Database Query (HTTPS)
+    if (!empData || empData.length === 0) {
+      try {
+        const { data, error } = await supabase
+          .from('employees')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          empData = data;
+          console.log('[SUPABASE DIRECT] Fetched', data.length, 'employees directly from cloud');
+        }
+      } catch (err) {
+        console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err.message);
+      }
+    }
+
+    // Tier 3: IndexedDB Local Offline Cache
+    if (!empData || empData.length === 0) {
+      try {
+        const cached = await db.employees_cache.toArray();
+        if (cached && cached.length > 0) {
+          empData = cached;
+          console.log('[INDEXEDDB CACHE] Loaded', cached.length, 'cached employees offline');
+        }
+      } catch (err) {
+        console.error('[FETCH EMPLOYEES INDEXEDDB ERROR]:', err.message);
+      }
+    }
+
+    if (empData && empData.length > 0) {
+      setEmployees(empData);
+      // Persist to IndexedDB local cache for mobile offline support
+      try {
+        await db.employees_cache.bulkPut(empData);
+        for (const emp of empData) {
+          if (emp.descriptor_json || emp.descriptor) {
+            await cacheUserMasterVector(emp);
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('[INDEXEDDB BULK PUT WARN]:', cacheErr.message);
+      }
     }
   }, []);
 
-  // Fetch Attendance Logs
+  // Fetch Attendance Logs (3-Tier Fallback: Express API -> Direct Supabase)
   const fetchLogs = useCallback(async () => {
+    let logData = null;
+
+    // Tier 1: Express REST API Endpoint
     try {
       const res = await fetch(`${API_BASE_URL}/api/attendance/logs`);
       const data = await res.json();
-      if (data.success) {
-        setLogs(data.data || []);
+      if (data.success && data.data) {
+        logData = data.data;
       }
     } catch (err) {
-      console.error('[FETCH LOGS ERROR]:', err);
+      console.warn('[FETCH LOGS API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
+    }
+
+    // Tier 2: Direct Supabase Cloud Database Query
+    if (!logData) {
+      try {
+        const { data, error } = await supabase
+          .from('attendance_logs')
+          .select('*')
+          .order('timestamp', { ascending: false });
+
+        if (!error && data) {
+          logData = data;
+        }
+      } catch (err) {
+        console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
+      }
+    }
+
+    if (logData) {
+      setLogs(logData);
     }
   }, []);
 
