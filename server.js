@@ -586,6 +586,46 @@ apiRouter.delete('/attendance/logs', async (req, res) => {
   }
 });
 
+// 9. POST /api/attendance/sync - Batch Auto-Sync offline attendance logs from IndexedDB
+apiRouter.post('/attendance/sync', async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.json({ success: true, count: 0, synced_ids: [] });
+    }
+
+    console.log(`[SUPABASE AUTO-SYNC] Received ${items.length} offline attendance logs to sync...`);
+
+    const syncedIds = [];
+    const insertPayloads = [];
+
+    for (const item of items) {
+      insertPayloads.push({
+        employee_id: item.employee_id,
+        location: item.location ? `${item.location} (Sync Offline)` : 'HP Mobile (Sync Offline)',
+        status: item.status || 'VERIFIKASI BERHASIL',
+        euclidean_distance: item.euclidean_distance || 0,
+        timestamp: item.timestamp || new Date().toISOString()
+      });
+      syncedIds.push(item.id);
+    }
+
+    const { error } = await supabase.from('attendance_logs').insert(insertPayloads);
+    if (error) throw error;
+
+    console.log(`[SUPABASE AUTO-SYNC OK] ${syncedIds.length} offline records successfully inserted into database!`);
+    res.json({
+      success: true,
+      count: syncedIds.length,
+      synced_ids: syncedIds,
+      message: `${syncedIds.length} log absensi offline berhasil disinkronkan ke Supabase.`
+    });
+  } catch (error) {
+    console.error('[ERROR /api/attendance/sync]:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // SPA Fallback Route: Serve dist/index.html for client-side routing
 app.use((req, res, next) => {
   if (req.path.includes('/api/')) {

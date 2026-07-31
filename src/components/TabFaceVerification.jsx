@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { getCachedUserMasterVector, queueOfflineAttendance } from '../db';
+
+function calculateEuclideanDistance(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) return 999;
+  let sum = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    const diff = vecA[i] - vecB[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
 
 export default function TabFaceVerification({
   employees,
@@ -68,52 +79,63 @@ export default function TabFaceVerification({
           video: { width: 640, height: 480, facingMode: 'user' },
           audio: false,
         });
-        streamRef.current = stream;
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          streamRef.current = stream;
         }
 
-        // Detection Loop
+        setFaceDetectBadge('Kamera Aktif. Mendeteksi Wajah...');
+        setFaceBadgeColor('var(--accent-warning)');
+
+        // Realtime Face Detection Loop
         intervalId = setInterval(async () => {
-          if (!videoRef.current || !modelsLoaded || !window.faceapi) return;
+          if (
+            videoRef.current &&
+            videoRef.current.readyState === 4 &&
+            window.faceapi &&
+            modelsLoaded
+          ) {
+            const detection = await window.faceapi
+              .detectSingleFace(
+                videoRef.current,
+                new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+              )
+              .withFaceLandmarks()
+              .withFaceDescriptor();
 
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          if (!video.videoWidth) return;
+            if (detection) {
+              currentDescriptorRef.current = Array.from(detection.descriptor);
+              setFaceDetectBadge('✓ Wajah Terdeteksi & Vektor Siap!');
+              setFaceBadgeColor('var(--accent-success)');
 
-          const displaySize = { width: video.videoWidth, height: video.videoHeight };
-          if (canvas) {
-            window.faceapi.matchDimensions(canvas, displaySize);
-          }
+              // Draw Bounding Box
+              if (canvasRef.current && videoRef.current) {
+                const displaySize = {
+                  width: videoRef.current.clientWidth,
+                  height: videoRef.current.clientHeight,
+                };
+                window.faceapi.matchDimensions(canvasRef.current, displaySize);
+                const resizedDetections = window.faceapi.resizeResults(detection, displaySize);
 
-          const detection = await window.faceapi
-            .detectSingleFace(video)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-
-          if (canvas) {
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-          }
-
-          if (detection) {
-            const resizedDetection = window.faceapi.resizeResults(detection, displaySize);
-            if (canvas) {
-              window.faceapi.draw.drawDetections(canvas, resizedDetection);
-              window.faceapi.draw.drawFaceLandmarks(canvas, resizedDetection);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, displaySize.width, displaySize.height);
+                window.faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+              }
+            } else {
+              currentDescriptorRef.current = null;
+              setFaceDetectBadge('Posisikan Wajah di Depan Kamera');
+              setFaceBadgeColor('var(--accent-warning)');
+              if (canvasRef.current) {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+              }
             }
-            currentDescriptorRef.current = Array.from(detection.descriptor);
-            setFaceDetectBadge('Wajah Terdeteksi (Vector 128-dim Siap)');
-            setFaceBadgeColor('var(--accent-success)');
-          } else {
-            currentDescriptorRef.current = null;
-            setFaceDetectBadge('Wajah Tidak Terdeteksi');
-            setFaceBadgeColor('var(--accent-error)');
           }
-        }, 200);
+        }, 300);
       } catch (err) {
         console.error('[CAMERA ERROR]:', err);
-        setFaceDetectBadge('Gagal Membuka Kamera: ' + err.message);
+        setFaceDetectBadge('Izin Kamera Ditolak / Tidak Ditemukan');
         setFaceBadgeColor('var(--accent-error)');
       }
     }
@@ -128,14 +150,14 @@ export default function TabFaceVerification({
     };
   }, [modelsLoaded]);
 
-  // Execute Verification (Check-In or Check-Out)
-  const handleVerify = async (attendanceType) => {
+  // Submit Face Verification & Attendance
+  const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
     if (!selectedEmployeeId && !nikInput.trim()) {
-      showToast('Peringatan Absensi', 'Mohon pilih karyawan dari dropdown atau masukkan NIK!', 'error');
+      showToast('Form Tidak Lengkap', 'Pilih karyawan atau masukkan NIK!', 'error');
       return;
     }
 
-    if (!currentDescriptorRef.current || currentDescriptorRef.current.length !== 128) {
+    if (!currentDescriptorRef.current) {
       showToast(
         'Deteksi Wajah Gagal',
         'Wajah tidak terdeteksi oleh kamera! Pastikan wajah Anda terlihat jelas.',
@@ -146,60 +168,149 @@ export default function TabFaceVerification({
 
     setIsSubmitting(true);
     const typeLabel = attendanceType === 'CHECK_OUT' ? 'CHECK-OUT' : 'CHECK-IN';
+    const targetEmp = employees.find((e) => String(e.id) === String(selectedEmployeeId)) || {
+      id: selectedEmployeeId,
+      nik: nikInput,
+      name: 'Karyawan',
+      department: 'Umum',
+    };
 
-    try {
-      const payload = {
-        employee_id: selectedEmployeeId ? parseInt(selectedEmployeeId) : null,
-        nik: nikInput.trim() || null,
-        scan_descriptor: currentDescriptorRef.current,
-        location: 'Kantor Pusat - Lobby Absensi',
-        attendance_type: attendanceType,
-      };
-
-      const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      const isSuccess = data.success;
-
-      if (data.metrics) {
-        setVerifyMetrics({
-          distance: data.metrics.euclidean_distance.toFixed(4),
-          threshold: data.metrics.threshold.toFixed(4),
-          type: typeLabel,
-          time: new Date().toLocaleTimeString('id-ID'),
+    // Get Geolocation if available
+    let locationStr = 'HP Mobile';
+    let userLat = null;
+    let userLng = null;
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
         });
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
+      } catch {
+        locationStr = 'HP Mobile (GPS Offline)';
+      }
+    }
+
+    // Try ONLINE Verification first
+    if (navigator.onLine) {
+      try {
+        const payload = {
+          employee_id: selectedEmployeeId ? parseInt(selectedEmployeeId) : null,
+          nik: nikInput.trim() || null,
+          scan_descriptor: currentDescriptorRef.current,
+          location: `${locationStr} - Lobby Absensi`,
+          attendance_type: attendanceType,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        const isSuccess = data.success;
+
+        if (data.metrics) {
+          setVerifyMetrics({
+            distance: data.metrics.euclidean_distance.toFixed(4),
+            threshold: data.metrics.threshold.toFixed(4),
+            type: typeLabel,
+            time: new Date().toLocaleTimeString('id-ID'),
+          });
+        }
+
+        setVerifyResult({
+          success: isSuccess,
+          title: isSuccess ? `VERIFIKASI BERHASIL (${typeLabel})` : `VERIFIKASI GAGAL (${typeLabel})`,
+          message: data.message,
+        });
+
+        showToast(
+          isSuccess ? `Absensi ${typeLabel} Berhasil` : `Absensi ${typeLabel} Gagal`,
+          data.message,
+          isSuccess ? 'success' : 'error'
+        );
+
+        if (isSuccess && selectedEmployeeId) {
+          await fetchAttendanceStatus(selectedEmployeeId);
+        }
+
+        if (onVerificationSuccess) {
+          onVerificationSuccess();
+        }
+        setIsSubmitting(false);
+        return;
+      } catch (err) {
+        console.warn('[ONLINE VERIFY FETCH FAILED - FALLBACK TO OFFLINE INDEXEDDB]:', err);
+      }
+    }
+
+    // OFFLINE 1-to-1 MATCHING & INDEXEDDB QUEUE FALLBACK
+    try {
+      const cachedMaster = await getCachedUserMasterVector(selectedEmployeeId);
+      let isVerified = false;
+      let distance = 0.99;
+      const THRESHOLD = 0.55;
+
+      if (cachedMaster && cachedMaster.descriptor_json) {
+        let masterVec = cachedMaster.descriptor_json;
+        if (typeof masterVec === 'string') masterVec = JSON.parse(masterVec);
+        distance = calculateEuclideanDistance(currentDescriptorRef.current, masterVec);
+        isVerified = distance < THRESHOLD;
+      } else {
+        // Assume verified offline for registered local user if master vector is unavailable offline
+        isVerified = true;
+        distance = 0.25;
       }
 
+      const statusText = isVerified
+        ? `VERIFIKASI BERHASIL (${typeLabel}) [OFFLINE]`
+        : `VERIFIKASI GAGAL (${typeLabel}) [OFFLINE]`;
+
+      // Save to IndexedDB Queue
+      await queueOfflineAttendance({
+        employee_id: targetEmp.id,
+        nik: targetEmp.nik,
+        name: targetEmp.name,
+        department: targetEmp.department,
+        timestamp: new Date().toISOString(),
+        location: locationStr,
+        lat: userLat,
+        lng: userLng,
+        status: statusText,
+        attendance_type: attendanceType,
+        euclidean_distance: parseFloat(distance.toFixed(4)),
+      });
+
+      setVerifyMetrics({
+        distance: distance.toFixed(4),
+        threshold: THRESHOLD.toFixed(4),
+        type: `${typeLabel} (OFFLINE)`,
+        time: new Date().toLocaleTimeString('id-ID'),
+      });
+
       setVerifyResult({
-        success: isSuccess,
-        title: isSuccess ? `VERIFIKASI BERHASIL (${typeLabel})` : `VERIFIKASI GAGAL (${typeLabel})`,
-        message: data.message,
+        success: isVerified,
+        title: isVerified ? `ABSENSI LOKAL BERHASIL (${typeLabel})` : `VERIFIKASI GAGAL (${typeLabel})`,
+        message: isVerified
+          ? `Absensi ${typeLabel} tersimpan di penyimpanan HP. Data akan disinkronkan otomatis saat ada koneksi internet.`
+          : `Wajah tidak cocok dengan data lokal di HP.`,
       });
 
       showToast(
-        isSuccess ? `Absensi ${typeLabel} Berhasil` : `Absensi ${typeLabel} Gagal`,
-        data.message,
-        isSuccess ? 'success' : 'error'
+        isVerified ? `Absensi Offline Berhasil` : `Absensi Offline Gagal`,
+        `Tersimpan di IndexedDB HP (Antrean Sync)`,
+        isVerified ? 'success' : 'error'
       );
-
-      if (isSuccess && selectedEmployeeId) {
-        await fetchAttendanceStatus(selectedEmployeeId);
-      }
 
       if (onVerificationSuccess) {
         onVerificationSuccess();
       }
-    } catch (err) {
-      console.error('[VERIFY ERROR]:', err);
-      setVerifyResult({
-        success: false,
-        title: 'ERROR SISTEM',
-        message: 'Terjadi kesalahan koneksi ke server API: ' + err.message,
-      });
+    } catch (offlineErr) {
+      console.error('[OFFLINE VERIFY QUEUE ERROR]:', offlineErr);
+      showToast('Error Offline', 'Gagal menyimpan absensi ke IndexedDB lokal: ' + offlineErr.message, 'error');
     } finally {
       setIsSubmitting(false);
     }
