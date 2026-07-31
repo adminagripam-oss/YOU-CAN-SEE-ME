@@ -4,7 +4,7 @@ import { getUnsyncedLogs } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import Header from './components/Header';
 import NetworkStatusBar from './components/NetworkStatusBar';
-import LoginModal from './components/LoginModal';
+import LoginPage from './components/LoginPage';
 import TabFaceVerification from './components/TabFaceVerification';
 import TabEmployeeManagement from './components/TabEmployeeManagement';
 import TabAttendanceLogs from './components/TabAttendanceLogs';
@@ -12,7 +12,6 @@ import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('tab-verify');
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -38,10 +37,15 @@ export default function App() {
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // User Auth & Offline Cache State
+  // User Auth & Page Routing State
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('logged_in_employee');
     return saved ? JSON.parse(saved) : null;
+  });
+
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem('logged_in_employee');
+    return saved ? 'tab-verify' : 'tab-login';
   });
 
   const [confirmModalConfig, setConfirmModalConfig] = useState({
@@ -128,7 +132,6 @@ export default function App() {
 
   // Service Worker Registration for PWA & Network Listener Setup
   useEffect(() => {
-    // 1. Register PWA Service Worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('./sw.js')
@@ -136,7 +139,6 @@ export default function App() {
         .catch((err) => console.warn('[PWA SW Register Error]', err));
     }
 
-    // 2. Network Online / Offline State
     const updateOnlineStatus = () => {
       setIsOnline(navigator.onLine);
       if (navigator.onLine) {
@@ -149,7 +151,6 @@ export default function App() {
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
 
-    // 3. Auto Sync Engine Listener
     const cleanupSync = initAutoSyncListener(showToast, () => {
       fetchLogs();
       refreshUnsyncedCount();
@@ -200,13 +201,15 @@ export default function App() {
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
     localStorage.setItem('logged_in_employee', JSON.stringify(user));
+    setActiveTab('tab-verify');
   };
 
   // Handle Logout
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('logged_in_employee');
-    showToast('Logout', 'Anda telah keluar dari sesi lokal.', 'info');
+    setActiveTab('tab-login');
+    showToast('Logout', 'Anda telah keluar dari akun.', 'info');
   };
 
   return (
@@ -222,14 +225,6 @@ export default function App() {
         confirmText={confirmModalConfig.confirmText}
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={closeConfirmModal}
-      />
-
-      {/* Login Modal for User Selection & Pre-Caching */}
-      <LoginModal
-        employees={employees}
-        currentUser={currentUser}
-        onLoginSuccess={handleLoginSuccess}
-        showToast={showToast}
       />
 
       {/* Network Online / Offline Status Pill */}
@@ -252,6 +247,18 @@ export default function App() {
 
       {/* Main Tab Content */}
       <main>
+        {activeTab === 'tab-login' && (
+          <section className="tab-content active">
+            <LoginPage
+              employees={employees}
+              currentUser={currentUser}
+              onLoginSuccess={handleLoginSuccess}
+              showToast={showToast}
+              onNavigateToApp={() => setActiveTab('tab-verify')}
+            />
+          </section>
+        )}
+
         {activeTab === 'tab-verify' && (
           <section className="tab-content active">
             <TabFaceVerification

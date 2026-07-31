@@ -42,6 +42,13 @@ export default function Header({ activeTab, setActiveTab, currentUser, onLogout,
 
         <div className="nav-tabs">
           <button
+            className={`tab-btn ${activeTab === 'tab-login' ? 'active' : ''}`}
+            onClick={() => setActiveTab('tab-login')}
+          >
+            <i className="fa-solid fa-user-shield"></i>
+            <span className="tab-label">{currentUser ? 'Akun Saya' : 'Login'}</span>
+          </button>
+          <button
             className={`tab-btn ${activeTab === 'tab-verify' ? 'active' : ''}`}
             onClick={() => setActiveTab('tab-verify')}
           >
