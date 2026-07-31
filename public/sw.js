@@ -1,5 +1,5 @@
-const CACHE_NAME = 'face-attendance-v1';
-const MODEL_CACHE_NAME = 'face-api-models-v1';
+const CACHE_NAME = 'face-attendance-v2';
+const MODEL_CACHE_NAME = 'face-api-models-v2';
 
 // Static assets to pre-cache on install
 const PRECACHE_ASSETS = [

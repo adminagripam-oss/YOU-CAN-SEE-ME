@@ -287,6 +287,7 @@ function AppContent() {
                   showToast={showToast}
                   theme={theme}
                   toggleTheme={toggleTheme}
+                  refreshEmployees={fetchEmployees}
                 />
               }
             />
