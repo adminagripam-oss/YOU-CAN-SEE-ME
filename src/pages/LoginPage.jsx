@@ -65,196 +65,81 @@ export default function LoginPage({ employees = [], showToast, theme, toggleThem
   return (
     <div className="glass-login-wrapper">
       <div className="login-pattern-container">
-        {/* Header Title */}
+        {/* Header Title from Figma Design */}
         <div className="glass-login-title">
-          <div className="brand-icon-lg">
-            <i className="fa-solid fa-face-smile"></i>
-          </div>
-          <h1>Absensi Biometrik Wajah</h1>
-          <p>Portal Otentikasi &amp; Pre-Caching Engine</p>
+          <h1 className="figma-login-title">Welcome back!</h1>
+          <p className="figma-login-subtitle">Mari isi Kehadiran Diri Anda</p>
         </div>
 
-        {/* Navigation Tabs (Account, Password, Settings) */}
-        <div className="ui-tabs-list">
-          <button
-            type="button"
-            className={`ui-tabs-trigger ${activeSubTab === 'account' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('account')}
-          >
-            <i className="fa-solid fa-user"></i> Account
-          </button>
-
-          <button
-            type="button"
-            className={`ui-tabs-trigger ${activeSubTab === 'password' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('password')}
-          >
-            <i className="fa-solid fa-lock"></i> Password
-          </button>
-
-          <button
-            type="button"
-            className={`ui-tabs-trigger ${activeSubTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('settings')}
-          >
-            <i className="fa-solid fa-sliders"></i> Settings
-          </button>
-        </div>
-
-        {/* Tab 1: Account Login */}
-        {activeSubTab === 'account' && (
-          <div className="glass-card ui-card">
-            <div className="ui-card-header">
-              <h3 className="ui-card-title">Masuk ke Sistem Absensi</h3>
-              <p className="ui-card-description">
-                Pilih profil Anda untuk login &amp; otomatis meng-cache Vektor Biometrik Wajah ke HP.
-              </p>
-            </div>
-
-            <div className="ui-card-content">
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                <div className="form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <label htmlFor="login-emp-select" style={{ marginBottom: 0 }}>Pilih Akun Karyawan</label>
-                    <button
-                      type="button"
-                      onClick={handleManualRefresh}
-                      disabled={isRefreshing}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--accent-primary)',
-                        fontSize: '0.78rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        padding: 0
-                      }}
-                      title="Muat Ulang Data Karyawan dari Supabase Cloud"
-                    >
-                      <i className={`fa-solid ${isRefreshing ? 'fa-spinner fa-spin' : 'fa-arrows-rotate'}`}></i>
-                      <span>{isRefreshing ? 'Muat...' : 'Refresh Supabase'}</span>
-                    </button>
-                  </div>
-                  <select
-                    id="login-emp-select"
-                    value={selectedEmpId}
-                    onChange={(e) => setSelectedEmpId(e.target.value)}
-                    disabled={isSubmitting}
+        {/* Login Form Card (Direct Figma Layout) */}
+        <div className="glass-card ui-card">
+          <div className="ui-card-content">
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label htmlFor="login-emp-select" className="figma-form-label">NIK / Akun Karyawan</label>
+                  <button
+                    type="button"
+                    onClick={handleManualRefresh}
+                    disabled={isRefreshing}
+                    className="figma-refresh-btn"
+                    title="Muat Ulang Data Karyawan dari Supabase Cloud"
                   >
-                    <option value="">-- Pilih Akun Karyawan --</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.name} ({emp.nik}) - {emp.department}
-                      </option>
-                    ))}
-                  </select>
-                  {(!employees || employees.length === 0) && (
-                    <p style={{ fontSize: '0.76rem', color: 'var(--accent-warning)', marginTop: '5px' }}>
-                      <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '4px' }}></i>
-                      Menghubungkan ke Supabase Cloud... Klik "Refresh Supabase" di atas jika daftar belum muncul.
-                    </p>
-                  )}
+                    <i className={`fa-solid ${isRefreshing ? 'fa-spinner fa-spin' : 'fa-arrows-rotate'}`}></i>
+                    <span>{isRefreshing ? 'Muat...' : 'Refresh Supabase'}</span>
+                  </button>
                 </div>
-
-                <div className="form-group">
-                  <label htmlFor="login-pin-input">Kode PIN / NIK</label>
-                  <input
-                    type="password"
-                    id="login-pin-input"
-                    placeholder="Masukkan PIN / NIK..."
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                  />
-                </div>
-
-                <button type="submit" className="btn btn-primary" disabled={isSubmitting || !selectedEmpId} style={{ marginTop: '1rem' }}>
-                  {isSubmitting ? (
-                    <>
-                      <i className="fa-solid fa-spinner fa-spin"></i> Menyiapkan Sesi...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fa-solid fa-right-to-bracket"></i> Masuk &amp; Buka Dashboard
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 2: Password */}
-        {activeSubTab === 'password' && (
-          <div className="glass-card ui-card">
-            <div className="ui-card-header">
-              <h3 className="ui-card-title">Password &amp; Keamanan PIN</h3>
-              <p className="ui-card-description">Atur dan perbarui PIN otentikasi cepat akun Anda.</p>
-            </div>
-
-            <div className="ui-card-content">
-              <form onSubmit={handleUpdatePin} className="space-y-4">
-                <div className="form-group">
-                  <label htmlFor="current-pin">PIN Saat Ini</label>
-                  <input
-                    type="password"
-                    id="current-pin"
-                    placeholder="••••••"
-                    value={currentPin}
-                    onChange={(e) => setCurrentPin(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="new-pin">PIN Baru</label>
-                  <input
-                    type="password"
-                    id="new-pin"
-                    placeholder="••••••"
-                    value={newPin}
-                    onChange={(e) => setNewPin(e.target.value)}
-                  />
-                </div>
-
-                <button type="submit" className="btn btn-primary" style={{ marginTop: '1rem' }}>
-                  <i className="fa-solid fa-key"></i> Simpan PIN Baru
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 3: Settings */}
-        {activeSubTab === 'settings' && (
-          <div className="glass-card ui-card">
-            <div className="ui-card-header">
-              <h3 className="ui-card-title">Pengaturan Sistem</h3>
-              <p className="ui-card-description">Kelola tema tampilan dan preferensi koneksi.</p>
-            </div>
-
-            <div className="ui-card-content">
-              <div className="form-group">
-                <label>Mode Tema Tampilan</label>
-                <button
-                  type="button"
-                  className="btn-action edit"
-                  onClick={toggleTheme}
-                  style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.9rem' }}
+                <select
+                  id="login-emp-select"
+                  className="figma-input-select"
+                  value={selectedEmpId}
+                  onChange={(e) => setSelectedEmpId(e.target.value)}
+                  disabled={isSubmitting}
                 >
-                  <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
-                  Mode Aktif: {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-                </button>
+                  <option value="">-- Pilih Akun Karyawan --</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.nik}) - {emp.department}
+                    </option>
+                  ))}
+                </select>
+                {(!employees || employees.length === 0) && (
+                  <p style={{ fontSize: '0.76rem', color: 'var(--accent-warning)', marginTop: '5px' }}>
+                    <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '4px' }}></i>
+                    Menghubungkan ke Supabase Cloud... Klik "Refresh Supabase" di atas jika daftar belum muncul.
+                  </p>
+                )}
               </div>
 
               <div className="form-group">
-                <label>Server Status</label>
-                <input type="text" readOnly value="Supabase Cloud Live (Port 8080)" />
+                <label htmlFor="login-pin-input" className="figma-form-label">Password / Kode PIN</label>
+                <input
+                  type="password"
+                  id="login-pin-input"
+                  className="figma-input-text"
+                  placeholder="Masukkan PIN / NIK..."
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                />
               </div>
-            </div>
+
+              <div className="figma-remember-checkbox">
+                <input type="checkbox" id="remember-me" defaultChecked />
+                <label htmlFor="remember-me">Remember for 30 days</label>
+              </div>
+
+              <button type="submit" className="figma-btn-login" disabled={isSubmitting || !selectedEmpId}>
+                {isSubmitting ? (
+                  <>
+                    <i className="fa-solid fa-spinner fa-spin"></i> Menyiapkan Sesi...
+                  </>
+                ) : (
+                  'Login'
+                )}
+              </button>
+            </form>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

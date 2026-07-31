@@ -20,9 +20,8 @@ export default function AuthLayout({ theme, toggleTheme }) {
         <Outlet />
       </main>
 
-      <footer className="auth-footer">
-        <p>Aplikasi Absensi Mobile Biometrik Wajah (Offline-First &amp; Auto-Sync PWA) &copy; 2026</p>
-      </footer>
+      {/* Right Side Image Banner (Figma Specification) */}
+      <div className="auth-side-banner" />
     </div>
   );
 }
