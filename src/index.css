@@ -1292,7 +1292,7 @@ footer {
     right: 10px;
     left: 10px;
     width: calc(100% - 20px);
-    maxWidth: 100%;
+    max-width: 100%;
   }
 
   /* Sidebar floats as overlay drawer on mobile */
