@@ -1,177 +1,331 @@
-# Product Requirement Document (PRD)
-## Sistem Absensi Biometrik Wajah berbasis 1-to-1 Verification Engine & Hybrid Supabase Cloud
+# Product Requirement Document (PRD) & System Architecture Analysis
+## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine & Hybrid Cloud Infrastructure
 
-- **Project Title**: Aplikasi Absensi Mobile Biometrik Wajah dengan Fitur Offline-First & Auto-Sync
-- **Target Complexity**: $O(1)$ Time Complexity Direct Lookup
-- **Database Engine Target**: Supabase Cloud (PostgreSQL Relational Engine dengan JSONB Vector Storage) & Dexie.js (IndexedDB Local)
-- **Biometric Library**: `face-api.js` (ResNet-34 Model, SSD MobileNet V1, 68 Landmarks, 128-Float32 Vector Descriptor)
-- **Version**: 2.0.0
-- **Status**: Production Ready Specifications (Live Supabase Cloud & GitHub Pages PWA Ready)
+- **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
+- **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA & Auto-Sync Engine
+- **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
+- **Versi Dokumen**: 2.2.0 (Live Production Specifications - Mesh & Anti-Spoofing Release)
+- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage) & Dexie.js v2 (IndexedDB Local Storage)
+- **Biometric Engine**: `@vladmandic/face-api` v1.7.15 (ResNet-34, 128-d Vector) + MediaPipe Face Mesh & EAR Liveness Engine (68-Point 3D Landmarks & 40-d GFV Cosine Similarity Engine)
+- **Status System**: Live Production Specifications & Enterprise-Ready PWA
 
 ---
 
 ## 1. Pendahuluan & Latar Belakang
 
-Sistem Absensi Biometrik Wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pencocokan **1-to-N (Verifikasi 1-ke-Banyak)**, di mana wajah scan dibandingkan satu per satu dengan seluruh sampel karyawan di database. Pendekatan $O(N)$ ini menyebabkan penundaan (*latency*) signifikan, lonjakan CPU/RAM server, dan risiko *false positive* yang tinggi saat jumlah karyawan bertambah hingga ribuan.
+Sistem absensi biometrik wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pendekatan **1-to-N (Verifikasi 1-ke-Banyak)**. Pada pendekatan 1-to-N, setiap scan wajah dibandingkan secara kuadratik/linear terhadap seluruh data karyawan yang tersimpan di database. Skema $O(N)$ ini menimbulkan kendala fatal saat jumlah karyawan membengkak:
+- **Lonjakan Latensi & CPU**: Server dipaksa menghitung *Euclidean Distance* ke ribuan sampel data.
+- **Tingkat False Positive Tinggi**: Semakin besar sampel $N$, semakin tinggi probabilitas *false match*.
+- **Ketergantungan Internet**: Kegagalan koneksi jaringan menghentikan seluruh operasional absensi.
 
-Versi 2.0.0 memperkenalkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Offline-First PWA (IndexedDB & Service Worker)**, **Otentikasi JWT (Cookie HTTP-Only & Session)**, **Sistem Router SPA dengan Pemisahan Layout**, serta **Hybrid 3-Tier Data Fetcher** yang memungkinkan aplikasi diakses dari perangkat mobile manapun (via GitHub Pages atau local server) tanpa hambatan *Mixed Content*.
-
----           
-
-## 1.1 Spesifikasi Teknologi & Arsitektur (Tech Stack Specifications)
-
-### 💻 Frontend (Client-Side SPA)
-- **Language**: JavaScript (ES6+ / JSX), HTML5, CSS3 (Vanilla Design Tokens)
-- **Framework & Routing**: React SPA (v19) & `react-router-dom` (v6) dengan Auth Guard & Layout Outlets.
-- **State Management & Auth**: React Context API (`AuthProvider` & `useAuth` hook).
-- **Styling & UI System**: Custom Glassmorphism CSS System, Theme Engine (Light Mode & Dark Mode), Shadcn UI Alert & Table Specifications, Google Fonts (Inter).
-- **Libraries & Dependencies**:
-  - `React` & `React-DOM` (v19.2.8): Core UI Framework Component Engine.
-  - `react-router-dom` (v6): Client-side SPA routing & Protected/Public route guards.
-  - `face-api.js` (`@vladmandic/face-api` v1.7.15): Deep Learning Neural Networks (ResNet-34 Architecture, SSD MobileNet V1 Face Detector, Tiny Face Detector, 68-Point Face Landmark Predictor, 128-float Vector Descriptor Extractor).
-  - `@supabase/supabase-js` (v2.111.0): SDK Resmi Supabase untuk query langsung dari Frontend via HTTPS (bebas *Mixed Content*).
-  - `dexie` (v4.4.4): IndexedDB Wrapper untuk offline caching karyawan, master biometrik, dan antrean absensi offline.
-  - `FontAwesome 6.4.0` / `Lucide-React`: Iconography UI Library.
-
-### ⚙️ Backend (Server-Side & REST API)
-- **Language & Runtime**: JavaScript (Node.js Runtime Environment).
-- **Framework**: Express.js (v4.21.2) Web Application Framework.
-- **Database Engine**: Supabase Cloud Database (PostgreSQL Relational Engine dengan tipe data `JSONB` untuk penyimpanan 128-float vector array).
-- **API Protocol**: RESTful JSON API Protocol (`GET`, `POST`, `PUT`, `DELETE`).
-- **Otentikasi & Keamanan**: JWT (`jsonwebtoken`) diset pada HTTP-Only Cookie (`cookie-parser`) & Bearer Header.
-- **Libraries & Dependencies**:
-  - `@supabase/supabase-js` (v2.111.0): SDK Database Client Supabase Cloud.
-  - `jsonwebtoken`: Penandatanganan & verifikasi token JWT.
-  - `cookie-parser`: Handler HTTP-Only cookies.
-  - `dotenv` (v17.4.2): Environment Variable Manager.
-  - `cors` (v2.8.5): Cross-Origin Resource Sharing Middleware dengan `credentials: true`.
+Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Offline-First PWA (IndexedDB + Service Worker)**, **Otentikasi Keamanan JWT (Cookie HTTP-Only & Session)**, serta **Hybrid 3-Tier Data Resiliency Engine** yang menjamin ketersediaan sistem 99.9% meskipun diakses dari perangkat mobile dengan jaringan tidak stabil atau dalam kondisi luring (offline).
 
 ---
 
-## 2. Tujuan & Sasaran Produk (Product Objectives)
+## 2. Spesifikasi Teknologi & Arsitektur Sistem (Tech Stack & Architecture)
 
-1. **Performa Tinggi ($O(1)$ Complexity)**: Memastikan waktu respon verifikasi absensi di server $\le 100\text{ ms}$ terlepas dari jumlah karyawan di database.
-2. **Akurasi & Keamanan Biometrik**: Menggunakan threshold Euclidean Distance $< 0.55$ pada vector 128-dimensi Float32.
-3. **Privasi Data**: Tidak menyimpan foto wajah mentah (*raw image*) di server, melainkan hanya menyimpan **Vector Descriptor Numerical Array (128 float)**.
-4. **Offline-First & PWA Support**: Karyawan dapat melakukan absensi di HP tanpa internet. Log disimpan di IndexedDB lokal dan di-sync otomatis saat internet kembali.
-5. **Otentikasi Sesi & Proteksi Rute**: Pemisahan tegas antara `AuthLayout` (Public) dan `DashboardLayout` (Protected) menggunakan `<ProtectedRoute>`.
-6. **Cross-Device Mobile Compatibility**: Integrasi Direct Supabase Client pada Frontend memungkinkan aplikasi diakses via GitHub Pages dari HP manapun di dunia secara *real-time*.
+```
+                                  +-------------------------------------------------+
+                                  |              CLIENT FRONTEND (PWA)              |
+                                  |  React 19 + Vite + React Router v7 + Dexie.js   |
+                                  +-----------------------+-------------------------+
+                                                          |
+                                      +-------------------+-------------------+
+                                      |                                       |
+                         Tier 1: Express API                     Tier 2: Direct Supabase SDK
+                         (http://localhost:8080)                 (HTTPS / CORS Safe)
+                                      |                                       |
+                                      v                                       v
+                        +---------------------------+           +---------------------------+
+                        |      EXPRESS SERVER       |           |   SUPABASE CLOUD DATABASE |
+                        |   Node.js + JWT Cookie    +---------->|   PostgreSQL Engine       |
+                        |   Biometric 1-to-1 Auth   |           |   (JSONB Vector Storage)  |
+                        +---------------------------+           +---------------------------+
+                                                                              ^
+                                      Tier 3: Local Offline Cache             |
+                        +-----------------------------------------------------+
+                        |          INDEXEDDB (Dexie.js Engine)                |
+                        |  - user_master                                      |
+                        |  - attendance_sync_queue                            |
+                        |  - employees_cache                                  |
+                        +-----------------------------------------------------+
+```
+
+### 2.1 Frontend (Client-Side SPA & PWA)
+- **Framework & UI Engine**: React v19.2.8 & Vite v8.1.5.
+- **Routing & Guard**: `react-router-dom` v7.18.2 dengan proteksi rute `<ProtectedRoute>` dan `<PublicRoute>`.
+- **State Management & Auth Context**: React Context API (`AuthProvider` & `useAuth` hook) yang mendukung verifikasi sesi otomatis `/api/auth/me`.
+- **Design System & Styling**: Custom CSS Tokens dengan dukungan **Light Mode** & **Dark Mode** (`localStorage.getItem('app-theme')`), Glassmorphism UI, Font Google Inter, Iconography Lucide-React & FontAwesome 6.4.0.
+- **Feedback Components**: Shadcn UI Toast System (`ShadcnToast.jsx`) dan Dynamic Modal Dialog (`ConfirmModal.jsx`).
+- **Biometric Library**: `@vladmandic/face-api` v1.7.15 (Model ResNet-34 Deep Neural Network, SSD MobileNet V1 Face Detector, Tiny Face Detector, 68 Landmark Points Predictor, 128-dimensional Float32 Descriptor Extractor).
+- **Offline Storage**: Dexie.js v4.4.4 wrapper IndexedDB untuk caching master vector, cache data karyawan, dan antrean absensi offline.
+
+### 2.2 Backend & Database Infrastructure
+- **Runtime Environment**: Node.js dengan framework Express.js v4.21.2.
+- **Cloud Database Engine**: Supabase Cloud PostgreSQL dengan ekstensi tipe data `JSONB` untuk penyimpanan 128-float vector array.
+- **Security & Authentication**:
+  - Open Standard JWT (`jsonwebtoken` v9.0.3) terenkripsi.
+  - Sesi disimpan secara aman pada HTTP-Only Cookie (`cookie-parser` v1.4.7).
+  - Cross-Origin Resource Sharing (`cors` v2.8.5) diset dengan `credentials: true`.
+- **Environment Management**: `dotenv` v17.4.2.
 
 ---
 
-## 3. Peran Pengguna (User Roles & Personas)
+## 3. Analisis Mendalam Arsitektur & Performa Sistem (System Deep-Dive Analysis)
 
-| Peran | Deskripsi & Hak Akses |
+### 3.1 Analisis Kompleksitas Algoritma: $O(1)$ Direct Lookup vs $O(N)$ Scan
+Pada sistem 1-to-1 Matching yang diimplementasikan:
+1. User memilih atau menginput NIK Karyawan yang akan diabsensi.
+2. Sistem menarik **Tepat 1 Master Descriptor** milik karyawan tersebut dari database Supabase (`master_descriptors.eq('employee_id', id)`).
+3. Matriks perhitungan *Euclidean Distance*:
+   $$d(p, q) = \sqrt{ \sum_{i=1}^{128} (p_i - q_i)^2 }$$
+   dieksekusi hanya **satu kali per proses scan**.
+4. **Hasil Evaluasi Performa**:
+   - Kompleksitas Waktu: $O(1)$ konstan.
+   - Waktu Eksekusi Verifikasi Server: $< 15\text{ ms}$.
+   - Pemakaian Memory/RAM: Sangat hemat karena tidak perlu memuat seluruh vektor karyawan ke memori.
+
+### 3.2 Analisis Resiliensi Data 3-Tier (3-Tier Hybrid Data Resiliency Engine)
+Untuk menangani situasi jaringan yang beragam (misalnya diakses via GitHub Pages di HP mobile di mana request HTTP ke localhost terblokir *Mixed Content*), sistem menggunakan algoritma bertingkat 3-Tier:
+1. **Tier 1 (Express REST API)**: Mencoba mengambil data via `/api/employees` dan `/api/attendance/logs`.
+2. **Tier 2 (Direct Supabase Cloud SDK)**: Jika Tier 1 gagal/unreachable, sistem secara otomatis melakukan query HTTPS langsung ke Supabase Cloud DB via `@supabase/supabase-js`.
+3. **Tier 3 (IndexedDB Local Offline Cache)**: Jika perangkat dalam keadaan *offline*, data diambil dari cache lokal IndexedDB (`db.employees_cache`).
+
+### 3.3 Analisis Keamanan & Validasi Anti-Duplikasi Master Biometrik
+Saat mendaftarkan karyawan baru atau mengunggah master foto wajah:
+- Backend mengekstrak vektor 128-float.
+- Sistem mengeksekusi **Anti-Duplication Check** dengan membandingkan vektor calon karyawan terhadap seluruh master vektor yang sudah terdaftar milik karyawan lain.
+- Jika ditemukan kemiripan dengan jarak Euclidean $d < 0.55$, sistem menolak pendaftaran dan mengembalikan response error:
+  `Registrasi Gagal: Wajah ini SUDAH TERDAFTAR atas nama karyawan "Nama" (NIK: XXX)`.
+- Hal ini mencegah pembajakan identitas biometrik dan registrasi ganda.
+
+### 3.4 Analisis Kebijakan Privasi Data Biometrik
+Sistem **tidak pernah menyimpan foto wajah mentah (*raw image file*)** di server backend maupun cloud storage. Foto wajah hanya diproses di memori browser secara ephemeral untuk diekstrak menjadi **128-element Float32 Array**. Hanya data angka matematis inilah yang disimpan di database `JSONB`. Dengan pendekatan ini, data biometrik karyawan aman dari kebocoran foto identitas.
+
+### 3.5 Analisis Kalkulasi Durasi Kerja & Grouping Check-In / Check-Out
+Sistem secara cerdas membedakan status absensi hari ini:
+- Jika karyawan belum melakukan absensi hari ini, aksi otomatis diset ke `CHECK-IN`.
+- Jika karyawan sudah `CHECK-IN`, sistem mengarahkan aksi ke `CHECK-OUT`.
+- Pada tab **Riwayat Absensi**, sistem memasangkan log `CHECK-OUT` dengan `CHECK-IN` terakhir karyawan pada hari yang sama, menghitung selisih waktu, dan memformatnya menjadi format intuitif **`Xj Ym Zd`** (contoh: `8j 15m 30d`).
+
+---
+
+## 4. Peran Pengguna & Proses Bisnis (User Roles & Business Process Architecture)
+
+### 4.1 Tabel Peran Pengguna & Hak Akses
+| Peran Pengguna | Hak Akses & Deskripsi Otentikasi |
 | :--- | :--- |
-| **Karyawan (Employee)** | Melakukan login sesi, verifikasi absensi harian (Check-In / Check-Out) dengan pemindai biometrik wajah, dan melihat durasi kerja. |
-| **HR / Admin Biometrik** | Mendaftarkan karyawan baru dan melakukan *enrollment* biometrik master wajah (live webcam / upload foto). |
-| **Admin Sistem / IT** | Memantau log absensi real-time, memicu auto-sync, mengedit/menghapus karyawan, serta mengelola log absensi. |
+| **Mandor Panen (Field Supervisor)** | Authenticated Mandor Account per Kebun/Afdeling. Melakukan verifikasi absensi biometrik wajah pemanen, mendata jam kerja/Hari Kerja (HK), serta menginput output panen (Kg & Hektare). |
+| **HR & Biometric Admin** | Mengelola data master pemanen (Tambah, Edit NIK/Nama/Kebun/Afdeling, Hapus Karyawan), melakukan enrollment master biometrik wajah via kamera live atau unggah foto. |
+| **Executive & Estate Manager** | Memantau dashboard analytics produktivitas kebun (`/analytics`), evaluasi persentase kehadiran pemanen per Afdeling, analisis produktivitas Kg/HK & Ha/HK, serta ekspor laporan. |
 
 ---
 
-## 4. Persyaratan Fungsional (Functional Requirements)
+### 4.2 Alur Proses Bisnis Mandor Panen (Mandor Field Operations Workflow)
 
-### FR-1: Authentication Flow & Layout Separation
+```
+ [1. Start Day]            [2. Biometric Scan]            [3. Field Output Entry]           [4. End Day Sync]
++---------------+         +-------------------+          +------------------------+        +-----------------+
+| Mandor Login  |-------> | Biometric Face    |--------> | Input Hasil Panen      |------> | Auto-Sync Log   |
+| App per Kebun |         | Check-In Pemanen  |          | - Tonase (Kg)          |        | Absensi & Output|
+| & Afdeling    |         | (Timestamp & HK)  |          | - Luas Area (Hektare)  |        | ke Cloud DB     |
++---------------+         +-------------------+          +------------------------+        +-----------------+
+```
+
+1. **Pendataan Hari Kerja & Jam Kerja (Attendance & HK Tracking)**:
+   - Mandor melakukan verifikasi absensi biometrik wajah pemanen pada jam masuk (Check-In) dan jam keluar (Check-Out).
+   - Sistem secara otomatis menghitung durasi jam kerja dan mencatat nilai **Hari Kerja (HK)** (misal: $1.0\text{ HK}$ untuk jam kerja penuh atau $0.5\text{ HK}$ untuk setengah hari).
+
+2. **Pencatatan Output Panen Pemanen (Harvest Output Metrics)**:
+   - **Output Kg / Hari Kerja (Kg/HK)**: Mandor mencatat total berat hasil panen (Kilogram / Tandan Buah Segar) yang dihasilkan oleh setiap pemanen pada hari tersebut:
+     $$\text{Produktivitas Tonase (Kg/HK)} = \frac{\text{Total Hasil Panen (Kg)}}{\text{Total Hari Kerja (HK)}}$$
+   - **Output Hektare / Hari Kerja (Ha/HK)**: Mandor mencatat luas areal Blok/Afdeling yang berhasil dipanen oleh pemanen:
+     $$\text{Produktivitas Luas (Ha/HK)} = \frac{\text{Total Luas Area Panen (Hektare)}}{\text{Total Hari Kerja (HK)}}$$
+
+3. **Kalkulasi Persentase Kehadiran Afdeling (% Attendance Rate)**:
+   - Sistem menghitung persentase tingkat kehadiran pemanen secara *real-time* per Afdeling dan per Kebun dari total kuota pekerja:
+     $$\text{\% Kehadiran Pemanen} = \left( \frac{\text{Jumlah Pemanen Hadir (Scan Verified)}}{\text{Total Pekerja Pemanen Terdaftar di Afdeling}} \right) \times 100\%$$
+
+---
+
+## 5. Persyaratan Fungsional Detail (Functional Requirements)
+
+### FR-1: Otentikasi JWT & Separasi Layout SPA
 - **Public Layout (`/login`)**:
-  - Halaman Login berdesain Glassmorphism penuh (*fullscreen*) tanpa Sidebar atau Topbar.
-  - Tabbed Card UI: **Account** (Pilih Akun & Login), **Password** (Ganti PIN/Password), **Settings** (Pengaturan Tema & Status Server).
-  - Meng-generate token JWT 24 jam via endpoint `POST /api/auth/login`.
+  - Halaman login dengan tampilan Glassmorphism responsif.
+  - Tabbed Interface: Login Akun Mandor/Admin, Ganti Password/PIN, dan Pengaturan Tema/Server Status.
+  - Mengirim request `POST /api/auth/login` untuk mendapatkan token JWT 24 jam yang disimpan di HTTP-Only Cookie dan localStorage.
 - **Protected Layout (`/dashboard`, `/absensi`, `/karyawan`, `/logs`)**:
-  - Dibungkus oleh komponen `<ProtectedRoute>`. Jika sesi kosong, user otomatis di-redirect ke `/login`.
-  - Memiliki komponen **Persistent Sidebar** dan **Persistent Topbar**.
-  - **Sidebar Collapsible Drawer**: Tombol hamburger `☰` / `✕` di Topbar untuk membuka/menutup Sidebar dengan transisi animasi smooth dan overlay gelap di mobile.
-  - **Topbar Live Indicator**: Badge animasi `● LIVE` / `OFFLINE` dan indikator `Pending Sync` di baris header.
-- **Session Verification (`GET /api/auth/me`)**:
-  - Dieksekusi otomatis saat *refresh* (F5) untuk memvalidasi apakah token JWT masih aktif.
-- **Logout (`POST /api/auth/logout`)**:
-  - Menghapus cookie otentikasi `token`, membersihkan sesi lokal, dan me-redirect user ke `/login`.
+  - Dibungkus oleh `<ProtectedRoute>`. Jika sesi tidak valid, pengguna di-redirect otomatis ke `/login`.
+  - Memiliki **Persistent Collapsible Sidebar** dan **Persistent Topbar** dengan tombol hamburger toggle untuk tampilan mobile.
+  - Badge Status Jaringan Real-Time (`LIVE` / `OFFLINE`) dan indikator antrean `Pending Sync`.
+- **Analytics Layout (`/analytics`)**:
+  - Dashboard Executive & Manager Kebun yang menyajikan metric produktivitas **Kg/HK**, **Ha/HK**, persentase kehadiran afdeling, serta filter berdasarkan Kebun & Afdeling.
 
-### FR-2: Hybrid 3-Tier Data Resiliency Engine
-- Frontend menggunakan logika pengambilan data 3-tier:
-  - **Tier 1 (Express REST API)**: Mencoba mengambil data via endpoint `/api/employees` dan `/api/attendance/logs`.
-  - **Tier 2 (Direct Supabase Cloud SDK)**: Jika Tier 1 gagal (misal diakses via GitHub Pages di HP karena pemblokiran *Mixed Content*), Frontend otomatis menarik data langsung dari Supabase Cloud (`https://qrtvawixmlekbitvfuav.supabase.co`) via HTTPS.
-  - **Tier 3 (IndexedDB Local Cache)**: Jika perangkat offline, data diambil dari cache lokal IndexedDB (`db.employees_cache`).
+### FR-2: Verification Engine 1-to-1 ($O(1)$) Check-In & Check-Out
+- Live webcam mendeteksi bounding box wajah, 68 titik landmark, dan 128-float vector descriptor.
+- Overlay canvas interaktif menampilkan visualisasi jaringan landmark wajah dan indikator kualitas pencahayaan.
+- Perhitungan jarak Euclidean terhadap master biometrik karyawan yang dipilih.
+- Ambang batas (*threshold*) $d < 0.55 \rightarrow$ **VERIFIKASI BERHASIL**.
+- Pencatatan log absensi ke database Supabase beserta tipe absensi (`CHECK-IN` / `CHECK-OUT`).
 
-### FR-3: Capture Wajah & Verification 1-to-1 ($O(1)$ Engine)
-- Pemindai webcam mendeteksi landmark 68-titik wajah dan mengekstrak **Float32Array 128 elemen**.
-- Overlay canvas menampilkan *bounding box*, landmark mesh 68 titik, dan badge sampel 128-vector preview.
-- Backend/Local Engine menghitung Euclidean Distance:
-  $$d(p, q) = \sqrt{ \sum_{i=1}^{128} (p_i - q_i)^2 }$$
-- Threshold $d < 0.55 \rightarrow$ **VERIFIKASI BERHASIL**.
+### FR-3: Registrasi Master Biometrik Wajah
+- Pendaftaran master biometrik melalui dua mode: **Kamera Live** atau **Upload Foto (JPG/PNG/WEBP)**.
+- Validasi otomatis bahwa foto mengandung tepat 1 wajah yang terdeteksi jelas.
+- Pemeriksaan anti-duplikasi ($d \ge 0.55$ terhadap karyawan lain).
+- Penyimpanan ke Supabase DB (`master_descriptors`) dan caching otomatis ke IndexedDB HP (`db.user_master`).
 
-### FR-4: Registrasi Master Biometrik & Anti-Duplikasi
-- Pendaftaran karyawan via Kamera Live atau Upload File Foto.
-- Backend / Direct Supabase memverifikasi bahwa wajah belum pernah terdaftar ($d < 0.55$) oleh karyawan lain.
-- Vector master (128 float) disimpan ke Supabase Cloud dan di-cache ke IndexedDB HP untuk absensi offline.
+### FR-4: Manajemen Data Karyawan (CRUD)
+- Registrasi karyawan baru dengan NIK, Nama, dan Departemen.
+- Update data karyawan via modal dialog edit (`PUT /api/employees/:id`).
+- Penghapusan data karyawan (`DELETE /api/employees/:id`) secara *cascade* menghapus master biometrik dan log absensinya di Supabase DB.
 
-### FR-5: Log Absensi & Format Durasi Kerja
-- Log absensi mencatat tanggal, jam, NIK, Nama, Departemen, Status (Berhasil/Gagal), dan Lokasi.
-- **Kalkulasi Durasi Kerja**: Log Check-Out diformat otomatis menjadi **`Xj Ym Zd`** (Jam, Menit, Detik), contoh: `0j 15m 30d`.
-- **Theme-Aware Font Color**: Teks NIK dan konten tabel menggunakan variabel warna tema yang kontras (Hitam murni di Light Mode, Putih murni di Dark Mode).
-- **Manajemen Hapus Log**: Menghapus 1 session log (`DELETE /api/attendance/logs/:id`) atau Hapus Semua Log (`DELETE /api/attendance/logs`).
+### FR-5: Offline Attendance Queue & Auto-Sync Engine
+- Ketika koneksi terputus (*offline*), proses verifikasi memanfaatkan master biometrik yang di-cache di IndexedDB (`db.user_master`).
+- Log absensi disimpan ke antrean IndexedDB (`db.attendance_sync_queue`).
+- Event listener `online` dan timer interval 20 detik secara otomatis memicu `syncPendingAttendanceLogs()` untuk mengirim antrean batch ke endpoint `POST /api/attendance/sync`.
 
 ---
 
-## 5. Persyaratan Non-Fungsional (Non-Functional Requirements)
+## 6. Ringkasan REST API Backend Specification (`server.js` & `auth.routes.js`)
 
-- **Latency**: Pengolahan verifikasi 1-to-1 $< 50\text{ ms}$.
-- **Theme Contrast**: Menggunakan variabel CSS `:root, [data-theme="light"]` (`--text-main: #000000`) dan `[data-theme="dark"]` (`--text-main: #ffffff`). Preference tersimpan di `localStorage.getItem('app-theme')`.
-- **Mobile Responsive**: Flexbox & CSS Grid adaptif untuk layar HP (320px - 768px).
-- **PWA Offline-First**: Service Worker (`public/sw.js`) meng-cache UI asset & AI models.
-
----
-
-## 6. Ringkasan Endpoint REST API Backend (`server.js`)
-
-| Method | Endpoint | Access | Deskripsi |
+| Method | Endpoint Path | Access Level | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Public | Autentikasi user & pengiriman cookie token JWT. |
-| `GET` | `/api/auth/me` | Protected | Verifikasi sesi aktif & data profil user. |
-| `POST` | `/api/auth/logout` | Protected | Menghapus cookie token JWT & mengakhiri sesi. |
-| `GET` | `/api/employees` | Public/Protected | Mengambil daftar karyawan & status biometrik master. |
-| `POST` | `/api/employees` | Protected | Menambah data karyawan baru. |
-| `PUT` | `/api/employees/:id` | Protected | Mengedit data NIK, Nama, dan Departemen karyawan. |
-| `DELETE` | `/api/employees/:id` | Protected | Menghapus karyawan (ON DELETE CASCADE master & log). |
-| `POST` | `/api/biometrics/register` | Protected | Menyimpan vector biometrik 128-float master. |
-| `POST` | `/api/attendance/verify` | Public/Protected | Verifikasi absensi 1-to-1 ($O(1)$) Check-In / Check-Out. |
-| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Check-In). |
-| `GET` | `/api/attendance/logs` | Protected | Mengambil riwayat log absensi & durasi kerja. |
-| `POST` | `/api/attendance/sync` | Protected | Endpoint batch auto-sync dari IndexedDB HP ke server. |
-| `DELETE` | `/api/attendance/logs/:id` | Protected | Menghapus 1 session log absensi spesifik. |
-| `DELETE` | `/api/attendance/logs` | Protected | Menghapus SELURUH riwayat log absensi. |
+| `POST` | `/api/auth/login` | Public | Otentikasi identitas karyawan & penandatanganan token JWT 24h. |
+| `GET` | `/api/auth/me` | Protected | Verifikasi integritas sesi aktif saat *refresh* halaman (F5). |
+| `POST` | `/api/auth/logout` | Protected | Membersihkan cookie token JWT & mengakhiri sesi pengguna. |
+| `GET` | `/api/employees` | Public/Protected | Mengambil daftar seluruh karyawan beserta status biometrik master. |
+| `POST` | `/api/employees` | Protected | Menambahkan data karyawan baru ke database Supabase. |
+| `PUT` | `/api/employees/:id` | Protected | Mengubah data NIK, Nama, dan Departemen karyawan. |
+| `DELETE` | `/api/employees/:id` | Protected | Menghapus karyawan (CASCADE hapus master biometrik & log). |
+| `POST` | `/api/biometrics/register` | Protected | Mendaftarkan/memperbarui 128-float vector master biometrik dengan cek anti-duplikasi. |
+| `GET` | `/api/biometrics/master/:id` | Public/Protected | Mengambil master vector biometrik (128-d & 40-d GFV) spesifik karyawan untuk matching 1-to-1. |
+| `POST` | `/api/attendance/verify` | Public/Protected | Engine verifikasi 1-to-1 ($O(1)$) untuk Check-In & Check-Out. |
+| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Apakah sudah Check-In / Check-Out). |
+| `GET` | `/api/attendance/logs` | Protected | Mengambil 100 riwayat log absensi terbaru beserta kalkulasi durasi kerja. |
+| `POST` | `/api/attendance/sync` | Protected | Endpoint batch auto-sync untuk menerima antrean absensi offline dari IndexedDB. |
+| `DELETE` | `/api/attendance/logs/:id` | Protected | Menghapus 1 session log absensi spesifik dari database. |
+| `DELETE` | `/api/attendance/logs` | Protected | Menghapus SELURUH riwayat log absensi dari database Supabase. |
 
 ---
 
-## 7. Skema Database Supabase PostgreSQL
+## 7. Skema Database (Database Schemas)
+
+### 7.1 Skema Relasional Supabase PostgreSQL Cloud
 
 ```sql
--- 1. Tabel Employees (Karyawan)
+-- 1. Tabel Master Karyawan / Pemanen (Employees)
 CREATE TABLE IF NOT EXISTS public.employees (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     nik VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
-    department VARCHAR(100) NOT NULL,
-    descriptor_json JSONB,
-    has_master_biometric BOOLEAN DEFAULT FALSE,
+    department VARCHAR(100) NOT NULL, -- Pemanen, Mandor, dsb.
+    kebun VARCHAR(100) DEFAULT 'Kebun A',
+    afdeling VARCHAR(100) DEFAULT 'Afdeling 1',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Tabel Attendance Logs
+-- 2. Tabel Master Vector Biometrik Wajah (128-Float Array JSONB)
+CREATE TABLE IF NOT EXISTS public.master_descriptors (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    employee_id BIGINT UNIQUE NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
+    descriptor_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Tabel Riwayat Log Absensi & Output Panen (Attendance & Harvest Logs)
 CREATE TABLE IF NOT EXISTS public.attendance_logs (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     employee_id BIGINT NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
-    name VARCHAR(100),
-    nik VARCHAR(50),
-    department VARCHAR(100),
-    timestamp TIMESTAMPTZ DEFAULT NOW(),
-    location VARCHAR(255) DEFAULT 'Kantor Pusat',
-    attendance_type VARCHAR(20) DEFAULT 'CHECK-IN', -- 'CHECK-IN' atau 'CHECK-OUT'
-    durasi VARCHAR(50),
+    kebun VARCHAR(100) DEFAULT 'Kebun A',
+    afdeling VARCHAR(100) DEFAULT 'Afdeling 1',
+    location VARCHAR(255) DEFAULT 'TPH / Blok Kebun',
     status VARCHAR(100) NOT NULL,
-    euclidean_distance DOUBLE PRECISION NOT NULL
+    euclidean_distance DOUBLE PRECISION NOT NULL,
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    attendance_type VARCHAR(20) DEFAULT 'CHECK-IN',
+    hk_val DOUBLE PRECISION DEFAULT 1.0, -- Hari Kerja (1.0 HK atau 0.5 HK)
+    kg_output DOUBLE PRECISION DEFAULT 0.0, -- Output Hasil Panen (Kg)
+    ha_output DOUBLE PRECISION DEFAULT 0.0 -- Output Luas Area Panen (Hektare)
 );
 
--- Indeks untuk pencarian O(1) cepat
+-- Indeks Performa untuk Query O(1) & Analytics Afdeling
 CREATE INDEX IF NOT EXISTS idx_employees_nik ON public.employees(nik);
+CREATE INDEX IF NOT EXISTS idx_master_emp_id ON public.master_descriptors(employee_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_emp_timestamp ON public.attendance_logs(employee_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_afdeling ON public.attendance_logs(kebun, afdeling);
 ```
+
+### 7.2 Skema Local IndexedDB (Dexie.js Engine)
+
+```javascript
+// Database Name: FaceAttendanceOfflineDB (Dexie.js v2)
+db.version(2).stores({
+  // Cache Master Biometrik HP (128-d & 40-d GFV)
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  
+  // Antrean Log Absensi Offline
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  
+  // Cache Daftar Karyawan
+  employees_cache: 'id, nik, name, department, has_master_biometric'
+});
+```
+
+---
+
+## 8. Persyaratan Non-Fungsional (Non-Functional Requirements)
+
+1. **Performa & Latensi**: Jarak Euclidean dihitung dalam $< 15\text{ ms}$. Responsivitas pemindaian kamera minimal 5 FPS di browser HP.
+2. **Kepatuhan Privasi Data**: Bebas simpan gambar mentah. Penyimpanan terenkripsi hanya untuk angka Float32 128 dimensi.
+3. **Cross-Browser & Cross-Device Compatibility**: Responsif penuh pada resolusi layar 320px hingga 4K UHD. Kompatibel dengan Google Chrome, Safari Mobile, Microsoft Edge, dan Mozilla Firefox.
+4. **PWA Compliance**: Lolos kualifikasi PWA dengan Service Worker (`public/sw.js`) untuk precaching aset statis dan web manifest.
+5. **Theme Engine**: Transisi CSS smooth antara Light Mode dan Dark Mode dengan standar kontras rasio WCAG AAA.
+
+---
+
+## 9. Rencana Pengembangan Masa Depan (Future Roadmap)
+
+1. **PostgreSQL pgvector Extension**: Mengintegrasikan ekstensi `pgvector` di Supabase untuk pencarian kesamaan kosinus (*Cosine Distance Indexing*) jika sistem di masa depan perlu mendukung hybrid 1-to-N search.
+2. **Geofencing & GPS Radius Enforcement**: Menambahkan validasi jarak radius geofencing lokasi koordinat kebun (TPH/Blok) berbasis Haversine formula saat Check-In/Check-Out.
+
+---
+
+## 10. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.2.0)
+
+Pembaruan versi **v2.2.0** membawa penyempurnaan menyeluruh pada mesin biometrik, arsitektur pencocokan vektor, keamanan anti-spoofing, serta pembersihan antarmuka pengguna (UI/UX):
+
+### 10.1 Mesin Biometrik Mesh & Geometric Feature Vector (GFV 40-d)
+- **Modul Triangulasi & Mesh 3D**: Menggunakan pemetaan 68-point facial landmarks yang dinormalisasi secara *scale-invariant* terhadap *Inter-Pupillary Distance* (IPD).
+- **Vektor Fitur Geometris (40-d)**: Memetakan rasio dan jarak antar-fitur fisik (lebar/tinggi mata, lebar alis, jarak mata-ke-hidung, kontur rahang, ketebalan bibir, dan rasio simetri wajah).
+- **Cosine Similarity Math Engine**:
+  $$\text{CosineSimilarity}(A, B) = \frac{A \cdot B}{\|A\| \cdot \|B\|}$$
+  - Threshold Kesamaan Kosinus GFV (40-d): $\ge 0.85$ ($85\%$).
+  - Threshold Kesamaan Kosinus Embedding (128-d): $\ge 0.80$ ($80\%$).
+
+### 10.2 Anti-Spoofing & Liveness Detection Engine
+- **Eye Aspect Ratio (EAR) Blink Detection**:
+  $$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \cdot \|p_1 - p_4\|}$$
+  Sistem memverifikasi manusia hidup (*Live Human*) melalui transisi kelopak mata tertutup ($\text{EAR} < 0.21$) ke mata terbuka kembali ($\text{EAR} > 0.24$) guna mencegah spoofing foto/video 2D.
+- **Backup 3D Head Rotation**: Verifikasi rotasi sudut kepala (*Yaw left/right*) sebagai alternatif keamanan liveness.
+
+### 10.3 Arsitektur Pemuatan Master Vektor 4-Tier (*4-Tier Load Resiliency*)
+Untuk menjamin vektor master selalu tersedia saat karyawan dipilih:
+1. **Tier 1 (Local IndexedDB Cache)**: Mengecek data master di Dexie IndexedDB lokal.
+2. **Tier 2 (Express REST API)**: Memanggil endpoint `GET /api/biometrics/master/:employeeId`.
+3. **Tier 3 (Supabase Cloud Direct)**: Melakukan query langsung ke tabel `master_descriptors` & `employees`.
+4. **Tier 4 (Props Fallback)**: Mengambil descriptor dari daftar `employees` di memori frontend.
+5. **Auto-Caching**: Vektor master yang berhasil dimuat dari server/cloud otomatis di-cache ke IndexedDB lokal untuk pemindaian offline berikutnya.
+
+### 10.4 Logika Status Absensi & Timezone Guard (*Check-In / Check-Out Lock*)
+- **Penanganan Timezone UTC/Lokal (`isSameDay`)**: Query status backend (`GET /api/attendance/status/:employeeId`) membandingkan tanggal secara aman tanpa terpengaruh offset jam UTC vs WIB.
+- **State Guard Penguncian Tombol**:
+  Begitu **Check-In** sukses dilakukan:
+  - State `checkedIn` dikunci pada nilai `true` dan tombol berubah menjadi **`LOG OUT (CHECK-OUT)`** (merah).
+  - Status tidak akan kembali ke Check-In secara otomatis sampai pengguna sendiri yang menekan tombol `LOG OUT (CHECK-OUT)`.
+  - Setelah Check-Out selesai, tombol terkunci menjadi **`Absensi Selesai Hari Ini`**.
+
+### 10.5 Pembersihan Antarmuka UI/UX (Clean & Minimalist Design)
+- **Node-Only Biometric Overlay**: Menampilkan titik node halus (`r = 1.8px`) dan garis kontur tipis yang mengalir natural mengikuti pergerakan kamera tanpa *double mirror transform*.
+- **Eliminasi Tampilan Berantakan**: Menghapus teks overlay persen di atas wajah, garis ukur putus-putus, crosshair, serta preview kotak Base64 di bawah kamera.
+- **Single Toast Notification**: Menghapus pesan alert ganda di bawah tombol; notifikasi absensi hanya dimunculkan 1 kali melalui Pop-up Toast di sudut kanan atas layar.

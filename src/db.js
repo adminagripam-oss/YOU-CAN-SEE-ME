@@ -2,23 +2,33 @@ import Dexie from 'dexie';
 
 /**
  * Dexie.js IndexedDB Database for Offline-First Face Attendance App
+ * v2: adds geometric_descriptor_json (40-d GFV) alongside 128-d face embedding
  */
 export const db = new Dexie('FaceAttendanceOfflineDB');
 
-// Define Database Schema
+// v1: original schema (kept for upgrade chain)
 db.version(1).stores({
-  // Master Vector Descriptors cached on HP
   user_master: '++id, employee_id, nik, name, department, updated_at',
-  
-  // Offline Attendance Queue waiting to sync to server
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
-  
-  // Local Cached Employees List
   employees_cache: 'id, nik, name, department, has_master_biometric'
 });
 
+// v2: geometric_descriptor_json column added to user_master
+db.version(2).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric'
+}).upgrade(tx => {
+  return tx.table('user_master').toCollection().modify(row => {
+    if (row.geometric_descriptor_json === undefined) {
+      row.geometric_descriptor_json = null;
+    }
+  });
+});
+
 /**
- * Save / Cache Master Descriptor for a user in IndexedDB
+ * Save / Cache Master Descriptor for a user in IndexedDB.
+ * Accepts both 128-d embedding (descriptor_json) and 40-d GFV (geometric_descriptor_json).
  */
 export async function cacheUserMasterVector(user) {
   try {
@@ -28,32 +38,48 @@ export async function cacheUserMasterVector(user) {
     const allMasters = await db.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(empId));
 
+    const payload = {
+      nik: user.nik,
+      name: user.name,
+      department: user.department,
+      descriptor_json: user.descriptor_json || user.descriptor || null,
+      geometric_descriptor_json: user.geometric_descriptor_json || null,
+      updated_at: new Date().toISOString(),
+    };
+
     if (existing) {
-      await db.user_master.update(existing.id, {
-        nik: user.nik,
-        name: user.name,
-        department: user.department,
-        descriptor_json: user.descriptor_json || user.descriptor,
-        updated_at: new Date().toISOString()
-      });
+      await db.user_master.update(existing.id, payload);
     } else {
-      await db.user_master.add({
-        employee_id: empId,
-        nik: user.nik,
-        name: user.name,
-        department: user.department,
-        descriptor_json: user.descriptor_json || user.descriptor,
-        updated_at: new Date().toISOString()
-      });
+      await db.user_master.add({ employee_id: empId, ...payload });
     }
-    console.log(`[IndexedDB] Cached master vector for ${user.name}`);
+    console.log(`[IndexedDB] Cached master for ${user.name} | GFV: ${payload.geometric_descriptor_json ? 'YES' : 'NO'}`);
   } catch (err) {
     console.error('[IndexedDB Cache Master Error]:', err);
   }
 }
 
 /**
- * Get Cached Master Descriptor from IndexedDB
+ * Update ONLY the geometric feature vector for an existing cached employee.
+ */
+export async function cacheGeometricVector(employeeId, gfv) {
+  try {
+    if (!employeeId || !gfv) return;
+    const allMasters = await db.user_master.toArray();
+    const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
+    if (existing) {
+      await db.user_master.update(existing.id, {
+        geometric_descriptor_json: gfv,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.error('[IndexedDB cacheGeometricVector Error]:', err);
+  }
+}
+
+/**
+ * Get Cached Master Descriptor from IndexedDB.
+ * Returns: { descriptor_json, geometric_descriptor_json, ... }
  */
 export async function getCachedUserMasterVector(employeeId) {
   try {
@@ -97,7 +123,6 @@ export async function queueOfflineAttendance(logData) {
 
 /**
  * Get all unsynced logs from IndexedDB
- * Safely fetches items without IDBKeyRange boolean error
  */
 export async function getUnsyncedLogs() {
   try {

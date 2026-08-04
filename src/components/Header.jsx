@@ -8,8 +8,8 @@ export default function Header({ activeTab, setActiveTab, currentUser, onLogout,
           <i className="fa-solid fa-face-smile"></i>
         </div>
         <div className="brand-text">
-          <h1>Absensi Biometrik Wajah</h1>
-          <p>Offline-First &amp; Auto-Sync Mobile Engine</p>
+          <h1>AgriFace</h1>
+          <p>Biometric Face Attendance Engine</p>
         </div>
       </div>
 

@@ -1,7 +1,10 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ isOpen, onClose }) {
+  const { logout } = useAuth();
+
   return (
     <>
       <aside className={`app-sidebar ${isOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
@@ -10,8 +13,8 @@ export default function Sidebar({ isOpen, onClose }) {
             <i className="fa-solid fa-face-smile"></i>
           </div>
           <div className="brand-text">
-            <h2>Absensi Biometrik</h2>
-            <p>1-to-1 Engine</p>
+            <h2>AgriFace</h2>
+            <p>1-to-1 Biometric Engine</p>
           </div>
         </div>
 
@@ -53,8 +56,17 @@ export default function Sidebar({ isOpen, onClose }) {
           </NavLink>
         </nav>
 
+        {/* Sidebar Footer replaced with Logout Button */}
         <div className="sidebar-footer">
-          <p>Biometric 1-to-1 v2.0</p>
+          <button
+            type="button"
+            className="sidebar-logout-btn"
+            onClick={logout}
+            title="Keluar dari Sesi Login"
+          >
+            <i className="fa-solid fa-right-from-bracket"></i>
+            <span>Logout</span>
+          </button>
         </div>
       </aside>
     </>
