@@ -748,15 +748,30 @@ export default function TabFaceVerification({
           });
 
           const successLogs = todayLogs.filter((l) => !l.status?.includes('GAGAL') && !l.status?.includes('REJECT'));
-          const checkIns = successLogs.filter(
-            (l) =>
-              l.attendance_type?.includes('CHECK_IN') ||
-              l.attendance_type?.includes('CHECK-IN') ||
-              l.status?.includes('Hadir')
-          );
-          const checkOuts = successLogs.filter(
-            (l) => l.attendance_type?.includes('CHECK_OUT') || l.attendance_type?.includes('CHECK-OUT')
-          );
+          const checkIns = successLogs.filter((l) => {
+            const t = (l.attendance_type || '').toUpperCase();
+            const loc = (l.location || '').toUpperCase();
+            const st = (l.status || '').toUpperCase();
+            return (
+              t.includes('CHECK_IN') ||
+              t.includes('CHECK-IN') ||
+              loc.includes('CHECK-IN') ||
+              st.includes('CHECK-IN') ||
+              (st.includes('HADIR') && !loc.includes('CHECK-OUT') && !st.includes('CHECK-OUT') && !t.includes('CHECK_OUT'))
+            );
+          });
+
+          const checkOuts = successLogs.filter((l) => {
+            const t = (l.attendance_type || '').toUpperCase();
+            const loc = (l.location || '').toUpperCase();
+            const st = (l.status || '').toUpperCase();
+            return (
+              t.includes('CHECK_OUT') ||
+              t.includes('CHECK-OUT') ||
+              loc.includes('CHECK-OUT') ||
+              st.includes('CHECK-OUT')
+            );
+          });
 
           const lastCheckIn = checkIns[0] || null;
           const lastCheckOut = checkOuts[0] || null;
