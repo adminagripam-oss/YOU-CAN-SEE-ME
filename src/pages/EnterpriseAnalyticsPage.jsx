@@ -1,59 +1,51 @@
 import React, { useState } from 'react';
 
-export default function EnterpriseAnalyticsPage() {
+export default function EnterpriseAnalyticsPage({ employees = [], logs = [] }) {
   const [selectedTimeframe, setSelectedTimeframe] = useState('12M');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Sample Transaction Data for Data Table (Analyst View)
-  const [transactions] = useState([
-    {
-      id: 'TX-90241',
-      user: { name: 'Budi Santoso', email: 'budi.santoso@agrenas.co.id', nik: 'EMP-001', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' },
-      category: 'Enterprise Subscriptions',
-      date: '31 Jul 2026, 14:32',
-      amount: '$14,250.00',
-      method: 'Biometric 1-to-1',
-      status: 'Completed',
-    },
-    {
-      id: 'TX-90242',
-      user: { name: 'Siti Rahma', email: 'siti.rahma@agrenas.co.id', nik: 'EMP-002', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80' },
-      category: 'Cloud Storage Add-on',
-      date: '31 Jul 2026, 13:15',
-      amount: '$2,850.00',
-      method: 'API Gateway',
-      status: 'Completed',
-    },
-    {
-      id: 'TX-90243',
-      user: { name: 'Andi Wijaya', email: 'andi.wijaya@agrenas.co.id', nik: 'EMP-003', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80' },
-      category: 'AI Model License',
-      date: '31 Jul 2026, 11:48',
-      amount: '$8,400.00',
-      method: 'NFC Token',
-      status: 'Pending',
-    },
-    {
-      id: 'TX-90244',
-      user: { name: 'Kibutsuchi Muzan', email: 'muzan@fighter.org', nik: 'JMK-609', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80' },
-      category: 'Biometric Engine Audit',
-      date: '30 Jul 2026, 18:05',
-      amount: '$19,500.00',
-      method: 'Biometric 1-to-1',
-      status: 'Completed',
-    },
-    {
-      id: 'TX-90245',
-      user: { name: 'Ladesh Tel Aviv', email: 'ladesh@yahudi.co.il', nik: 'JMK-909', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&auto=format&fit=crop&q=80' },
-      category: 'Security Compliance',
-      date: '30 Jul 2026, 16:20',
-      amount: '$1,200.00',
-      method: 'Manual Entry',
-      status: 'Failed',
-    },
-  ]);
+  // Dynamic Metrics from Database
+  const totalEmployeesCount = employees.length;
+  const verifiedLogsCount = logs.filter(
+    (l) => l.status && (l.status.includes('BERHASIL') || l.status.includes('Hadir') || l.status.includes('Verified'))
+  ).length;
+  const attendancePercentage =
+    totalEmployeesCount > 0 ? ((verifiedLogsCount / totalEmployeesCount) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+
+  // Dynamically convert database attendance logs into table transactions
+  const transactions = logs.map((log, index) => {
+    const emp = employees.find((e) => String(e.id) === String(log.employee_id) || String(e.nik) === String(log.nik));
+    const name = log.name || emp?.name || `Karyawan #${log.employee_id}`;
+    const nik = log.nik || emp?.nik || `ID-${log.employee_id}`;
+    const dateStr = log.timestamp
+      ? new Date(log.timestamp).toLocaleString('id-ID', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      : '-';
+    const isSuccess =
+      log.status && (log.status.includes('BERHASIL') || log.status.includes('Hadir') || log.status.includes('Verified'));
+
+    return {
+      id: `LOG-${log.id || index + 1}`,
+      user: {
+        name,
+        email: `${nik.toLowerCase()}@kebun.co.id`,
+        nik,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
+      },
+      category: emp?.department || log.department || 'Operasional Kebun',
+      date: dateStr,
+      amount: log.euclidean_distance !== undefined && log.euclidean_distance !== null ? `Dist: ${log.euclidean_distance}` : '-',
+      method: log.attendance_type || 'Biometric 1-to-1',
+      status: isSuccess ? 'Completed' : 'Failed'
+    };
+  });
 
   const filteredTransactions = transactions.filter((tx) => {
     const matchesSearch =
@@ -76,7 +68,7 @@ export default function EnterpriseAnalyticsPage() {
             </div>
             <div>
               <span className="font-extrabold text-lg tracking-tight text-slate-100 block leading-none">
-                AURA<span className="text-blue-500">.ai</span>
+                Agri<span className="text-blue-500">Face</span>
               </span>
               <span className="text-[10px] font-semibold text-slate-400 tracking-wider uppercase">Analytics Suite</span>
             </div>
@@ -215,8 +207,8 @@ export default function EnterpriseAnalyticsPage() {
           {/* Section Header Title */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-extrabold text-slate-50 tracking-tight">Enterprise Analytics Dashboard</h1>
-              <p className="text-sm text-slate-400 mt-1">Ringkasan performa eksekutif &amp; pemantauan transaksi real-time.</p>
+              <h1 className="text-2xl font-extrabold text-slate-50 tracking-tight">AgriFace Dashboard Monitoring Pekerjaan Kebun</h1>
+              <p className="text-sm text-slate-400 mt-1">Monitoring KPI Produktivitas Panen Pemanen, Kehadiran, &amp; Luasan Area Afdeling.</p>
             </div>
 
             {/* Timeframe Filter Buttons */}
@@ -237,81 +229,70 @@ export default function EnterpriseAnalyticsPage() {
             </div>
           </div>
 
-          {/* 3. METRIC CARDS (EXECUTIVE VIEW) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* Card 1: Total Pendapatan */}
-            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all">
+          {/* 3. METRIC CARDS (CLEAN NON-REDUNDANT UNIT BADGE DESIGN) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Card 1: Protas */}
+            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Pendapatan</span>
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center text-lg">
-                  <i className="fa-solid fa-wallet"></i>
-                </div>
+                <span className="text-base font-bold text-slate-400">Protas</span>
+                <span className="text-xs font-medium text-slate-400 bg-slate-700/80 px-2.5 py-1 rounded-lg border border-slate-600/40">
+                  Ton/Ha
+                </span>
               </div>
-              <div className="mt-4">
-                <div className="text-2xl font-extrabold text-slate-50">$1,248,500.00</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-emerald-400 bg-emerald-500/10 text-xs font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-arrow-trend-up"></i> +14.2%
-                  </span>
-                  <span className="text-xs text-slate-400">vs periode lalu</span>
-                </div>
+              <div className="mt-4 text-3.5xl font-black text-slate-50 tracking-tight">
+                3,87
               </div>
             </div>
 
-            {/* Card 2: Pengguna Aktif */}
-            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all">
+            {/* Card 2: Output Panen (Kg/HK) */}
+            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pengguna Aktif</span>
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-lg">
-                  <i className="fa-solid fa-users"></i>
-                </div>
+                <span className="text-base font-bold text-slate-400">Output Panen</span>
+                <span className="text-xs font-medium text-slate-400 bg-slate-700/80 px-2.5 py-1 rounded-lg border border-slate-600/40">
+                  Kg/HK
+                </span>
               </div>
-              <div className="mt-4">
-                <div className="text-2xl font-extrabold text-slate-50">84,320</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-emerald-400 bg-emerald-500/10 text-xs font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-arrow-trend-up"></i> +8.7%
-                  </span>
-                  <span className="text-xs text-slate-400">vs minggu lalu</span>
-                </div>
+              <div className="mt-4 text-3.5xl font-black text-slate-50 tracking-tight">
+                1,245.0
               </div>
             </div>
 
-            {/* Card 3: Conversion Rate */}
-            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all">
+            {/* Card 3: Output Area (Ha/HK) */}
+            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Conversion Rate</span>
-                <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center text-lg">
-                  <i className="fa-solid fa-filter-circle-dollar"></i>
-                </div>
+                <span className="text-base font-bold text-slate-400">Output Area</span>
+                <span className="text-xs font-medium text-slate-400 bg-slate-700/80 px-2.5 py-1 rounded-lg border border-slate-600/40">
+                  Ha/HK
+                </span>
               </div>
-              <div className="mt-4">
-                <div className="text-2xl font-extrabold text-slate-50">3.64%</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-rose-400 bg-rose-500/10 text-xs font-semibold px-2 py-0.5 rounded-full border border-rose-500/20 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-arrow-trend-down"></i> -1.2%
-                  </span>
-                  <span className="text-xs text-slate-400">vs periode lalu</span>
-                </div>
+              <div className="mt-4 text-3.5xl font-black text-slate-50 tracking-tight">
+                2,45
               </div>
             </div>
 
-            {/* Card 4: Rata-Rata Transaksi */}
-            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all">
+            {/* Card 4: Persentase Kehadiran Pemanen */}
+            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Rerata Transaksi</span>
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center text-lg">
-                  <i className="fa-solid fa-credit-card"></i>
-                </div>
+                <span className="text-base font-bold text-slate-400">Kehadiran</span>
+                <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                  % Absensi
+                </span>
               </div>
-              <div className="mt-4">
-                <div className="text-2xl font-extrabold text-slate-50">$342.50</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-emerald-400 bg-emerald-500/10 text-xs font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-arrow-trend-up"></i> +5.4%
-                  </span>
-                  <span className="text-xs text-slate-400">vs bulan lalu</span>
-                </div>
+              <div className="mt-4 text-3.5xl font-black text-emerald-400 tracking-tight">
+                {attendancePercentage}
+              </div>
+            </div>
+
+            {/* Card 5: Total Pemanen */}
+            <div className="bg-slate-800 border border-slate-700/60 p-5 rounded-2xl shadow-lg hover:border-slate-600 transition-all flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-base font-bold text-slate-400">Total Pekerja</span>
+                <span className="text-xs font-medium text-slate-400 bg-slate-700/80 px-2.5 py-1 rounded-lg border border-slate-600/40">
+                  Orang
+                </span>
+              </div>
+              <div className="mt-4 text-3.5xl font-black text-slate-50 tracking-tight">
+                {totalEmployeesCount.toLocaleString('id-ID')}
               </div>
             </div>
           </div>

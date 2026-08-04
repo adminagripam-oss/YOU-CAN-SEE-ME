@@ -1,7 +1,94 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector } from '../db';
+import { cacheUserMasterVector, cacheGeometricVector } from '../db';
+
+/**
+ * Extract a 40-d Geometric Feature Vector (GFV) from 68 face-api landmark points.
+ * All distances normalized by Inter-Pupillary Distance (IPD) → scale invariant.
+ */
+function extractGeometricFeatureVector(landmarks) {
+  try {
+    const pts = landmarks.positions;
+    if (!pts || pts.length < 68) return null;
+
+    const d = (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+    const cen = (arr) => ({
+      x: arr.reduce((s, p) => s + p.x, 0) / arr.length,
+      y: arr.reduce((s, p) => s + p.y, 0) / arr.length,
+    });
+
+    const leftEyePts = pts.slice(36, 42);
+    const rightEyePts = pts.slice(42, 48);
+    const lEye = cen(leftEyePts);
+    const rEye = cen(rightEyePts);
+    const lBrow = cen(pts.slice(17, 22));
+    const rBrow = cen(pts.slice(22, 27));
+    const midEye = cen([lEye, rEye]);
+
+    const ipd = d(lEye, rEye);
+    if (ipd < 5) return null; // face too small
+    const n = (val) => parseFloat((val / ipd).toFixed(6));
+
+    const noseTip = pts[30];
+    const noseBtm = pts[33];
+    const chin = pts[8];
+
+    return [
+      // ── Eyes ──────────────────────────────────────────────────
+      n(d(pts[36], pts[39])),        // 0  L eye width
+      n(d(pts[42], pts[45])),        // 1  R eye width
+      n(d(pts[37], pts[41])),        // 2  L eye height (outer)
+      n(d(pts[43], pts[47])),        // 3  R eye height (outer)
+      n(d(pts[38], pts[40])),        // 4  L eye height (inner)
+      n(d(pts[44], pts[46])),        // 5  R eye height (inner)
+      // ── Eyebrows ──────────────────────────────────────────────
+      n(d(pts[17], pts[21])),        // 6  L eyebrow width
+      n(d(pts[22], pts[26])),        // 7  R eyebrow width
+      n(d(lBrow, lEye)),             // 8  L eyebrow-to-eye gap
+      n(d(rBrow, rEye)),             // 9  R eyebrow-to-eye gap
+      // ── Nose ──────────────────────────────────────────────────
+      n(d(pts[31], pts[35])),        // 10 nose width
+      n(d(pts[27], pts[30])),        // 11 nose bridge length
+      n(d(noseTip, noseBtm)),        // 12 nose tip → nose bottom
+      n(d(noseTip, chin)),           // 13 nose tip → chin
+      // ── Mouth ─────────────────────────────────────────────────
+      n(d(pts[48], pts[54])),        // 14 mouth width
+      n(d(pts[51], pts[57])),        // 15 mouth height
+      n(d(pts[51], pts[62])),        // 16 upper lip thickness
+      n(d(pts[57], pts[66])),        // 17 lower lip thickness
+      // ── Inter-feature distances ────────────────────────────────
+      n(d(lEye, noseTip)),           // 18 L eye → nose tip
+      n(d(rEye, noseTip)),           // 19 R eye → nose tip
+      n(d(midEye, pts[51])),         // 20 eye-midpoint → upper lip
+      n(d(noseTip, pts[51])),        // 21 nose tip → upper lip
+      n(d(midEye, chin)),            // 22 eye-midpoint → chin
+      // ── Jaw ───────────────────────────────────────────────────
+      n(d(pts[0], pts[16])),        // 23 face width (jaw corners)
+      n(d(pts[4], pts[12])),        // 24 cheek width
+      n(d(pts[2], pts[14])),        // 25 jaw intermediate width
+      n(d(pts[0], pts[8])),         // 26 L jaw height (corner → chin)
+      n(d(pts[16], pts[8])),         // 27 R jaw height (corner → chin)
+      n(d(pts[0], pts[4])),         // 28 L jaw segment
+      n(d(pts[4], pts[8])),         // 29 L-mid jaw segment
+      n(d(pts[8], pts[12])),        // 30 R-mid jaw segment
+      n(d(pts[12], pts[16])),        // 31 R jaw segment
+      // ── Symmetry offsets (signed, ~0 for frontal face) ─────────
+      parseFloat(((lEye.x - midEye.x) / ipd).toFixed(6)),  // 32 L eye offset
+      parseFloat(((rEye.x - midEye.x) / ipd).toFixed(6)),  // 33 R eye offset
+      parseFloat(((noseTip.x - midEye.x) / ipd).toFixed(6)), // 34 nose offset
+      parseFloat(((pts[57].x - midEye.x) / ipd).toFixed(6)), // 35 mouth offset
+      // ── Facial ratios (scale-independent) ─────────────────────
+      parseFloat((d(midEye, chin) / d(pts[0], pts[16])).toFixed(6)), // 36 face aspect ratio
+      parseFloat((d(pts[27], noseTip) / d(noseTip, chin)).toFixed(6)), // 37 upper/lower split
+      parseFloat((d(pts[48], pts[54]) / d(pts[0], pts[16])).toFixed(6)), // 38 mouth/face width ratio
+      parseFloat((d(pts[17], pts[26]) / d(pts[0], pts[16])).toFixed(6)), // 39 brow span / face width
+    ];
+  } catch (e) {
+    console.warn('[GFV Extract Error]:', e);
+    return null;
+  }
+}
 
 export default function TabEmployeeManagement({
   employees,
@@ -26,6 +113,7 @@ export default function TabEmployeeManagement({
   const [editingEmp, setEditingEmp] = useState({ id: '', nik: '', name: '', department: '' });
 
   const currentEmpDescriptorRef = useRef(null);
+  const currentEmpGFVRef = useRef(null); // 40-d Geometric Feature Vector
   const regVideoRef = useRef(null);
   const regCanvasRef = useRef(null);
   const regStreamRef = useRef(null);
@@ -76,10 +164,15 @@ export default function TabEmployeeManagement({
                 window.faceapi.draw.drawFaceLandmarks(canvas, resizedDetection);
               }
               currentEmpDescriptorRef.current = Array.from(detection.descriptor);
-              setCameraStatusText('Biometrik Wajah Master Terdeteksi [128-dim]!');
+              // Extract 40-d Geometric Feature Vector from landmarks
+              const gfv = extractGeometricFeatureVector(detection.landmarks);
+              currentEmpGFVRef.current = gfv;
+              const gfvLabel = gfv ? `[128-dim + GFV ${gfv.length}]` : '[128-dim]';
+              setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi ${gfvLabel}`);
               setCameraStatusColor('var(--accent-success)');
             } else {
               currentEmpDescriptorRef.current = null;
+              currentEmpGFVRef.current = null;
               setCameraStatusText('Menunggu Wajah di Kamera...');
               setCameraStatusColor('var(--accent-warning)');
             }
@@ -139,10 +232,15 @@ export default function TabEmployeeManagement({
 
           if (detection) {
             currentEmpDescriptorRef.current = Array.from(detection.descriptor);
-            setCameraStatusText('Wajah Berhasil Diekstrak dari Foto [128-dim]!');
+            // Extract 40-d GFV from photo landmarks
+            const gfv = extractGeometricFeatureVector(detection.landmarks);
+            currentEmpGFVRef.current = gfv;
+            const gfvLabel = gfv ? `[128-dim + GFV ${gfv.length}]` : '[128-dim]';
+            setCameraStatusText(`✓ Wajah Diekstrak dari Foto ${gfvLabel}`);
             setCameraStatusColor('var(--accent-success)');
           } else {
             currentEmpDescriptorRef.current = null;
+            currentEmpGFVRef.current = null;
             setCameraStatusText('Wajah Tidak Terdeteksi dalam Foto! Gunakan foto lain.');
             setCameraStatusColor('var(--accent-error)');
           }
@@ -249,14 +347,19 @@ export default function TabEmployeeManagement({
           }
         }
 
-        // Cache Master Vector in local IndexedDB for mobile offline use
+        // Cache Master Vector + GFV in local IndexedDB for offline geometric verification
         await cacheUserMasterVector({
           employee_id: createdEmpId,
           nik: createdEmp.nik,
           name: createdEmp.name,
           department: createdEmp.department,
           descriptor_json: currentEmpDescriptorRef.current,
+          geometric_descriptor_json: currentEmpGFVRef.current || null,
         });
+
+        if (currentEmpGFVRef.current) {
+          console.log(`[GFV] Stored ${currentEmpGFVRef.current.length}-d geometric vector for ${createdEmp.name}`);
+        }
       }
 
       showToast(
@@ -272,6 +375,7 @@ export default function TabEmployeeManagement({
       setPhotoPreview(null);
       setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
       currentEmpDescriptorRef.current = null;
+      currentEmpGFVRef.current = null;
 
       refreshEmployees();
     } catch (err) {

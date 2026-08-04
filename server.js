@@ -307,53 +307,154 @@ apiRouter.post('/biometrics/register', async (req, res) => {
   }
 });
 
+// 3b. GET /api/biometrics/master/:employeeId - Get master face descriptor for matching
+apiRouter.get('/biometrics/master/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+
+    const { data: master } = await supabase
+      .from('master_descriptors')
+      .select('descriptor_json')
+      .eq('employee_id', employeeId)
+      .maybeSingle();
+
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('descriptor_json, geometric_descriptor_json')
+      .eq('id', employeeId)
+      .maybeSingle();
+
+    let descriptor_json = master?.descriptor_json || emp?.descriptor_json || null;
+    let geometric_descriptor_json = emp?.geometric_descriptor_json || null;
+
+    if (typeof descriptor_json === 'string') {
+      try { descriptor_json = JSON.parse(descriptor_json); } catch {}
+    }
+    if (typeof geometric_descriptor_json === 'string') {
+      try { geometric_descriptor_json = JSON.parse(geometric_descriptor_json); } catch {}
+    }
+
+    res.json({
+      success: true,
+      employee_id: parseInt(employeeId),
+      descriptor_json,
+      geometric_descriptor_json
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // 4. POST /api/attendance/verify - Core 1-to-1 Matching Endpoint (Check-In / Check-Out)
 apiRouter.post('/attendance/verify', async (req, res) => {
   try {
-    const { employee_id, nik, scan_descriptor, location = 'Kantor Pusat', attendance_type = 'CHECK_IN' } = req.body;
+    const { employee_id, nik, name, department, scan_descriptor, location = 'Kantor Pusat', attendance_type = 'CHECK_IN', status: customStatus } = req.body;
 
-    // 1. Input Validation: Check Descriptor Format
-    if (!isValidDescriptor(scan_descriptor)) {
+    // Check if status is manual assignment (Izin, Sakit, Mangkir)
+    const isManualStatus = customStatus && ['Izin', 'Sakit', 'Mangkir'].includes(customStatus);
+
+    // 1. Input Validation: Check Descriptor Format (Only required for Hadir)
+    if (!isManualStatus && !isValidDescriptor(scan_descriptor)) {
       return res.status(400).json({
         success: false,
         message: 'Validasi Payload Gagal: scan_descriptor harus berupa Array bertipe Float32 berjumlah 128 elemen!'
       });
     }
 
-    // 2. Fetch Employee Record
-    let empQuery = supabase.from('employees').select('*');
+    // 2. Fetch Employee Record with Smart Fallback & Auto-Sync
+    let employee = null;
+
     if (employee_id) {
-      empQuery = empQuery.eq('id', employee_id);
-    } else if (nik) {
-      empQuery = empQuery.eq('nik', nik.trim());
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Wajib memberikan employee_id atau NIK untuk verifikasi 1-to-1!'
-      });
+      const { data } = await supabase.from('employees').select('*').eq('id', employee_id).single();
+      employee = data;
     }
 
-    const { data: employee, error: empErr } = await empQuery.single();
+    if (!employee && nik) {
+      const { data } = await supabase.from('employees').select('*').ilike('nik', nik.trim()).single();
+      employee = data;
+    }
 
-    if (empErr || !employee) {
+    // Auto-Sync Employee if missing in Supabase
+    if (!employee && (name || nik)) {
+      const { data: newEmp } = await supabase
+        .from('employees')
+        .insert({
+          nik: nik || `EMP-${Date.now().toString().slice(-4)}`,
+          name: name || 'Karyawan',
+          department: department || 'Umum',
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (newEmp) {
+        employee = newEmp;
+      }
+    }
+
+    if (!employee) {
       return res.status(404).json({
         success: false,
-        message: 'Error 404: ID / NIK Karyawan tidak ditemukan dalam sistem database Supabase.'
+        message: 'Error 404: Data Karyawan tidak ditemukan di Supabase. Harap pilih karyawan dari daftar.'
       });
     }
 
-    // 3. 1-to-1 Fetch: Backend HANYA mengambil 1 record master descriptor milik employee_id tersebut
-    const { data: masterRecord, error: masterErr } = await supabase
+    // Handle Manual Non-Face Status (Izin, Sakit, Mangkir)
+    if (isManualStatus) {
+      const nowTs = new Date().toISOString();
+      const logPayload = {
+        employee_id: employee.id,
+        location: `${location} [${customStatus}]`,
+        status: customStatus,
+        timestamp: nowTs,
+        euclidean_distance: 0
+      };
+
+      await supabase.from('attendance_logs').insert(logPayload);
+
+      return res.json({
+        success: true,
+        status: customStatus,
+        message: `Absensi Karyawan ${employee.name} (${employee.nik}) dengan status [${customStatus}] berhasil dicatat!`,
+        employee: {
+          id: employee.id,
+          nik: employee.nik,
+          name: employee.name,
+          department: employee.department
+        },
+        metrics: {
+          euclidean_distance: 0,
+          threshold: 0.55,
+          attendance_type: customStatus,
+          complexity: 'Manual Status Record'
+        },
+        timestamp: nowTs
+      });
+    }
+
+    // 3. 1-to-1 Fetch Master Descriptor with Auto-Register Fallback
+    let { data: masterRecord } = await supabase
       .from('master_descriptors')
       .select('descriptor_json')
       .eq('employee_id', employee.id)
       .single();
 
-    if (masterErr || !masterRecord || !masterRecord.descriptor_json) {
-      return res.status(404).json({
-        success: false,
-        message: `Error 404: Data Biometrik Master Wajah untuk karyawan "${employee.name}" (${employee.nik}) belum didaftarkan!`
-      });
+    // Auto-Register Master Descriptor in Supabase if missing
+    if (!masterRecord || !masterRecord.descriptor_json) {
+      if (isValidDescriptor(scan_descriptor)) {
+        await supabase.from('master_descriptors').upsert({
+          employee_id: employee.id,
+          descriptor_json: scan_descriptor,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'employee_id' });
+
+        masterRecord = { descriptor_json: scan_descriptor };
+      } else {
+        return res.status(404).json({
+          success: false,
+          message: `Error 404: Data Biometrik Master Wajah untuk karyawan "${employee.name}" (${employee.nik}) belum didaftarkan!`
+        });
+      }
     }
 
     let masterDescriptor = masterRecord.descriptor_json;
@@ -369,13 +470,15 @@ apiRouter.post('/attendance/verify', async (req, res) => {
     const isVerified = distance < THRESHOLD;
 
     const typeLabel = attendance_type === 'CHECK_OUT' ? 'CHECK-OUT' : 'CHECK-IN';
-    const status = isVerified ? `VERIFIKASI BERHASIL (${typeLabel})` : `VERIFIKASI GAGAL (${typeLabel})`;
+    const status = isVerified ? `Hadir (Verified)` : `VERIFIKASI GAGAL (${typeLabel})`;
+    const nowTs = new Date().toISOString();
 
     // 6. Log Attendance to Supabase Database (Pencatatan Audit Audit Log)
     const logPayload = {
       employee_id: employee.id,
       location: `${location} [${typeLabel}]`,
       status,
+      timestamp: nowTs,
       euclidean_distance: parseFloat(distance.toFixed(4))
     };
 
@@ -409,7 +512,9 @@ apiRouter.post('/attendance/verify', async (req, res) => {
           attendance_type: typeLabel,
           complexity: '1-to-1 Verification'
         },
-        timestamp: new Date().toISOString()
+        check_in_time: attendance_type === 'CHECK_IN' ? nowTs : null,
+        check_out_time: attendance_type === 'CHECK_OUT' ? nowTs : null,
+        timestamp: nowTs
       });
     } else {
       return res.status(400).json({
@@ -479,17 +584,17 @@ apiRouter.get('/attendance/logs', async (req, res) => {
     // For each CHECK-OUT, find the paired CHECK-IN of same employee same day
     for (let i = 0; i < enrichedLogs.length; i++) {
       const log = enrichedLogs[i];
-      if (log.attendance_type === 'CHECK-OUT' && log.status.includes('BERHASIL')) {
-        const checkoutTime = new Date(log.timestamp);
+      if (log.attendance_type === 'CHECK-OUT' && !log.status.includes('GAGAL')) {
+        const checkoutTime = new Date(log.timestamp || log.created_at);
         // Look for most recent CHECK-IN by same employee before this checkout
         const paired = enrichedLogs.find(l =>
           l.employee_id === log.employee_id &&
           l.attendance_type === 'CHECK-IN' &&
-          l.status.includes('BERHASIL') &&
-          new Date(l.timestamp) < checkoutTime
+          !l.status.includes('GAGAL') &&
+          new Date(l.timestamp || l.created_at) < checkoutTime
         );
         if (paired) {
-          const checkinTime = new Date(paired.timestamp);
+          const checkinTime = new Date(paired.timestamp || paired.created_at);
           const diffMs = checkoutTime - checkinTime;
           const diffHrs = Math.floor(diffMs / 3600000);
           const diffMins = Math.floor((diffMs % 3600000) / 60000);
@@ -500,6 +605,7 @@ apiRouter.get('/attendance/logs', async (req, res) => {
 
     res.json({ success: true, data: enrichedLogs });
   } catch (error) {
+    console.error('[ERROR /api/attendance/logs]:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -509,45 +615,64 @@ apiRouter.get('/attendance/status/:employeeId', async (req, res) => {
   try {
     const { employeeId } = req.params;
 
-    // Today's date range in UTC
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-
     const { data: logs, error } = await supabase
       .from('attendance_logs')
       .select('*')
       .eq('employee_id', employeeId)
-      .gte('timestamp', todayStart)
-      .lt('timestamp', tomorrowStart)
-      .order('timestamp', { ascending: true });
+      .order('id', { ascending: true });
 
     if (error) throw error;
 
-    const successLogs = (logs || []).filter(l => l.status.includes('BERHASIL'));
-    const checkIns = successLogs.filter(l => {
-      const t = l.attendance_type || '';
-      return t.includes('CHECK-IN') || (!t.includes('CHECK-OUT') && !l.location?.includes('CHECK-OUT') && !l.status?.includes('CHECK-OUT'));
+    const now = new Date();
+    const isSameDay = (d1, d2) => {
+      if (!d1 || !d2) return false;
+      const date1 = new Date(d1);
+      const date2 = new Date(d2);
+      return date1.getFullYear() === date2.getFullYear() &&
+             date1.getMonth() === date2.getMonth() &&
+             date1.getDate() === date2.getDate();
+    };
+
+    const todayLogs = (logs || []).filter(l => {
+      const ts = l.timestamp || l.created_at;
+      if (!ts) return false;
+      return isSameDay(ts, now) || Math.abs(now.getTime() - new Date(ts).getTime()) < 18 * 3600 * 1000;
     });
+
+    const successLogs = todayLogs.filter(l => {
+      const s = (l.status || '').toUpperCase();
+      return !s.includes('GAGAL') && !s.includes('REJECT');
+    });
+
+    const checkIns = successLogs.filter(l => {
+      const t = (l.attendance_type || '').toUpperCase();
+      const loc = (l.location || '').toUpperCase();
+      const st = (l.status || '').toUpperCase();
+      return t.includes('CHECK_IN') || t.includes('CHECK-IN') || (!t.includes('CHECK_OUT') && !t.includes('CHECK-OUT') && !loc.includes('CHECK-OUT') && !st.includes('CHECK-OUT'));
+    });
+
     const checkOuts = successLogs.filter(l => {
-      const t = l.attendance_type || '';
-      return t.includes('CHECK-OUT') || l.location?.includes('CHECK-OUT') || l.status?.includes('CHECK-OUT');
+      const t = (l.attendance_type || '').toUpperCase();
+      const loc = (l.location || '').toUpperCase();
+      const st = (l.status || '').toUpperCase();
+      return t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK-OUT');
     });
 
     const lastCheckIn = checkIns.length > 0 ? checkIns[checkIns.length - 1] : null;
     const lastCheckOut = checkOuts.length > 0 ? checkOuts[checkOuts.length - 1] : null;
 
-    // Employee is considered "checked in" if last check-in is more recent than last check-out
+    const getTs = (l) => (l ? new Date(l.timestamp || l.created_at || Date.now()).getTime() : 0);
+
     const checkedIn = lastCheckIn !== null && (
-      lastCheckOut === null || new Date(lastCheckIn.timestamp) > new Date(lastCheckOut.timestamp)
+      lastCheckOut === null || getTs(lastCheckIn) > getTs(lastCheckOut)
     );
 
     res.json({
       success: true,
       employee_id: parseInt(employeeId),
       checked_in: checkedIn,
-      check_in_time: lastCheckIn ? lastCheckIn.timestamp : null,
-      check_out_time: lastCheckOut ? lastCheckOut.timestamp : null
+      check_in_time: lastCheckIn ? (lastCheckIn.timestamp || lastCheckIn.created_at) : null,
+      check_out_time: lastCheckOut ? (lastCheckOut.timestamp || lastCheckOut.created_at) : null
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -606,9 +731,10 @@ apiRouter.post('/attendance/sync', async (req, res) => {
     const insertPayloads = [];
 
     for (const item of items) {
+      const typeLabel = item.attendance_type || (item.status?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
       insertPayloads.push({
         employee_id: item.employee_id,
-        location: item.location ? `${item.location} (Sync Offline)` : 'HP Mobile (Sync Offline)',
+        location: item.location ? `${item.location} (Sync Offline) [${typeLabel}]` : `HP Mobile (Sync Offline) [${typeLabel}]`,
         status: item.status || 'VERIFIKASI BERHASIL',
         euclidean_distance: item.euclidean_distance || 0,
         timestamp: item.timestamp || new Date().toISOString()

@@ -36,10 +36,6 @@ export default function DashboardLayout({ isOnline, unsyncedCount, isSyncing, on
           <main className="dashboard-content-outlet">
             <Outlet />
           </main>
-
-          <footer>
-            <p>Aplikasi Absensi Mobile Biometrik Wajah (Offline-First &amp; Auto-Sync PWA) &copy; 2026</p>
-          </footer>
         </div>
       </div>
     </div>

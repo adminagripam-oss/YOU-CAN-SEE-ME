@@ -155,16 +155,40 @@ function AppContent() {
       console.warn('[FETCH LOGS API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
     }
 
-    // Tier 2: Direct Supabase Cloud Database Query
+    // Tier 2: Direct Supabase Cloud Database Query with Employee Detail Enrichment
     if (!logData) {
       try {
-        const { data, error } = await supabase
+        const { data: rawLogs, error } = await supabase
           .from('attendance_logs')
           .select('*')
           .order('timestamp', { ascending: false });
 
-        if (!error && data) {
-          logData = data;
+        if (!error && rawLogs) {
+          const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
+          let empMap = new Map();
+          if (empIds.length > 0) {
+            const { data: empData } = await supabase
+              .from('employees')
+              .select('id, nik, name, department')
+              .in('id', empIds);
+            if (empData) {
+              empMap = new Map(empData.map((e) => [e.id, e]));
+            }
+          }
+
+          logData = rawLogs.map((log) => {
+            const emp = empMap.get(log.employee_id) || {};
+            const typeLabel =
+              log.attendance_type ||
+              (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
+            return {
+              ...log,
+              attendance_type: typeLabel,
+              nik: emp.nik || log.nik || '-',
+              name: emp.name || log.name || `Karyawan #${log.employee_id}`,
+              department: emp.department || log.department || '-'
+            };
+          });
         }
       } catch (err) {
         console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
@@ -295,7 +319,7 @@ function AppContent() {
           </Route>
         </Route>
 
-        <Route path="/analytics" element={<EnterpriseAnalyticsPage />} />
+        <Route path="/analytics" element={<EnterpriseAnalyticsPage employees={employees} logs={logs} />} />
 
         {/* PROTECTED ROUTES (Dashboard Layout + Auth Guard) */}
         <Route element={<ProtectedRoute />}>

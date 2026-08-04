@@ -1,86 +1,401 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
 export default function DashboardPage({ employees = [], logs = [], modelsLoaded }) {
   const { user } = useAuth();
-  const totalEmployees = employees.length;
-  const totalLogs = logs.length;
-  const todayLogs = logs.filter((l) => {
+  
+  // Date Filter State (default to today YYYY-MM-DD)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [selectedSegment, setSelectedSegment] = useState(null);
+
+  const totalEmployees = employees.length || 0;
+
+  // Filter logs dynamically based on selectedDate
+  const filteredLogs = logs.filter((l) => {
     if (!l.timestamp) return false;
-    const logDate = new Date(l.timestamp).toDateString();
-    return logDate === new Date().toDateString();
+    const logDateStr = new Date(l.timestamp).toISOString().split('T')[0];
+    return logDateStr === selectedDate;
   });
 
+  // Calculate 100% DYNAMIC real-time attendance counts from filteredLogs
+  // Count unique verified employee check-ins for the selectedDate
+  const verifiedEmployeeIds = new Set(
+    filteredLogs
+      .filter((l) => l.status === 'Verified' || l.status === 'Hadir' || l.status === 'Hadir (Verified)' || !l.status)
+      .map((l) => l.nik || l.employee_id)
+  );
+
+  const verifiedCount = filteredLogs.length > 0 ? (verifiedEmployeeIds.size || filteredLogs.length) : 0;
+  const izinCount = filteredLogs.filter((l) => l.status === 'Izin').length;
+  const sakitCount = filteredLogs.filter((l) => l.status === 'Sakit').length;
+  
+  // Mangkir = Total Employees - (Hadir + Izin + Sakit)
+  const mangkirCount = totalEmployees > 0 ? Math.max(totalEmployees - verifiedCount - izinCount - sakitCount, 0) : 0;
+
+  // Ratios & Percentages
+  const totalCountForCalc = totalEmployees > 0 ? totalEmployees : 1;
+  const hadirRatio = verifiedCount / totalCountForCalc;
+  const izinRatio = izinCount / totalCountForCalc;
+  const sakitRatio = sakitCount / totalCountForCalc;
+  const mangkirRatio = mangkirCount / totalCountForCalc;
+
+  const hadirPct = (hadirRatio * 100).toFixed(1).replace('.', ',');
+  const izinPct = (izinRatio * 100).toFixed(1).replace('.', ',');
+  const sakitPct = (sakitRatio * 100).toFixed(1).replace('.', ',');
+  const mangkirPct = (mangkirRatio * 100).toFixed(1).replace('.', ',');
+
+  // Donut SVG circumference calculation (2 * PI * r=35 = 219.91)
+  const C = 219.91;
+  const dashHadir = (hadirRatio * C).toFixed(2);
+  const dashIzin = (izinRatio * C).toFixed(2);
+  const dashSakit = (sakitRatio * C).toFixed(2);
+  const dashMangkir = (mangkirRatio * C).toFixed(2);
+
+  const offsetIzin = -(hadirRatio * C).toFixed(2);
+  const offsetSakit = -((hadirRatio + izinRatio) * C).toFixed(2);
+  const offsetMangkir = -((hadirRatio + izinRatio + sakitRatio) * C).toFixed(2);
+
+  // Dark Muted Color Palette
+  const workforceComposition = [
+    { name: 'TK Hadir', count: verifiedCount, percentage: hadirPct, color: '#15803d', bgTag: 'rgba(21, 128, 61, 0.12)' },
+    { name: 'Izin', count: izinCount, percentage: izinPct, color: '#1d4ed8', bgTag: 'rgba(29, 78, 216, 0.12)' },
+    { name: 'Sakit', count: sakitCount, percentage: sakitPct, color: '#b45309', bgTag: 'rgba(180, 83, 9, 0.12)' },
+    { name: 'Mangkir', count: mangkirCount, percentage: mangkirPct, color: '#b91c1c', bgTag: 'rgba(185, 28, 28, 0.12)' }
+  ];
+
+  // Quick Date Preset Handlers
+  const handleSetToday = () => setSelectedDate(todayStr);
+  const handleSetYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    setSelectedDate(d.toISOString().split('T')[0]);
+  };
+
   return (
-    <div className="dashboard-page">
-      <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <h1 style={{ fontSize: '1.35rem', fontWeight: 800 }}>
-              Selamat datang kembali, {user ? user.name : 'Pengguna'}! 👋
-            </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '4px' }}>
-              Sistem Absensi Biometrik Wajah 1-to-1 Verification Engine &amp; Supabase Cloud Sync.
-            </p>
-          </div>
-          <Link to="/absensi" className="btn btn-primary" style={{ width: 'auto', padding: '10px 18px', fontSize: '0.88rem' }}>
-            <i className="fa-solid fa-camera"></i> Buka Scanner Absensi
-          </Link>
+    <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
+      {/* DATE FILTER HEADER BAR - DYNAMIC REAL-TIME BINDING */}
+      <div className="glass-card" style={{ padding: '0.9rem 1.25rem', marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <i className="fa-solid fa-calendar-days" style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}></i>
+          <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+            Filter Tanggal:
+          </span>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-main)',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          />
+        </div>
+
+        {/* Quick Presets */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleSetToday}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              background: selectedDate === todayStr ? 'var(--accent-primary)' : 'var(--bg-primary)',
+              color: selectedDate === todayStr ? '#ffffff' : 'var(--text-muted)',
+              border: '1px solid var(--border-color)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            Hari Ini
+          </button>
+          <button
+            type="button"
+            onClick={handleSetYesterday}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              background: 'var(--bg-primary)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border-color)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            Kemarin
+          </button>
         </div>
       </div>
 
-      {/* Grid Stat Cards */}
-      <div className="grid-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-        <div className="glass-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--alert-info-bg)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-              <i className="fa-solid fa-users"></i>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Karyawan</div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{totalEmployees} Orangnya</div>
-            </div>
+      {/* 1. TOP SECTION: 5 DYNAMIC WORKFORCE KPI CARDS */}
+      <div className="grid-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.85rem' }}>
+        {/* KPI 1: Total Tenaga Kerja */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Total TK</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              TK
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {totalEmployees.toLocaleString('id-ID')}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>100% Pemanen</div>
+        </div>
+
+        {/* KPI 2: TK Hadir */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>TK Hadir</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#15803d', background: 'rgba(21, 128, 61, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(21, 128, 61, 0.25)' }}>
+              {hadirPct}%
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#15803d', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {verifiedCount.toLocaleString('id-ID')}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Verified Scan</div>
+        </div>
+
+        {/* KPI 3: Izin */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Izin</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8', background: 'rgba(29, 78, 216, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(29, 78, 216, 0.25)' }}>
+              {izinPct}%
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#1d4ed8', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {izinCount}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Izin Resmi</div>
+        </div>
+
+        {/* KPI 4: Sakit */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Sakit</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b45309', background: 'rgba(180, 83, 9, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(180, 83, 9, 0.25)' }}>
+              {sakitPct}%
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b45309', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {sakitCount}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Keterangan Dokter</div>
+        </div>
+
+        {/* KPI 5: Mangkir */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Mangkir</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185, 28, 28, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(185, 28, 28, 0.25)' }}>
+              {mangkirPct}%
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b91c1c', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {mangkirCount}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Tanpa Keterangan</div>
+        </div>
+      </div>
+
+      {/* 2. MINIMALIST PIE CHART CARD - DYNAMIC SVG RING ANGLES BINDING */}
+      <div className="glass-card" style={{ padding: '1.5rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+        {/* Minimalist Card Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.85rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <i className="fa-solid fa-chart-pie" style={{ color: 'var(--text-main)', fontSize: '1.1rem' }}></i>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)' }}>
+              Komposisi Kehadiran TK
+            </h3>
+          </div>
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+            Tanggal: {selectedDate} ({filteredLogs.length} Log Absensi)
           </div>
         </div>
 
-        <div className="glass-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--alert-success-bg)', color: 'var(--accent-success)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-              <i className="fa-solid fa-calendar-check"></i>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Absen Hari Ini</div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{todayLogs.length} Records</div>
-            </div>
-          </div>
-        </div>
+        {/* Chart & Minimalist Legend Responsive Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
+          {/* SVG Pie/Donut Chart Center */}
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', height: '220px' }}>
+            <svg viewBox="0 0 100 100" style={{ width: '200px', height: '200px', transform: 'rotate(-90deg)' }}>
+              <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-primary)" strokeWidth="15" />
+              
+              {/* Segment 1: TK Hadir */}
+              {hadirRatio > 0 && (
+                <circle
+                  cx="50" cy="50" r="35" fill="none" stroke="#15803d" strokeWidth="15"
+                  strokeDasharray={`${dashHadir} ${C}`} strokeDashoffset="0"
+                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
+                  onClick={() => setSelectedSegment(selectedSegment === 0 ? null : 0)}
+                />
+              )}
+              
+              {/* Segment 2: Izin */}
+              {izinRatio > 0 && (
+                <circle
+                  cx="50" cy="50" r="35" fill="none" stroke="#1d4ed8" strokeWidth="15"
+                  strokeDasharray={`${dashIzin} ${C}`} strokeDashoffset={`${offsetIzin}`}
+                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
+                  onClick={() => setSelectedSegment(selectedSegment === 1 ? null : 1)}
+                />
+              )}
+              
+              {/* Segment 3: Sakit */}
+              {sakitRatio > 0 && (
+                <circle
+                  cx="50" cy="50" r="35" fill="none" stroke="#b45309" strokeWidth="15"
+                  strokeDasharray={`${dashSakit} ${C}`} strokeDashoffset={`${offsetSakit}`}
+                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
+                  onClick={() => setSelectedSegment(selectedSegment === 2 ? null : 2)}
+                />
+              )}
 
-        <div className="glass-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--alert-info-bg)', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-              <i className="fa-solid fa-brain"></i>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Model AI Biometrik</div>
-              <div style={{ fontSize: '1rem', fontWeight: 800, color: modelsLoaded ? 'var(--accent-success)' : 'var(--accent-warning)' }}>
-                {modelsLoaded ? '✓ Model AI Ready' : 'Memuat AI...'}
+              {/* Segment 4: Mangkir */}
+              {mangkirRatio > 0 && (
+                <circle
+                  cx="50" cy="50" r="35" fill="none" stroke="#b91c1c" strokeWidth="15"
+                  strokeDasharray={`${dashMangkir} ${C}`} strokeDashoffset={`${offsetMangkir}`}
+                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
+                  onClick={() => setSelectedSegment(selectedSegment === 3 ? null : 3)}
+                />
+              )}
+            </svg>
+
+            {/* Center Label inside Donut Hole */}
+            <div style={{ position: 'absolute', textAlign: 'center' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-main)' }}>
+                {selectedSegment !== null ? `${workforceComposition[selectedSegment].percentage}%` : `${hadirPct}%`}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                {selectedSegment !== null ? workforceComposition[selectedSegment].name : 'TK Hadir'}
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="glass-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--bg-primary)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', border: '1px solid var(--border-color)' }}>
-              <i className="fa-solid fa-database"></i>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Log Absensi</div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{totalLogs} History</div>
-            </div>
+          {/* Minimalist Legend List with Clear Spacing */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+            {workforceComposition.map((item, index) => (
+              <div
+                key={item.name}
+                onClick={() => setSelectedSegment(selectedSegment === index ? null : index)}
+                style={{
+                  display: 'flex',
+                  justify: 'space-between',
+                  alignItems: 'center',
+                  padding: '11px 16px',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  background: selectedSegment === index ? item.bgTag : 'var(--bg-primary)',
+                  border: selectedSegment === index ? `1.5px solid ${item.color}` : '1px solid var(--border-color)',
+                  transition: 'all 0.2s ease',
+                  gap: '16px'
+                }}
+              >
+                {/* Left Side: Dot Indicator + Category Name */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: item.color, display: 'inline-block', flexShrink: 0 }}></span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                    {item.name}
+                  </span>
+                </div>
+
+                {/* Right Side: Count + Percentage WITH CLEAR SPACING */}
+                <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  <span style={{ fontSize: '0.92rem', fontWeight: 900, color: item.color }}>
+                    {item.count} Orang
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                    ({item.percentage}%)
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+      </div>
+
+      {/* 3. DYNAMIC LOGS TABLE FOR SELECTED DATE */}
+      <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+            Log Absensi ({selectedDate})
+          </h3>
+          <Link to="/logs" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
+            <i className="fa-solid fa-list-ul"></i> Lihat Semua Log
+          </Link>
+        </div>
+
+        {filteredLogs.length === 0 ? (
+          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+            <i className="fa-solid fa-calendar-xmark" style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}></i>
+            <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{selectedDate}</strong>.</p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
+                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>NIK</th>
+                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>WAKTU ABSEN</th>
+                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>STATUS</th>
+                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>AFDELING / KEBUN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLogs.slice(0, 10).map((l, idx) => {
+                  const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
+                  const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
+                  const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
+                  const displayDept = l.department || l.afdeling || empMatch?.department || 'Kebun / Operational';
+                  const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
+
+                  return (
+                    <tr key={l.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 700 }}>{displayName}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayNik}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: 600 }}>
+                        {l.timestamp
+                          ? new Date(l.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                          : '-'}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            background: isFail ? 'rgba(239, 68, 68, 0.12)' : 'rgba(21, 128, 61, 0.12)',
+                            color: isFail ? '#ef4444' : '#15803d',
+                            border: isFail ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(21, 128, 61, 0.25)'
+                          }}
+                        >
+                          {l.status || 'Hadir'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayDept}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
