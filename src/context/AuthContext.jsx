@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { supabase } from '../supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -10,36 +11,19 @@ export function AuthProvider({ children }) {
   });
   const [loading, setLoading] = useState(true);
 
-  // Check auth session on startup / page refresh (GET /api/auth/me)
-  const checkAuth = useCallback(async () => {
+  // Check auth session on startup / page refresh
+  const checkAuth = useCallback(() => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      const data = await res.json();
-
-      if (data.success && data.user) {
-        setUser(data.user);
-        localStorage.setItem('logged_in_employee', JSON.stringify(data.user));
-      } else {
-        const saved = localStorage.getItem('logged_in_employee');
-        if (saved) {
-          setUser(JSON.parse(saved));
-        } else {
-          setUser(null);
-        }
-      }
-    } catch (err) {
-      console.warn('[CHECK AUTH WARN]:', err.message);
-      const saved = localStorage.getItem('logged_in_employee');
+      const saved = localStorage.getItem('logged_in_admin');
       if (saved) {
         setUser(JSON.parse(saved));
       } else {
         setUser(null);
       }
+    } catch (err) {
+      console.warn('[CHECK AUTH WARN]:', err.message);
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -49,48 +33,43 @@ export function AuthProvider({ children }) {
     checkAuth();
   }, [checkAuth]);
 
-  // Login handler (POST /api/auth/login)
+  // Login handler
   const login = async (credentials) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(credentials),
+      const { username, password } = credentials;
+      
+      const { data: isValid, error } = await supabase.rpc('verify_admin_login', {
+        p_username: username,
+        p_password: password
       });
 
-      const data = await res.json();
-      if (data.success && data.user) {
-        setUser(data.user);
-        localStorage.setItem('logged_in_employee', JSON.stringify(data.user));
-        return { success: true, user: data.user, message: data.message };
+      if (error) throw error;
+
+      if (isValid) {
+        const adminUser = { id: 'admin-01', username, role: 'admin', name: 'Administrator' };
+        setUser(adminUser);
+        localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
+        return { success: true, user: adminUser, message: 'Login Berhasil' };
+      } else {
+        return { success: false, message: 'Username atau Password salah!' };
       }
-      return { success: false, message: data.message || 'Login gagal' };
     } catch (err) {
       console.error('[AUTH LOGIN ERROR]:', err);
       // Fallback local login if offline
-      if (credentials.employee) {
-        setUser(credentials.employee);
-        localStorage.setItem('logged_in_employee', JSON.stringify(credentials.employee));
-        return { success: true, user: credentials.employee, message: 'Login Mode Offline' };
+      if (credentials.username === 'admin' && credentials.password === 'tanaman') {
+        const adminUser = { id: 'admin-01', username: 'admin', role: 'admin', name: 'Administrator (Offline)' };
+        setUser(adminUser);
+        localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
+        return { success: true, user: adminUser, message: 'Login Mode Offline' };
       }
       return { success: false, message: err.message };
     }
   };
 
-  // Logout handler (POST /api/auth/logout)
+  // Logout handler
   const logout = async () => {
-    try {
-      await fetch(`${API_BASE_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-    } catch {
-      // Ignore network errors on logout
-    } finally {
-      setUser(null);
-      localStorage.removeItem('logged_in_employee');
-    }
+    setUser(null);
+    localStorage.removeItem('logged_in_admin');
   };
 
   const value = {

@@ -325,7 +325,34 @@ function AppContent() {
         {/* Halaman Uji Coba Order Form (Bisa diakses tanpa login) */}
         <Route path="/order-form" element={<OfflineOrderForm />} />
 
-        {/* PROTECTED ROUTES (Dashboard Layout + Auth Guard) */}
+        {/* PUBLIC ROUTES DENGAN DASHBOARD LAYOUT (Tanpa Login) */}
+        <Route
+          element={
+            <DashboardLayout
+              isOnline={isOnline}
+              unsyncedCount={unsyncedCount}
+              isSyncing={isSyncing}
+              onManualSync={handleManualSync}
+              theme={theme}
+              toggleTheme={toggleTheme}
+            />
+          }
+        >
+          <Route
+            path="/absensi"
+            element={
+              <AbsensiPage
+                employees={employees}
+                modelsLoaded={modelsLoaded}
+                modelStatusText={modelStatusText}
+                showToast={showToast}
+                refreshLogs={fetchLogs}
+              />
+            }
+          />
+        </Route>
+
+        {/* PROTECTED ROUTES (Hanya Admin) */}
         <Route element={<ProtectedRoute />}>
           <Route
             element={
@@ -349,18 +376,7 @@ function AppContent() {
                 />
               }
             />
-            <Route
-              path="/absensi"
-              element={
-                <AbsensiPage
-                  employees={employees}
-                  modelsLoaded={modelsLoaded}
-                  modelStatusText={modelStatusText}
-                  showToast={showToast}
-                  refreshLogs={fetchLogs}
-                />
-              }
-            />
+
             <Route
               path="/karyawan"
               element={
@@ -388,8 +404,8 @@ function AppContent() {
         </Route>
 
         {/* Fallback Index Route */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/absensi" replace />} />
+        <Route path="*" element={<Navigate to="/absensi" replace />} />
       </Routes>
     </>
   );
