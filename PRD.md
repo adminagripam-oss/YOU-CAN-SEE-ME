@@ -4,8 +4,8 @@
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
 - **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA & Auto-Sync Engine
 - **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
-- **Versi Dokumen**: 2.2.0 (Live Production Specifications - Mesh & Anti-Spoofing Release)
-- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage) & Dexie.js v2 (IndexedDB Local Storage)
+- **Versi Dokumen**: 2.3.0 (Security, Kiosk Mode & UI Enhancement Release)
+- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage & pgcrypto) & Dexie.js v2 (IndexedDB Local Storage)
 - **Biometric Engine**: `@vladmandic/face-api` v1.7.15 (ResNet-34, 128-d Vector) + MediaPipe Face Mesh & EAR Liveness Engine (68-Point 3D Landmarks & 40-d GFV Cosine Similarity Engine)
 - **Status System**: Live Production Specifications & Enterprise-Ready PWA
 
@@ -150,14 +150,14 @@ Sistem secara cerdas membedakan status absensi hari ini:
 
 ## 5. Persyaratan Fungsional Detail (Functional Requirements)
 
-### FR-1: Otentikasi JWT & Separasi Layout SPA
-- **Public Layout (`/login`)**:
-  - Halaman login dengan tampilan Glassmorphism responsif.
-  - Tabbed Interface: Login Akun Mandor/Admin, Ganti Password/PIN, dan Pengaturan Tema/Server Status.
-  - Mengirim request `POST /api/auth/login` untuk mendapatkan token JWT 24 jam yang disimpan di HTTP-Only Cookie dan localStorage.
-- **Protected Layout (`/dashboard`, `/absensi`, `/karyawan`, `/logs`)**:
-  - Dibungkus oleh `<ProtectedRoute>`. Jika sesi tidak valid, pengguna di-redirect otomatis ke `/login`.
-  - Memiliki **Persistent Collapsible Sidebar** dan **Persistent Topbar** dengan tombol hamburger toggle untuk tampilan mobile.
+### FR-1: Otentikasi RPC Backend & Separasi Layout SPA
+- **Public Layout (`/login` & `/absensi`)**:
+  - Halaman login murni digunakan untuk **Admin** dengan form *Username* dan *Password*. 
+  - Verifikasi keamanan sangat ketat karena tidak dilakukan di frontend, melainkan dikirim ke backend Supabase (RPC `verify_admin_login`) untuk dicocokkan dengan *hash bcrypt* menggunakan fungsi `pgcrypto`.
+  - Halaman **Scanner Absensi (`/absensi`)** bersifat publik (Mode Kios). Karyawan bisa langsung melakukan pemindaian wajah dan absen tanpa harus login ke dashboard.
+- **Protected Layout (`/dashboard`, `/karyawan`, `/logs`)**:
+  - Dibungkus oleh `<ProtectedRoute>`. Hanya Admin yang bisa mengakses area manajemen ini.
+  - Memiliki **Persistent Collapsible Sidebar** dan **Persistent Topbar** dengan tombol hamburger toggle untuk tampilan mobile. Menu navigasi akan beradaptasi secara dinamis menyembunyikan rute yang terproteksi jika pengguna belum login.
   - Badge Status Jaringan Real-Time (`LIVE` / `OFFLINE`) dan indikator antrean `Pending Sync`.
 - **Analytics Layout (`/analytics`)**:
   - Dashboard Executive & Manager Kebun yang menyajikan metric produktivitas **Kg/HK**, **Ha/HK**, persentase kehadiran afdeling, serta filter berdasarkan Kebun & Afdeling.
@@ -188,13 +188,12 @@ Sistem secara cerdas membedakan status absensi hari ini:
 
 ---
 
-## 6. Ringkasan REST API Backend Specification (`server.js` & `auth.routes.js`)
+## 6. Ringkasan REST API & RPC Backend Specification
 
-| Method | Endpoint Path | Access Level | Description |
+| Method/Tipe | Endpoint / RPC Name | Access Level | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Public | Otentikasi identitas karyawan & penandatanganan token JWT 24h. |
+| `RPC` | `verify_admin_login` | Public | Otentikasi identitas admin dari database menggunakan *pgcrypto hash matching*. |
 | `GET` | `/api/auth/me` | Protected | Verifikasi integritas sesi aktif saat *refresh* halaman (F5). |
-| `POST` | `/api/auth/logout` | Protected | Membersihkan cookie token JWT & mengakhiri sesi pengguna. |
 | `GET` | `/api/employees` | Public/Protected | Mengambil daftar seluruh karyawan beserta status biometrik master. |
 | `POST` | `/api/employees` | Protected | Menambahkan data karyawan baru ke database Supabase. |
 | `PUT` | `/api/employees/:id` | Protected | Mengubah data NIK, Nama, dan Departemen karyawan. |
@@ -202,11 +201,10 @@ Sistem secara cerdas membedakan status absensi hari ini:
 | `POST` | `/api/biometrics/register` | Protected | Mendaftarkan/memperbarui 128-float vector master biometrik dengan cek anti-duplikasi. |
 | `GET` | `/api/biometrics/master/:id` | Public/Protected | Mengambil master vector biometrik (128-d & 40-d GFV) spesifik karyawan untuk matching 1-to-1. |
 | `POST` | `/api/attendance/verify` | Public/Protected | Engine verifikasi 1-to-1 ($O(1)$) untuk Check-In & Check-Out dengan urutan transaksi transaksional. |
-| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Timezone-safe range `.gte` startOfDay & `.lte` endOfDay) mengembalikan `hasCheckedIn` & `hasCheckedOut`. |
-| `GET` | `/api/attendance/logs` | Protected | Mengambil 100 riwayat log absensi terbaru beserta kalkulasi durasi kerja. |
+| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Timezone-safe range `.gte` startOfDay & `.lte` endOfDay). |
+| `GET` | `/api/attendance/logs` | Protected | Mengambil riwayat log absensi terbaru beserta kalkulasi durasi kerja. |
 | `POST` | `/api/attendance/sync` | Protected | Endpoint batch auto-sync untuk menerima antrean absensi offline dari IndexedDB. |
-| `DELETE` | `/api/attendance/logs/:id` | Protected | Menghapus 1 session log absensi spesifik dari database. |
-| `DELETE` | `/api/attendance/logs` | Protected | Menghapus SELURUH riwayat log absensi dari database Supabase. |
+| `DELETE` | `supabase.from('attendance_logs')` | Protected | (Direct SDK) Menghapus 1 session log absensi spesifik langsung via client Supabase untuk melewati batasan Vercel Serverless. |
 
 ---
 
@@ -215,7 +213,15 @@ Sistem secara cerdas membedakan status absensi hari ini:
 ### 7.1 Skema Relasional Supabase PostgreSQL Cloud
 
 ```sql
--- 1. Tabel Master Karyawan / Pemanen (Employees)
+-- 1. Tabel Master Admin (Keamanan Hash pgcrypto)
+CREATE TABLE IF NOT EXISTS public.admins (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    username text UNIQUE NOT NULL,
+    password_hash text NOT NULL,
+    created_at timestamptz DEFAULT now()
+);
+
+-- 2. Tabel Master Karyawan / Pemanen (Employees)
 CREATE TABLE IF NOT EXISTS public.employees (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     nik VARCHAR(50) UNIQUE NOT NULL,
@@ -330,3 +336,9 @@ Untuk menjamin vektor master selalu tersedia saat karyawan dipilih:
 - **Node-Only Biometric Overlay**: Menampilkan titik node halus (`r = 1.8px`) dan garis kontur tipis yang mengalir natural mengikuti pergerakan kamera tanpa *double mirror transform*.
 - **Eliminasi Tampilan Berantakan**: Menghapus teks overlay persen di atas wajah, garis ukur putus-putus, crosshair, serta preview kotak Base64 di bawah kamera.
 - **Single Toast Notification**: Menghapus pesan alert ganda di bawah tombol; notifikasi absensi hanya dimunculkan 1 kali melalui Pop-up Toast di sudut kanan atas layar.
+
+### 10.6 Keamanan Admin & Kiosk Mode (Release v2.3.0)
+- **Admin RPC Authentication**: Menghapus sistem login karyawan via *dropdown*. Login diubah sepenuhnya menggunakan form Username/Password yang diverifikasi via RPC (`verify_admin_login`) ke *hash* `pgcrypto` di Supabase. Ini memastikan kredensial tidak bocor di frontend.
+- **Open Scanner (Mode Kios)**: Layar Scanner Absensi dikeluarkan dari rute yang dilindungi (Protected Route). Hal ini memfasilitasi penggunaan aplikasi dalam bentuk Kios stasioner (seperti di pos penjagaan atau tablet yang disandarkan), di mana karyawan bisa langsung memindai wajah tanpa harus punya akun untuk masuk ke dashboard.
+- **Mobile-First Camera UI**: Menambahkan tombol pergantian (*Switch Camera*) antara kamera depan (*user*) dan belakang (*environment*) dengan penyesuaian otomatis cermin (*mirroring/transform scaleX*). Rasio tampilan kamera juga diperbesar menjadi `3:4` pada layar *mobile* sehingga mengisi tinggi layar (mirip *interface* aplikasi kamera bawaan HP).
+- **Direct SDK Integration untuk Perintah Hapus**: API untuk menghapus log absensi dipindahkan murni menggunakan pemanggilan SDK Supabase (`supabase.from('attendance_logs').delete()`) di komponen klien untuk menghindari error konektivitas Vercel ke port backend yang terisolasi.
