@@ -84,40 +84,43 @@ function AppContent() {
   // Fetch Employees (3-Tier Fallback: Express API -> Direct Supabase -> IndexedDB Cache)
   const fetchEmployees = useCallback(async () => {
     let empData = null;
+    let dataSource = 'api';
 
     // Tier 1: Express REST API Endpoint
     try {
       const res = await fetch(`${API_BASE_URL}/api/employees`);
       const data = await res.json();
-      if (data.success && data.data && data.data.length > 0) {
+      if (data.success && data.data) {
         empData = data.data;
       }
     } catch (err) {
       console.warn('[FETCH EMPLOYEES API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
+      dataSource = 'supabase';
     }
 
     // Tier 2: Direct Supabase Cloud Database Query (HTTPS)
-    if (!empData || empData.length === 0) {
+    if (!empData) {
       try {
         const { data, error } = await supabase
           .from('employees')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           empData = data;
           console.log('[SUPABASE DIRECT] Fetched', data.length, 'employees directly from cloud');
         }
       } catch (err) {
         console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err.message);
+        dataSource = 'indexeddb';
       }
     }
 
     // Tier 3: IndexedDB Local Offline Cache
-    if (!empData || empData.length === 0) {
+    if (!empData) {
       try {
         const cached = await db.employees_cache.toArray();
-        if (cached && cached.length > 0) {
+        if (cached) {
           empData = cached;
           console.log('[INDEXEDDB CACHE] Loaded', cached.length, 'cached employees offline');
         }
@@ -126,18 +129,25 @@ function AppContent() {
       }
     }
 
-    if (empData && empData.length > 0) {
+    if (empData) {
       setEmployees(empData);
+      
       // Persist to IndexedDB local cache for mobile offline support
-      try {
-        await db.employees_cache.bulkPut(empData);
-        for (const emp of empData) {
-          if (emp.descriptor_json || emp.descriptor) {
-            await cacheUserMasterVector(emp);
+      // Only clear and rebuild if we got fresh data from API or Supabase
+      if (dataSource !== 'indexeddb') {
+        try {
+          await db.employees_cache.clear();
+          if (empData.length > 0) {
+            await db.employees_cache.bulkPut(empData);
+            for (const emp of empData) {
+              if (emp.descriptor_json || emp.descriptor) {
+                await cacheUserMasterVector(emp);
+              }
+            }
           }
+        } catch (cacheErr) {
+          console.warn('[INDEXEDDB BULK PUT WARN]:', cacheErr.message);
         }
-      } catch (cacheErr) {
-        console.warn('[INDEXEDDB BULK PUT WARN]:', cacheErr.message);
       }
     }
   }, []);
