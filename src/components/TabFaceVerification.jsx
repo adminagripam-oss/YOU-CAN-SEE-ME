@@ -100,6 +100,48 @@ function extractGFV(landmarks) {
     return null;
   }
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW HELPERS (Lighting & Audio)
+// ═══════════════════════════════════════════════════════════════════════════
+const offscreenCanvas = document.createElement('canvas');
+offscreenCanvas.width = 32;
+offscreenCanvas.height = 32;
+const offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+
+function checkLightingQuality(videoEl) {
+  if (!videoEl || videoEl.readyState < 2 || videoEl.videoWidth === 0) return "";
+  try {
+    offscreenCtx.drawImage(videoEl, 0, 0, 32, 32);
+    const imgData = offscreenCtx.getImageData(0, 0, 32, 32).data;
+    let sum = 0;
+    for (let i = 0; i < imgData.length; i += 4) {
+      sum += (0.299 * imgData[i] + 0.587 * imgData[i+1] + 0.114 * imgData[i+2]);
+    }
+    const avg = sum / (32 * 32);
+    if (avg < 40) return "Area Terlalu Gelap";
+    if (avg > 240) return "Terlalu Silau / Backlight";
+    return "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function playBeepSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+  } catch (e) {}
+}
 
 /**
  * Weighted Euclidean distance between two GFVs.
@@ -322,23 +364,29 @@ function drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, matched) {
  * @param {CanvasRenderingContext2D} ctx  Already translated+scaled for mirroring
  * @param {Array}   pts          68 {x,y} landmark points
  * @param {boolean} livenessDone
- * @param {boolean} matchDone
+ * @param {number}  detectionScore
  */
-function drawGeometricMesh(ctx, pts, livenessDone, matchDone) {
+function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
   if (!pts || pts.length < 68) return;
 
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
 
-  const [R, G, B] = matchDone
-    ? [16,  185, 129]   // ✓ matched — emerald green
-    : livenessDone
-      ? [59,  130, 246]  // liveness done — blue
-      : [56,  189, 248]; // idle — sky blue
+  let R, G, B;
+  if (livenessDone) {
+    // Liveness Validated -> Green
+    [R, G, B] = [50, 255, 50];
+  } else if (detectionScore >= 0.70) {
+    // Score >= 0.70 but Liveness not satisfied -> Yellow
+    [R, G, B] = [255, 200, 50];
+  } else {
+    // Score < 0.70 -> Red
+    [R, G, B] = [255, 50, 50];
+  }
 
   // 1. Scanner Corner Brackets
-  drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, matchDone);
+  drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
 
   // 2. Facial Contour Lines (Subtle Connecting Lines)
   const drawContourPath = (indices, closed = false) => {
@@ -350,8 +398,8 @@ function drawGeometricMesh(ctx, pts, livenessDone, matchDone) {
       else ctx.lineTo(p.x, p.y);
     });
     if (closed) ctx.closePath();
-    ctx.strokeStyle = `rgba(${R},${G},${B},0.35)`;
-    ctx.lineWidth   = 0.9;
+    ctx.strokeStyle = `rgba(${R},${G},${B},0.5)`;
+    ctx.lineWidth   = 0.5; // Setebal 0.5px
     ctx.stroke();
   };
 
@@ -369,8 +417,8 @@ function drawGeometricMesh(ctx, pts, livenessDone, matchDone) {
     const p = pts[i];
     if (!p) continue;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.8, 0, 2 * Math.PI);
-    ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.85)`;
+    ctx.arc(p.x, p.y, 1.5, 0, 2 * Math.PI); // Maksimal 1.5px
+    ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.8)`;
     ctx.fill();
   }
 }
@@ -517,6 +565,7 @@ export default function TabFaceVerification({
 
   // Camera settings
   const [facingMode, setFacingMode] = useState('user'); // 'user' = depan, 'environment' = belakang
+  const [lightingWarning, setLightingWarning] = useState('');
 
   // Attendance & Timer States
   const [attendanceStatus, setAttendanceStatus] = useState({
@@ -864,7 +913,10 @@ export default function TabFaceVerification({
 
   // ── Camera + Geometric Detection Loop ──────────────────────────────────
   useEffect(() => {
-    let intervalId = null;
+    let animationFrameId = null;
+    let isDetecting = false;
+    let isRunning = true;
+
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -877,138 +929,167 @@ export default function TabFaceVerification({
         });
         if (videoRef.current) { videoRef.current.srcObject = stream; streamRef.current = stream; }
 
-        intervalId = setInterval(async () => {
-          if (!videoRef.current || videoRef.current.readyState !== 4 || !window.faceapi || !modelsLoaded) return;
+        async function detectionLoop() {
+          if (!isRunning) return;
 
-          const opts = window.faceapi.nets.tinyFaceDetector?.isLoaded
-            ? new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
-            : new window.faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+          if (!isDetecting && videoRef.current && videoRef.current.readyState === 4 && window.faceapi && modelsLoaded) {
+            isDetecting = true;
+            
+            try {
+              // 1. Lighting Check
+              const lightingStatus = checkLightingQuality(videoRef.current);
+              setLightingWarning(lightingStatus);
 
-          const detection = await window.faceapi
-            .detectSingleFace(videoRef.current, opts)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
+              const opts = window.faceapi.nets.tinyFaceDetector?.isLoaded
+                ? new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+                : new window.faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
 
-          const W = videoRef.current?.clientWidth  || 640;
-          const H = videoRef.current?.clientHeight || 480;
-          const ctx = canvasRef.current?.getContext('2d');
-          if (!ctx) return;
+              const detection = await window.faceapi
+                .detectSingleFace(videoRef.current, opts)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
 
-          if (!detection) {
-            currentDescRef.current = null; currentGFVRef.current = null;
-            setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
-            ctx.clearRect(0, 0, W, H);
-            return;
-          }
+              const W = videoRef.current?.clientWidth  || 640;
+              const H = videoRef.current?.clientHeight || 480;
+              const ctx = canvasRef.current?.getContext('2d');
+              
+              if (ctx) {
+                // Clear Canvas on every frame to prevent memory leak
+                ctx.clearRect(0, 0, W, H);
 
-          // Store live descriptors
-          currentDescRef.current = Array.from(detection.descriptor);
-          const liveGFV = extractGFV(detection.landmarks);
-          currentGFVRef.current = liveGFV;
+                if (!detection) {
+                  currentDescRef.current = null; currentGFVRef.current = null;
+                  setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+                } else {
+                  // Store live descriptors
+                  currentDescRef.current = Array.from(detection.descriptor);
+                  const liveGFV = extractGFV(detection.landmarks);
+                  currentGFVRef.current = liveGFV;
 
-          // ── EYE ASPECT RATIO (EAR) BLINK DETECTION (ANTI-SPOOFING) ─────────
-          const landmarksPos = detection.landmarks.positions;
-          const leftEAR  = calculateEAR(landmarksPos, FA_LEFT_EYE);
-          const rightEAR = calculateEAR(landmarksPos, FA_RIGHT_EYE);
-          const avgEAR   = (leftEAR + rightEAR) / 2.0;
-          setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
+                  // ── EYE ASPECT RATIO (EAR) BLINK DETECTION (ANTI-SPOOFING) ─────────
+                  const landmarksPos = detection.landmarks.positions;
+                  const leftEAR  = calculateEAR(landmarksPos, FA_LEFT_EYE);
+                  const rightEAR = calculateEAR(landmarksPos, FA_RIGHT_EYE);
+                  const avgEAR   = (leftEAR + rightEAR) / 2.0;
+                  setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
-          if (!livenessVerifiedRef.current) {
-            setLivenessStatusMsg('Silakan kedipkan mata Anda untuk verifikasi');
+                  if (!livenessVerifiedRef.current) {
+                    setLivenessStatusMsg('Silakan kedipkan mata Anda untuk verifikasi');
 
-            // Blink transition: EAR < 0.21 (Closed) -> EAR > 0.24 (Reopened)
-            if (avgEAR < 0.21) {
-              eyeClosedRef.current = true;
-            } else if (eyeClosedRef.current && avgEAR > 0.24) {
-              // BLINK DETECTED & VERIFIED!
-              eyeClosedRef.current = false;
-              livenessVerifiedRef.current = true;
-              setLivenessVerified(true);
-              setIsLiveHuman(true);
-              setLivenessStatusMsg('Liveness Terverifikasi!');
+                    // Blink transition: EAR < 0.21 (Closed) -> EAR > 0.24 (Reopened)
+                    if (avgEAR < 0.21) {
+                      eyeClosedRef.current = true;
+                    } else if (eyeClosedRef.current && avgEAR > 0.24) {
+                      // BLINK DETECTED & VERIFIED!
+                      eyeClosedRef.current = false;
+                      livenessVerifiedRef.current = true;
+                      setLivenessVerified(true);
+                      setIsLiveHuman(true);
+                      setLivenessStatusMsg('Liveness Terverifikasi!');
 
-              const base64Str = captureVideoFrameBase64(videoRef.current);
-              if (base64Str) setCapturedBase64Image(base64Str);
-            }
+                      const base64Str = captureVideoFrameBase64(videoRef.current);
+                      if (base64Str) setCapturedBase64Image(base64Str);
+                    }
 
-            // Backup 3D Head Rotation (Toleh Kiri & Kanan)
-            const jaw  = detection.landmarks.getJawOutline();
-            const nose = detection.landmarks.getNose();
-            if (jaw?.length >= 17 && nose?.length >= 4) {
-              const dL = Math.abs(nose[3].x - jaw[0].x);
-              const dR = Math.abs(jaw[16].x  - nose[3].x);
-              const tw = dL + dR;
-              if (tw > 0) {
-                const yaw = (dL - dR) / tw;
-                if (yaw >  0.20) headTurnRef.current.left  = true;
-                if (yaw < -0.20) headTurnRef.current.right = true;
+                    // Backup 3D Head Rotation (Toleh Kiri & Kanan)
+                    const jaw  = detection.landmarks.getJawOutline();
+                    const nose = detection.landmarks.getNose();
+                    if (jaw?.length >= 17 && nose?.length >= 4) {
+                      const dL = Math.abs(nose[3].x - jaw[0].x);
+                      const dR = Math.abs(jaw[16].x  - nose[3].x);
+                      const tw = dL + dR;
+                      if (tw > 0) {
+                        const yaw = (dL - dR) / tw;
+                        if (yaw >  0.20) headTurnRef.current.left  = true;
+                        if (yaw < -0.20) headTurnRef.current.right = true;
+                      }
+                    }
+                    const nL = headTurnRef.current.left, nR = headTurnRef.current.right;
+                    setHeadTurnState({ left: nL, right: nR });
+                    if (nL && nR && !livenessVerifiedRef.current) {
+                      livenessVerifiedRef.current = true;
+                      setLivenessVerified(true);
+                      setIsLiveHuman(true);
+                      setLivenessStatusMsg('Liveness Terverifikasi!');
+                      const base64Str = captureVideoFrameBase64(videoRef.current);
+                      if (base64Str) setCapturedBase64Image(base64Str);
+                    }
+                  }
+
+                  // ── Step 2: Geometric 1-to-1 Match via Cosine Similarity ───────────
+                  if (liveGFV || currentDescRef.current) {
+                    let pct = 0, matched = false;
+
+                    // Case A: 40-d GFV Cosine Match
+                    if (masterGFVRef.current && Array.isArray(masterGFVRef.current) && liveGFV && masterGFVRef.current.length === liveGFV.length) {
+                      const cosSim = cosineSimilarity(liveGFV, masterGFVRef.current);
+                      pct     = cosineToMatchPct(cosSim);
+                      matched = cosSim >= 0.85; // Match threshold 85% (0.85)
+                    }
+                    // Case B: 128-d Face-API Vector Cosine Match
+                    else if (masterVectorRef.current && currentDescRef.current && masterVectorRef.current.length === 128 && currentDescRef.current.length === 128) {
+                      const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
+                      pct     = cosineToMatchPct(cosSim);
+                      matched = cosSim >= 0.80; // Match threshold 80% for 128-d cosine similarity
+
+                      // Auto-cache GFV for future scans if 128-d match passes
+                      if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeId) {
+                        masterGFVRef.current = liveGFV;
+                        setGfvMode(true);
+                        cacheGeometricVector(selectedEmployeeId, liveGFV).catch(() => {});
+                      }
+                    }
+
+                    matchRateRef.current = pct; isMatchedRef.current = matched;
+                    setMatchRate(pct); setIsMatched(matched);
+
+                    if (matched && !hasBeepedRef.current) {
+                      hasBeepedRef.current = true;
+                      playBeepSound();
+                    }
+                  }
+
+                  // ── Draw Biometric Node Overlay ─────────────────────────────────
+                  window.faceapi.matchDimensions(canvasRef.current, { width: W, height: H });
+                  const resized = window.faceapi.resizeResults(detection, { width: W, height: H });
+
+                  // Draw landmark nodes directly.
+                  drawGeometricMesh(
+                    ctx,
+                    resized.landmarks.positions,
+                    livenessVerifiedRef.current,
+                    detection.detection.score
+                  );
+                }
               }
+            } catch (err) {
+              console.warn("Detection loop error:", err);
             }
-            const nL = headTurnRef.current.left, nR = headTurnRef.current.right;
-            setHeadTurnState({ left: nL, right: nR });
-            if (nL && nR && !livenessVerifiedRef.current) {
-              livenessVerifiedRef.current = true;
-              setLivenessVerified(true);
-              setIsLiveHuman(true);
-              setLivenessStatusMsg('Liveness Terverifikasi!');
-              const base64Str = captureVideoFrameBase64(videoRef.current);
-              if (base64Str) setCapturedBase64Image(base64Str);
-            }
+            
+            isDetecting = false;
           }
-
-          // ── Step 2: Geometric 1-to-1 Match via Cosine Similarity ───────────
-          if (liveGFV || currentDescRef.current) {
-            let pct = 0, matched = false;
-
-            // Case A: 40-d GFV Cosine Match
-            if (masterGFVRef.current && Array.isArray(masterGFVRef.current) && liveGFV && masterGFVRef.current.length === liveGFV.length) {
-              const cosSim = cosineSimilarity(liveGFV, masterGFVRef.current);
-              pct     = cosineToMatchPct(cosSim);
-              matched = cosSim >= 0.85; // Match threshold 85% (0.85)
-            }
-            // Case B: 128-d Face-API Vector Cosine Match
-            else if (masterVectorRef.current && currentDescRef.current && masterVectorRef.current.length === 128 && currentDescRef.current.length === 128) {
-              const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-              pct     = cosineToMatchPct(cosSim);
-              matched = cosSim >= 0.80; // Match threshold 80% for 128-d cosine similarity
-
-              // Auto-cache GFV for future scans if 128-d match passes
-              if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeId) {
-                masterGFVRef.current = liveGFV;
-                setGfvMode(true);
-                cacheGeometricVector(selectedEmployeeId, liveGFV).catch(() => {});
-              }
-            }
-
-            matchRateRef.current = pct; isMatchedRef.current = matched;
-            setMatchRate(pct); setIsMatched(matched);
+          
+          if (isRunning) {
+            animationFrameId = requestAnimationFrame(detectionLoop);
           }
-
-          // ── Draw Biometric Node Overlay ─────────────────────────────────
-          window.faceapi.matchDimensions(canvasRef.current, { width: W, height: H });
-          const resized = window.faceapi.resizeResults(detection, { width: W, height: H });
-
-          ctx.clearRect(0, 0, W, H);
-
-          // Draw landmark nodes directly.
-          // CSS 'transform: scaleX(-1)' on canvas.overlay-canvas handles GPU video mirroring.
-          drawGeometricMesh(
-            ctx,
-            resized.landmarks.positions,
-            livenessVerifiedRef.current,
-            isMatchedRef.current
-          );
-
-          // Match% label — Un-flip text so it reads normally under CSS scaleX(-1)
-          const box    = resized.detection.box;
-        }, 200);
-      } catch (err) { console.error('[CAMERA ERROR]:', err); }
+        }
+        
+        animationFrameId = requestAnimationFrame(detectionLoop);
+        
+      } catch (err) {
+        setHasCameraError(true);
+        console.error('Kamera error:', err);
+      }
     }
 
     startCamera();
+
     return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      isRunning = false;
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
     };
   }, [modelsLoaded, selectedEmployeeId, facingMode]);
 
@@ -1308,6 +1389,33 @@ export default function TabFaceVerification({
                   ) : (
                     <>{livenessStatusMsg}</>
                   )}
+                </div>
+              )}
+
+              {/* Lighting Warning Badge */}
+              {lightingWarning && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 10,
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    background: 'rgba(239, 68, 68, 0.9)', // Red warning
+                    color: '#ffffff',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    pointerEvents: 'none',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <i className="fa-solid fa-triangle-exclamation"></i> {lightingWarning}
                 </div>
               )}
 
