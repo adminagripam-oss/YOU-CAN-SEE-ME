@@ -455,13 +455,22 @@ function confirmDeleteEmployee(id, name) {
           method: 'DELETE'
         });
 
-        const data = await res.json();
-        if (data.success) {
+        const text = await res.text();
+        let data = {};
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            console.warn('Failed to parse response:', text);
+          }
+        }
+
+        if (res.ok || data.success) {
           showShadcnToast('Penghapusan Berhasil', `Karyawan "${name}" telah berhasil dihapus dari database .`, 'success');
           await loadEmployeeList();
           loadAttendanceLogs();
         } else {
-          showShadcnToast('Gagal Menghapus', data.message, 'error');
+          showShadcnToast('Gagal Menghapus', data.message || `Error HTTP ${res.status}: Respons kosong`, 'error');
         }
       } catch (err) {
         console.error('[DELETE ERROR]:', err);
