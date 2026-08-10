@@ -5,12 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgriFace - Sistem Absensi Biometrik Wajah Perkebunan (1-to-1 Engine)</title>
   
+  <!-- Script untuk membersihkan PWA Service Worker otomatis -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister();
+          console.log('ServiceWorker unregistered automatically to clear cache.');
+        }
+      });
+    }
+  </script>
+
+  <!-- PWA Setup -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="apple-touch-icon" href="/icon-192x192.png">
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   
   <!-- FontAwesome Icons -->
+  <link rel="icon" type="image/png" href="/logo.png" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- face-api.js CDN -->
@@ -19,8 +37,8 @@
   <!-- MediaPipe Camera Utils & Face Mesh CDN (468/478 3D Landmarks & Iris Tracking) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script type="module" crossorigin src="./assets/index-Ck0FIE2H.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CdXzJ9lD.css">
+  <script type="module" crossorigin src="/assets/index-BM0IDOek.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-XZBkWmxP.css">
 </head>
 <body>
   <div id="root"></div>
