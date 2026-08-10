@@ -640,81 +640,60 @@ export default function TabFaceVerification({
     }
   };
 
-  // Load stored GFV + 128-d for selected employee (4-Tier Fetch: IndexedDB -> Server API -> Supabase Direct -> Props)
+  // Load stored vector for selected employee (4-Tier Fetch: IndexedDB -> Server API -> Supabase Direct -> Props)
   const loadMasterVectors = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
     try {
-      let gfv = null;
       let vec = null;
 
       // Tier 1: Local IndexedDB Cache
       const cached = await getCachedUserMasterVector(empId);
       if (cached) {
-        gfv = cached.geometric_descriptor_json;
-        vec = cached.descriptor_json;
+        vec = cached.descriptor_json || cached.face_vector;
       }
 
       // Tier 2: Fetch from Express Backend API Endpoint
-      if (!gfv && !vec) {
+      if (!vec) {
         try {
           const res = await fetch(`${API_BASE_URL}/api/biometrics/master/${empId}`);
           if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-              gfv = data.geometric_descriptor_json;
-              vec = data.descriptor_json;
-            }
+            const text = await res.text();
+            try {
+              const data = JSON.parse(text);
+              if (data.success) {
+                vec = data.face_vector || data.descriptor_json;
+              }
+            } catch (jsonErr) {}
           }
         } catch (e) {
           console.warn('[LOAD MASTER API WARN]:', e.message);
         }
       }
 
-      // Tier 3: Fetch directly from Supabase Cloud Database
-      if (!gfv && !vec) {
+      // Tier 3: Fetch directly from Supabase Cloud Database (master_biometrics)
+      if (!vec) {
         try {
           const { data: masterData } = await supabase
-            .from('master_descriptors')
-            .select('descriptor_json')
+            .from('master_biometrics')
+            .select('face_vector')
             .eq('employee_id', empId)
             .maybeSingle();
 
-          const { data: empData } = await supabase
-            .from('employees')
-            .select('descriptor_json, geometric_descriptor_json')
-            .eq('id', empId)
-            .maybeSingle();
-
-          gfv = empData?.geometric_descriptor_json || null;
-          vec = masterData?.descriptor_json || empData?.descriptor_json || null;
+          vec = masterData?.face_vector || null;
         } catch (e) {
           console.warn('[LOAD MASTER SUPABASE WARN]:', e.message);
         }
       }
 
-      // Tier 4: Fallback to employees list from props
-      if (!gfv && !vec) {
+      // Tier 4: Fallback to employees list from props (legacy support if needed)
+      if (!vec) {
         const empObj = employees.find((it) => String(it.id) === String(empId));
-        gfv = empObj?.geometric_descriptor_json;
-        vec = empObj?.descriptor_json || empObj?.facial_descriptor;
+        vec = empObj?.face_vector || empObj?.descriptor_json || empObj?.facial_descriptor;
       }
 
       // Parse & Store in Refs
-      if (gfv) {
-        if (typeof gfv === 'string') {
-          try { gfv = JSON.parse(gfv); } catch {}
-        }
-        if (Array.isArray(gfv)) {
-          masterGFVRef.current = gfv;
-          setGfvMode(true);
-        } else {
-          masterGFVRef.current = null;
-          setGfvMode(false);
-        }
-      } else {
-        masterGFVRef.current = null;
-        setGfvMode(false);
-      }
+      masterGFVRef.current = null; // No longer used
+      setGfvMode(false);
 
       if (vec) {
         if (typeof vec === 'string') {
@@ -730,7 +709,7 @@ export default function TabFaceVerification({
       }
 
       // Auto-cache into IndexedDB if retrieved from Cloud/API
-      if ((gfv || vec) && !cached) {
+      if (vec && !cached) {
         const empObj = employees.find((it) => String(it.id) === String(empId));
         await cacheUserMasterVector({
           employee_id: empId,
@@ -738,14 +717,13 @@ export default function TabFaceVerification({
           name: empObj?.name || '',
           department: empObj?.department || '',
           descriptor_json: masterVectorRef.current,
-          geometric_descriptor_json: masterGFVRef.current,
+          face_vector: masterVectorRef.current
         });
       }
 
-      console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | GFV: ${masterGFVRef.current ? masterGFVRef.current.length + '-d' : 'NO'} | 128-d: ${masterVectorRef.current ? 'YES' : 'NO'}`);
+      console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | Vector: ${masterVectorRef.current ? masterVectorRef.current.length + '-dim' : 'NO'}`);
     } catch (err) {
       console.error('[LOAD MASTER VECTORS ERROR]:', err);
-      masterGFVRef.current = null;
       masterVectorRef.current = null;
     }
   };
@@ -759,8 +737,11 @@ export default function TabFaceVerification({
     try {
       const res = await fetch(`${API_BASE_URL}/api/attendance/status/${empId}`);
       if (res.ok) {
-        const data = await res.json();
-        if (data?.success) statusData = data;
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          if (data?.success) statusData = data;
+        } catch (jsonErr) {}
       }
     } catch (err) {
       console.warn('[FETCH ATTENDANCE STATUS API WARN - FALLBACK TO SUPABASE/DEXIE]:', err.message);

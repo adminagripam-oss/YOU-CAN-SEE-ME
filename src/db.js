@@ -42,7 +42,8 @@ export async function cacheUserMasterVector(user) {
       nik: user.nik,
       name: user.name,
       department: user.department,
-      descriptor_json: user.descriptor_json || user.descriptor || null,
+      descriptor_json: user.descriptor_json || user.descriptor || user.face_vector || null,
+      face_vector: user.face_vector || user.descriptor_json || user.descriptor || null,
       geometric_descriptor_json: user.geometric_descriptor_json || null,
       updated_at: new Date().toISOString(),
     };
