@@ -173,7 +173,7 @@ apiRouter.post('/employees', async (req, res) => {
 apiRouter.put('/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { nik, name, department } = req.body;
+    const { nik, name, department, face_vector } = req.body;
 
     if (!nik || !name || !department) {
       return res.status(400).json({ success: false, message: 'NIK, Nama, dan Departemen wajib diisi!' });
@@ -191,6 +191,18 @@ apiRouter.put('/employees/:id', async (req, res) => {
         return res.status(400).json({ success: false, message: 'NIK sudah digunakan oleh karyawan lain!' });
       }
       throw error;
+    }
+
+    // Optional: Update Biometrics if face_vector is provided
+    if (face_vector) {
+      const { error: bioErr } = await supabase
+        .from('master_biometrics')
+        .update({ face_vector })
+        .eq('employee_id', id);
+
+      if (bioErr) {
+        console.warn('[WARN] Failed to update biometrics for employee', id, bioErr);
+      }
     }
 
     res.json({
