@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Human } from '@vladmandic/human';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { API_BASE_URL } from './config';
 import { supabase } from './supabaseClient';
@@ -261,22 +262,20 @@ function AppContent() {
     fetchEmployees();
     fetchLogs();
 
-    async function loadFaceApiModels() {
-      if (!window.faceapi) {
-        setModelStatusText('Menunggu library face-api.js...');
-        return;
-      }
-
+    async function loadHumanModels() {
       try {
-        setModelStatusText('Memuat Model AI Biometrik Wajah (ResNet-34)...');
-        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-
-        await Promise.all([
-          window.faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-          window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          window.faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          window.faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        ]);
+        setModelStatusText('Memuat Model AI Biometrik Wajah (Human/MediaPipe)...');
+        
+        const humanConfig = {
+          modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
+          face: { enabled: true, mesh: true, iris: true, description: true },
+          body: { enabled: false },
+          hand: { enabled: false },
+          object: { enabled: false },
+          gesture: { enabled: false },
+        };
+        const human = new Human(humanConfig);
+        await human.load();
 
         setModelsLoaded(true);
         setModelStatusText('Model AI Siap!');
@@ -286,7 +285,7 @@ function AppContent() {
       }
     }
 
-    loadFaceApiModels();
+    loadHumanModels();
   }, [fetchEmployees, fetchLogs]);
 
   return (

@@ -1,5 +1,5 @@
 const CACHE_NAME = 'face-attendance-v5';
-const MODEL_CACHE_NAME = 'face-api-models-v5';
+const MODEL_CACHE_NAME = 'human-models-v6';
 
 // Static assets to pre-cache on install
 const PRECACHE_ASSETS = [
@@ -8,7 +8,7 @@ const PRECACHE_ASSETS = [
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js',
+  'https://cdn.jsdelivr.net/npm/@vladmandic/human/dist/human.js',
   'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js',
   'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js'
 ];
@@ -56,9 +56,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy 1: Face-API Models & MediaPipe CDN Cache (Cache-First)
+  // Strategy 1: Human Models & MediaPipe CDN Cache (Cache-First)
   if (
-    url.href.includes('vladmandic/face-api') ||
+    url.href.includes('vladmandic/human') ||
     url.href.includes('mediapipe') ||
     url.href.includes('/model/')
   ) {
