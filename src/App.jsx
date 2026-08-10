@@ -404,7 +404,7 @@ function AppContent() {
         </Route>
 
         {/* Fallback Index Route */}
-        <Route path="/" element={<Navigate to="/absensi" replace />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/absensi" replace />} />
       </Routes>
     </>
