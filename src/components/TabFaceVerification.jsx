@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
-import { getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
+import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -704,12 +704,12 @@ export default function TabFaceVerification({
     }
   };
 
-  // Fetch attendance status (2-Tier: Express API -> Direct Supabase)
+  // Fetch attendance status (Multi-Tier: Express API -> Direct Supabase -> Dexie.js Queue + State Guard)
   const fetchAttendanceStatus = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
     let statusData = null;
 
-    // Tier 1: Express REST API
+    // 1. Tier 1: Express REST API
     try {
       const res = await fetch(`${API_BASE_URL}/api/attendance/status/${empId}`);
       if (res.ok) {
@@ -717,16 +717,16 @@ export default function TabFaceVerification({
         if (data?.success) statusData = data;
       }
     } catch (err) {
-      console.warn('[FETCH ATTENDANCE STATUS API WARN - FALLBACK TO SUPABASE DIRECT]:', err.message);
+      console.warn('[FETCH ATTENDANCE STATUS API WARN - FALLBACK TO SUPABASE/DEXIE]:', err.message);
     }
 
-    // Tier 2: Direct Supabase Cloud Query Fallback
+    // 2. Tier 2: Direct Supabase Cloud Query Fallback
     if (!statusData) {
       try {
         const { data: logs, error } = await supabase
           .from('attendance_logs')
           .select('*')
-          .eq('employee_id', empId)
+          .eq('employee_id', parseInt(empId))
           .order('timestamp', { ascending: false });
 
         if (!error && logs) {
@@ -752,13 +752,9 @@ export default function TabFaceVerification({
             const t = (l.attendance_type || '').toUpperCase();
             const loc = (l.location || '').toUpperCase();
             const st = (l.status || '').toUpperCase();
-            return (
-              t.includes('CHECK_IN') ||
-              t.includes('CHECK-IN') ||
-              loc.includes('CHECK-IN') ||
-              st.includes('CHECK-IN') ||
-              (st.includes('HADIR') && !loc.includes('CHECK-OUT') && !st.includes('CHECK-OUT') && !t.includes('CHECK_OUT'))
-            );
+            const isOut = t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK_OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK_OUT') || st.includes('CHECK-OUT');
+            const isIn = t.includes('CHECK_IN') || t.includes('CHECK-IN') || loc.includes('CHECK_IN') || loc.includes('CHECK-IN') || st.includes('HADIR') || st.includes('CHECK_IN') || st.includes('CHECK-IN');
+            return isIn && !isOut;
           });
 
           const checkOuts = successLogs.filter((l) => {
@@ -768,7 +764,9 @@ export default function TabFaceVerification({
             return (
               t.includes('CHECK_OUT') ||
               t.includes('CHECK-OUT') ||
+              loc.includes('CHECK_OUT') ||
               loc.includes('CHECK-OUT') ||
+              st.includes('CHECK_OUT') ||
               st.includes('CHECK-OUT')
             );
           });
@@ -782,6 +780,8 @@ export default function TabFaceVerification({
                 new Date(lastCheckOut.timestamp || lastCheckOut.created_at));
 
           statusData = {
+            hasCheckedIn: !!lastCheckIn,
+            hasCheckedOut: !!lastCheckOut,
             checked_in: isCheckedIn,
             check_in_time: lastCheckIn ? lastCheckIn.timestamp || lastCheckIn.created_at : null,
             check_out_time: lastCheckOut ? lastCheckOut.timestamp || lastCheckOut.created_at : null,
@@ -792,14 +792,71 @@ export default function TabFaceVerification({
       }
     }
 
-    if (statusData) {
-      setAttendanceStatus({
-        checkedIn: !!statusData.checked_in,
-        checkInTime: statusData.check_in_time || null,
-        checkOutTime: statusData.check_out_time || null,
-        loaded: true,
+    // Determine base statuses
+    let hasCheckedIn = statusData?.hasCheckedIn ?? statusData?.checked_in ?? false;
+    let hasCheckedOut = statusData?.hasCheckedOut ?? false;
+    let checkInTime = statusData?.check_in_time || null;
+    let checkOutTime = statusData?.check_out_time || null;
+
+    // 3. Tier 3: Dexie.js (IndexedDB) Sync Queue Inspection (Offline Override Rule)
+    try {
+      const now = new Date();
+      const isSameDay = (d1, d2) => {
+        if (!d1 || !d2) return false;
+        const date1 = new Date(d1);
+        const date2 = new Date(d2);
+        return (
+          date1.getFullYear() === date2.getFullYear() &&
+          date1.getMonth() === date2.getMonth() &&
+          date1.getDate() === date2.getDate()
+        );
+      };
+
+      const queuedLogs = await db.attendance_sync_queue.toArray();
+      const localEmpLogs = queuedLogs.filter((item) => {
+        const matchEmp = String(item.employee_id) === String(empId);
+        const ts = item.timestamp || item.created_at;
+        return matchEmp && ts && isSameDay(ts, now);
       });
+
+      const localCheckIn = localEmpLogs.find((item) => {
+        const type = (item.attendance_type || item.status || '').toUpperCase();
+        return type.includes('CHECK_IN') || type.includes('CHECK-IN') || type.includes('HADIR');
+      });
+
+      const localCheckOut = localEmpLogs.find((item) => {
+        const type = (item.attendance_type || item.status || '').toUpperCase();
+        return type.includes('CHECK_OUT') || type.includes('CHECK-OUT');
+      });
+
+      if (localCheckIn) {
+        hasCheckedIn = true;
+        if (!checkInTime) checkInTime = localCheckIn.timestamp || localCheckIn.created_at;
+      }
+
+      if (localCheckOut) {
+        hasCheckedOut = true;
+        hasCheckedIn = true;
+        if (!checkOutTime) checkOutTime = localCheckOut.timestamp || localCheckOut.created_at;
+      }
+    } catch (dexieErr) {
+      console.warn('[DEXIE CHECK QUEUE WARN]:', dexieErr.message);
     }
+
+    // 4. State Guard: Prevent state revert if state is already checkedIn
+    setAttendanceStatus((prev) => {
+      const isCurrentlyCheckedIn = prev.checkedIn && !prev.checkOutTime;
+      const targetCheckedIn = isCurrentlyCheckedIn
+        ? true
+        : ((hasCheckedIn || prev.checkedIn) && !hasCheckedOut && !checkOutTime && !prev.checkOutTime);
+
+      return {
+        checkedIn: targetCheckedIn,
+        checkInTime: checkInTime || prev.checkInTime,
+        checkOutTime: checkOutTime || prev.checkOutTime,
+        loaded: true,
+      };
+    });
   };
 
   // ── Camera + Geometric Detection Loop ──────────────────────────────────
@@ -947,25 +1004,42 @@ export default function TabFaceVerification({
     };
   }, [modelsLoaded, selectedEmployeeId]);
 
-  // ── Submit Attendance ──────────────────────────────────────────────────
+  // ── Submit Attendance (Transactional async/await) ──────────────────────
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
-    if (!selectedEmployeeId) { showToast('Pilih Karyawan','Harap pilih karyawan terlebih dahulu!','error'); return; }
+    if (!selectedEmployeeId) {
+      showToast('Pilih Karyawan', 'Harap pilih karyawan terlebih dahulu!', 'error');
+      return;
+    }
 
     const targetEmp = selectedEmployee || {
-      id: selectedEmployeeId, nik: nikInput,
-      name: currentUser?.name || 'Karyawan', department: currentUser?.department || 'Umum',
+      id: selectedEmployeeId,
+      nik: nikInput,
+      name: currentUser?.name || 'Karyawan',
+      department: currentUser?.department || 'Umum',
     };
 
+    // 1. Hitung & Validasi Biometrik Euclidean Distance
+    let euclideanDist = 0.1;
     if (attendanceType === 'CHECK_IN' && selectedStatus === 'Hadir') {
-      if (!currentDescRef.current) { showToast('Deteksi Gagal','Wajah belum terdeteksi!','error'); return; }
-      if (!livenessVerifiedRef.current) { showToast('Liveness Ditolak','Toleh kepala ke Kiri kemudian Kanan!','error'); return; }
-      if (!isMatchedRef.current) {
-        showToast('Wajah Tidak Cocok',`Skor ${matchRateRef.current.toFixed(1)}% — tidak sesuai data karyawan!`,'error');
+      if (!currentDescRef.current) {
+        showToast('Deteksi Gagal', 'Wajah belum terdeteksi!', 'error');
         return;
+      }
+      if (!livenessVerifiedRef.current) {
+        showToast('Liveness Ditolak', 'Harap lakukan verifikasi kedip mata!', 'error');
+        return;
+      }
+      if (!isMatchedRef.current) {
+        showToast('Wajah Tidak Cocok', `Skor ${matchRateRef.current.toFixed(1)}% — tidak sesuai data karyawan!`, 'error');
+        return;
+      }
+      if (matchRateRef.current > 0) {
+        euclideanDist = parseFloat((1.0 - (matchRateRef.current / 100)).toFixed(4));
       }
     }
 
-    setIsSubmitting(true); setLastResultMsg(null);
+    setIsSubmitting(true);
+    setLastResultMsg(null);
 
     const typeLabel = selectedStatus !== 'Hadir'
       ? selectedStatus.toUpperCase()
@@ -977,108 +1051,115 @@ export default function TabFaceVerification({
         const pos = await new Promise((res, rej) =>
           navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 })
         );
-        userLat = pos.coords.latitude; userLng = pos.coords.longitude;
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
         locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
-      } catch { locationStr = 'HP Mobile (GPS)'; }
+      } catch {
+        locationStr = 'HP Mobile (GPS)';
+      }
     }
+
+    // 2. Lakukan Operasi Database (API / Supabase Direct / Dexie.js Offline)
+    let isSuccess = false;
+    let successMsg = '';
+    let recordTimestamp = new Date().toISOString();
 
     if (navigator.onLine) {
       try {
         const payload = {
-          employee_id:     parseInt(selectedEmployeeId),
-          nik:             (targetEmp.nik || nikInput).trim() || null,
+          employee_id: parseInt(selectedEmployeeId),
+          nik: (targetEmp.nik || nikInput).trim() || null,
           scan_descriptor: currentDescRef.current || [],
-          location:        `${locationStr} - GeoMesh Scanner`,
+          location: `${locationStr} - GeoMesh Scanner`,
           attendance_type: attendanceType,
-          status:          selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+          status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
         };
-        const res  = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+
+        const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
         });
+
         const data = await res.json();
-        showToast(data.success ? 'Absensi Berhasil' : 'Absensi Gagal', data.message, data.success ? 'success' : 'error');
-        if (data.success) {
-          const now = data.timestamp || new Date().toISOString();
-          setAttendanceStatus(prev => ({
-            checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),
-            checkInTime: attendanceType === 'CHECK_IN' ? (data.check_in_time || now) : prev.checkInTime,
-            checkOutTime: attendanceType === 'CHECK_OUT' ? (data.check_out_time || now) : prev.checkOutTime,
-            loaded: true,
-          }));
-          setTimeout(async () => {
-            await fetchAttendanceStatus(selectedEmployeeId);
-          }, 300);
-          if (onVerificationSuccess) onVerificationSuccess();
+        if (res.ok && data.success) {
+          isSuccess = true;
+          successMsg = data.message || `Absensi ${typeLabel} berhasil dicatat!`;
+          recordTimestamp = data.timestamp || recordTimestamp;
+        } else {
+          throw new Error(data.message || `API Gagal mencatat ${typeLabel}`);
         }
-        setIsSubmitting(false); return;
-      } catch (err) {
-        console.warn('[ONLINE VERIFY API WARN – FALLBACK TO DIRECT SUPABASE INSERT]:', err.message);
+      } catch (apiErr) {
+        console.warn('[ONLINE API WARN – FALLBACK TO SUPABASE/DEXIE]:', apiErr.message);
+
+        // Fallback A: Direct Supabase Cloud Insert
         try {
-          const now = new Date().toISOString();
           const logPayload = {
             employee_id: parseInt(selectedEmployeeId),
             location: `${locationStr} - GeoMesh Scanner [Supabase Direct] [${attendanceType}]`,
             status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
-            euclidean_distance: 0.1,
-            timestamp: now
+            euclidean_distance: euclideanDist,
+            timestamp: recordTimestamp,
           };
           const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
           if (!sbErr) {
-            showToast('Absensi Berhasil', `Absensi ${attendanceType} berhasil dicatat di Supabase Cloud!`, 'success');
-            setAttendanceStatus(prev => ({
-              checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),
-              checkInTime: attendanceType === 'CHECK_IN' ? now : prev.checkInTime,
-              checkOutTime: attendanceType === 'CHECK_OUT' ? now : prev.checkOutTime,
-              loaded: true,
-            }));
-            if (onVerificationSuccess) onVerificationSuccess();
-            setIsSubmitting(false);
-            return;
+            isSuccess = true;
+            successMsg = `Absensi ${typeLabel} berhasil dicatat di Supabase Cloud!`;
+          } else {
+            throw new Error(sbErr.message);
           }
         } catch (sbEx) {
-          console.warn('[SUPABASE DIRECT INSERT WARN]:', sbEx.message);
+          console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
         }
       }
     }
 
-    // Offline fallback
-    try {
-      let isVerified = false, cosSimScore = 0;
-      if (selectedStatus !== 'Hadir') { isVerified = true; cosSimScore = 1.0; }
-      else if (masterGFVRef.current && currentGFVRef.current) {
-        cosSimScore = cosineSimilarity(currentGFVRef.current, masterGFVRef.current);
-        isVerified  = cosSimScore >= 0.85;
-      } else if (masterVectorRef.current && currentDescRef.current) {
-        cosSimScore = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-        isVerified  = cosSimScore >= 0.82;
-      } else {
-        isVerified  = isMatchedRef.current;
-        cosSimScore = matchRateRef.current / 100;
+    // Fallback B: Offline Dexie.js Sync Queue
+    if (!isSuccess) {
+      try {
+        await queueOfflineAttendance({
+          employee_id: targetEmp.id,
+          nik: targetEmp.nik,
+          name: targetEmp.name,
+          department: targetEmp.department,
+          timestamp: recordTimestamp,
+          location: `${locationStr} [OFFLINE DEXIE]`,
+          lat: userLat,
+          lng: userLng,
+          status: selectedStatus === 'Hadir' ? 'Hadir (Verified) [OFFLINE]' : selectedStatus,
+          attendance_type: attendanceType,
+          euclidean_distance: euclideanDist,
+        });
+
+        isSuccess = true;
+        successMsg = `Absensi ${typeLabel} berhasil disimpan di penyimpanan offline (Dexie.js)!`;
+      } catch (dexieErr) {
+        console.error('[DEXIE QUEUE ERROR]:', dexieErr);
       }
+    }
 
-      await queueOfflineAttendance({
-        employee_id: targetEmp.id, nik: targetEmp.nik, name: targetEmp.name, department: targetEmp.department,
-        timestamp: new Date().toISOString(), location: `${locationStr} [OFFLINE COSINE]`,
-        lat: userLat, lng: userLng,
-        status: isVerified ? 'Hadir (Verified) [OFFLINE]' : 'VERIFIKASI GAGAL [OFFLINE]',
-        attendance_type: attendanceType, euclidean_distance: parseFloat((1.0 - cosSimScore).toFixed(4)),
-      });
+    // 3. JANGAN update Toast/State sebelum Database Benar-Benar Sukses
+    if (isSuccess) {
+      showToast('Absensi Berhasil', successMsg, 'success');
 
-      const msg = isVerified ? `Absensi ${typeLabel} berhasil disimpan offline.` : `Wajah tidak cocok dengan data geometri lokal.`;
-      setLastResultMsg({ success: isVerified, title: isVerified ? `✓ ${typeLabel} OFFLINE` : `✗ VERIFIKASI GAGAL`, message: msg });
-      showToast(isVerified ? 'Absensi Offline OK' : 'Offline Gagal', msg, isVerified ? 'success' : 'error');
+      setAttendanceStatus((prev) => ({
+        checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),
+        checkInTime: attendanceType === 'CHECK_IN' ? recordTimestamp : prev.checkInTime,
+        checkOutTime: attendanceType === 'CHECK_OUT' ? recordTimestamp : prev.checkOutTime,
+        loaded: true,
+      }));
 
-      if (isVerified) {
-        const now = new Date().toISOString();
-        setAttendanceStatus(prev => ({
-          ...prev, checkedIn: attendanceType === 'CHECK_IN',
-          checkInTime:  attendanceType === 'CHECK_IN'  ? now : prev.checkInTime,
-          checkOutTime: attendanceType === 'CHECK_OUT' ? now : prev.checkOutTime, loaded: true,
-        }));
-        if (onVerificationSuccess) onVerificationSuccess();
-      }
-    } catch (e) { console.error('[OFFLINE ERROR]:', e); }
-    finally     { setIsSubmitting(false); }
+      setTimeout(async () => {
+        await fetchAttendanceStatus(selectedEmployeeId);
+      }, 300);
+
+      if (onVerificationSuccess) onVerificationSuccess();
+    } else {
+      // Jika Catch Error: Tampilkan Toast Gagal & Biarkan Mode Tombol Tetap (State Tidak Berubah)
+      showToast('Absensi Gagal', `Gagal memproses absensi ${typeLabel}. Silakan coba lagi.`, 'error');
+    }
+
+    setIsSubmitting(false);
   };
 
   // Computed helpers
@@ -1273,26 +1354,26 @@ export default function TabFaceVerification({
 
           {/* ── ATTENDANCE BUTTON ──────────────────────────────────── */}
           <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexDirection: 'column' }}>
-            {!attendanceStatus.checkedIn ? (
-              /* CHECK IN BUTTON */
+            {attendanceStatus.checkInTime && attendanceStatus.checkOutTime ? (
+              /* ALREADY COMPLETED BOTH CHECK-IN & CHECK-OUT */
               <button
                 type="button"
-                className="btn btn-primary"
-                disabled={
-                  isSubmitting ||
-                  !selectedEmployeeId ||
-                  (isHadir && (!canCheckIn || isSubmitting))
-                }
-                onClick={() => handleVerifySubmit('CHECK_IN')}
-                style={{ padding: '13px', fontSize: '0.9rem', fontWeight: 800 }}
+                className="btn"
+                disabled
+                style={{
+                  padding: '13px',
+                  fontSize: '0.9rem',
+                  fontWeight: 800,
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  cursor: 'not-allowed',
+                }}
               >
-                {isSubmitting ? (
-                  <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
-                ) : (
-                  <><i className="fa-solid fa-circle-check"></i> PROSES ABSENSI (CHECK-IN)</>
-                )}
+                <i className="fa-solid fa-lock"></i> Absensi Selesai Hari Ini
               </button>
-            ) : !attendanceStatus.checkOutTime ? (
+            ) : (attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? (
               /* CHECK OUT BUTTON — shown after successful check-in */
               <button
                 type="button"
@@ -1317,23 +1398,23 @@ export default function TabFaceVerification({
                 )}
               </button>
             ) : (
-              /* ALREADY COMPLETED BOTH CHECK-IN & CHECK-OUT */
+              /* CHECK IN BUTTON */
               <button
                 type="button"
-                className="btn"
-                disabled
-                style={{
-                  padding: '13px',
-                  fontSize: '0.9rem',
-                  fontWeight: 800,
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-muted)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  cursor: 'not-allowed',
-                }}
+                className="btn btn-primary"
+                disabled={
+                  isSubmitting ||
+                  !selectedEmployeeId ||
+                  (isHadir && (!canCheckIn || isSubmitting))
+                }
+                onClick={() => handleVerifySubmit('CHECK_IN')}
+                style={{ padding: '13px', fontSize: '0.9rem', fontWeight: 800 }}
               >
-                <i className="fa-solid fa-lock"></i> Absensi Selesai Hari Ini
+                {isSubmitting ? (
+                  <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
+                ) : (
+                  <><i className="fa-solid fa-circle-check"></i> PROSES ABSENSI (CHECK-IN)</>
+                )}
               </button>
             )}
           </div>

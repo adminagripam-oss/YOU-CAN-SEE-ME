@@ -610,67 +610,67 @@ apiRouter.get('/attendance/logs', async (req, res) => {
   }
 });
 
-// 6. GET /api/attendance/status/:employeeId - Check today's attendance state
+// 6. GET /api/attendance/status/:employeeId - Check today's attendance state (Timezone Safe)
 apiRouter.get('/attendance/status/:employeeId', async (req, res) => {
   try {
     const { employeeId } = req.params;
 
+    // Setel rentang waktu lokal 00:00:00 s/d 23:59:59 lalu konversi ke ISOString (UTC)
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const startOfDayIso = startOfDay.toISOString();
+    const endOfDayIso = endOfDay.toISOString();
+
+    // Query Supabase dengan filter .gte() dan .lte() pada kolom TIMESTAMPTZ 'timestamp'
     const { data: logs, error } = await supabase
       .from('attendance_logs')
       .select('*')
-      .eq('employee_id', employeeId)
-      .order('id', { ascending: true });
+      .eq('employee_id', parseInt(employeeId))
+      .gte('timestamp', startOfDayIso)
+      .lte('timestamp', endOfDayIso)
+      .order('timestamp', { ascending: true });
 
     if (error) throw error;
 
-    const now = new Date();
-    const isSameDay = (d1, d2) => {
-      if (!d1 || !d2) return false;
-      const date1 = new Date(d1);
-      const date2 = new Date(d2);
-      return date1.getFullYear() === date2.getFullYear() &&
-             date1.getMonth() === date2.getMonth() &&
-             date1.getDate() === date2.getDate();
-    };
-
-    const todayLogs = (logs || []).filter(l => {
-      const ts = l.timestamp || l.created_at;
-      if (!ts) return false;
-      return isSameDay(ts, now) || Math.abs(now.getTime() - new Date(ts).getTime()) < 18 * 3600 * 1000;
-    });
-
-    const successLogs = todayLogs.filter(l => {
+    const validLogs = (logs || []).filter(l => {
       const s = (l.status || '').toUpperCase();
       return !s.includes('GAGAL') && !s.includes('REJECT');
     });
 
-    const checkIns = successLogs.filter(l => {
+    const checkIns = validLogs.filter(l => {
       const t = (l.attendance_type || '').toUpperCase();
       const loc = (l.location || '').toUpperCase();
       const st = (l.status || '').toUpperCase();
-      return t.includes('CHECK_IN') || t.includes('CHECK-IN') || (!t.includes('CHECK_OUT') && !t.includes('CHECK-OUT') && !loc.includes('CHECK-OUT') && !st.includes('CHECK-OUT'));
+      const isOut = t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK_OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK_OUT') || st.includes('CHECK-OUT');
+      const isIn = t.includes('CHECK_IN') || t.includes('CHECK-IN') || loc.includes('CHECK_IN') || loc.includes('CHECK-IN') || st.includes('HADIR') || st.includes('VERIFIED');
+      return isIn && !isOut;
     });
 
-    const checkOuts = successLogs.filter(l => {
+    const checkOuts = validLogs.filter(l => {
       const t = (l.attendance_type || '').toUpperCase();
       const loc = (l.location || '').toUpperCase();
       const st = (l.status || '').toUpperCase();
-      return t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK-OUT');
+      return t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK_OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK_OUT') || st.includes('CHECK-OUT');
     });
 
     const lastCheckIn = checkIns.length > 0 ? checkIns[checkIns.length - 1] : null;
     const lastCheckOut = checkOuts.length > 0 ? checkOuts[checkOuts.length - 1] : null;
 
-    const getTs = (l) => (l ? new Date(l.timestamp || l.created_at || Date.now()).getTime() : 0);
-
-    const checkedIn = lastCheckIn !== null && (
-      lastCheckOut === null || getTs(lastCheckIn) > getTs(lastCheckOut)
-    );
+    const hasCheckedIn = checkIns.length > 0;
+    const hasCheckedOut = checkOuts.length > 0;
 
     res.json({
       success: true,
       employee_id: parseInt(employeeId),
-      checked_in: checkedIn,
+      hasCheckedIn,
+      hasCheckedOut,
+      status: {
+        hasCheckedIn,
+        hasCheckedOut
+      },
+      checked_in: hasCheckedIn && !hasCheckedOut,
       check_in_time: lastCheckIn ? (lastCheckIn.timestamp || lastCheckIn.created_at) : null,
       check_out_time: lastCheckOut ? (lastCheckOut.timestamp || lastCheckOut.created_at) : null
     });

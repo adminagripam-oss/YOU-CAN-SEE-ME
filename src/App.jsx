@@ -17,6 +17,7 @@ import LogsPage from './pages/LogsPage';
 import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
+import OfflineOrderForm from './components/OfflineOrderForm';
 
 function AppContent() {
   const [employees, setEmployees] = useState([]);
@@ -320,6 +321,9 @@ function AppContent() {
         </Route>
 
         <Route path="/analytics" element={<EnterpriseAnalyticsPage employees={employees} logs={logs} />} />
+        
+        {/* Halaman Uji Coba Order Form (Bisa diakses tanpa login) */}
+        <Route path="/order-form" element={<OfflineOrderForm />} />
 
         {/* PROTECTED ROUTES (Dashboard Layout + Auth Guard) */}
         <Route element={<ProtectedRoute />}>
