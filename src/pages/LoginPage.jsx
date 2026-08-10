@@ -36,7 +36,8 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
       <div className="login-pattern-container">
         
         {/* Header Title from Figma Design */}
-        <div className="glass-login-title">
+        <div className="glass-login-title" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <img src="/logo.png" alt="AgriFace Logo" style={{ width: '80px', height: '80px', objectFit: 'contain', marginBottom: '15px' }} />
           <h1 className="figma-login-title">Welcome Admin!</h1>
           <p className="figma-login-subtitle">
             Masuk untuk kelola karyawan dan riwayat absensi.
