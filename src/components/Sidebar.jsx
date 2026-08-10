@@ -69,7 +69,10 @@ export default function Sidebar({ isOpen, onClose }) {
             <button
               type="button"
               className="sidebar-logout-btn"
-              onClick={logout}
+              onClick={async () => {
+                await logout();
+                navigate('/login');
+              }}
               title="Keluar dari Sesi Login"
             >
               <i className="fa-solid fa-right-from-bracket"></i>
