@@ -65,7 +65,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
-          {isAuthenticated ? (
+          {isAuthenticated && (
             <button
               type="button"
               className="sidebar-logout-btn"
@@ -74,17 +74,6 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <i className="fa-solid fa-right-from-bracket"></i>
               <span>Logout</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="sidebar-logout-btn"
-              onClick={() => navigate('/login')}
-              title="Masuk sebagai Admin"
-              style={{ background: 'var(--accent-primary)' }}
-            >
-              <i className="fa-solid fa-right-to-bracket"></i>
-              <span>Login Admin</span>
             </button>
           )}
         </div>

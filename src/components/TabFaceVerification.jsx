@@ -1109,7 +1109,8 @@ export default function TabFaceVerification({
 
     // 1. Hitung & Validasi Biometrik Euclidean Distance
     let euclideanDist = 0.1;
-    if (attendanceType === 'CHECK_IN' && selectedStatus === 'Hadir') {
+    // Wajibkan scan wajah baik saat CHECK-IN maupun CHECK-OUT untuk status Hadir
+    if ((attendanceType === 'CHECK_IN' || attendanceType === 'CHECK_OUT') && selectedStatus === 'Hadir') {
       if (!currentDescRef.current) {
         showToast('Deteksi Gagal', 'Wajah belum terdeteksi!', 'error');
         return;
@@ -1241,6 +1242,13 @@ export default function TabFaceVerification({
       setTimeout(async () => {
         await fetchAttendanceStatus(selectedEmployeeId);
       }, 300);
+
+      // Reset sesi/pilihan karyawan setelah 2.5 detik agar mesin siap untuk karyawan selanjutnya
+      setTimeout(() => {
+        setSelectedEmployeeId('');
+        setNikInput('');
+        setAttendanceStatus({ checkedIn: false, checkInTime: null, checkOutTime: null, loaded: false });
+      }, 2500);
 
       if (onVerificationSuccess) onVerificationSuccess();
     } else {
