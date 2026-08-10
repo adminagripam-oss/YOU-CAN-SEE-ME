@@ -515,6 +515,9 @@ export default function TabFaceVerification({
   const [isMatched, setIsMatched] = useState(false);
   const [gfvMode, setGfvMode]     = useState(false);
 
+  // Camera settings
+  const [facingMode, setFacingMode] = useState('user'); // 'user' = depan, 'environment' = belakang
+
   // Attendance & Timer States
   const [attendanceStatus, setAttendanceStatus] = useState({
     checkedIn: false, checkInTime: null, checkOutTime: null, loaded: false,
@@ -865,7 +868,12 @@ export default function TabFaceVerification({
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: 'user' }, audio: false,
+          video: { 
+            width: { ideal: 640 }, 
+            height: { ideal: 720 }, 
+            facingMode: facingMode 
+          }, 
+          audio: false,
         });
         if (videoRef.current) { videoRef.current.srcObject = stream; streamRef.current = stream; }
 
@@ -1002,7 +1010,7 @@ export default function TabFaceVerification({
       if (intervalId) clearInterval(intervalId);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
-  }, [modelsLoaded, selectedEmployeeId]);
+  }, [modelsLoaded, selectedEmployeeId, facingMode]);
 
   // ── Submit Attendance (Transactional async/await) ──────────────────────
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
@@ -1221,9 +1229,49 @@ export default function TabFaceVerification({
 
           {/* Live Camera */}
           <div className="form-group">
-            <div className="webcam-wrapper">
-              <video ref={videoRef} autoPlay muted playsInline></video>
-              <canvas ref={canvasRef} className="overlay-canvas"></canvas>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label style={{ margin: 0 }}>Kamera Scanner</label>
+              <button 
+                type="button" 
+                onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+                style={{ 
+                  padding: '6px 14px', 
+                  borderRadius: '20px', 
+                  border: 'none', 
+                  background: 'var(--accent-primary)', 
+                  color: '#fff', 
+                  fontSize: '0.8rem', 
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 6px rgba(99,102,241,0.4)'
+                }}
+              >
+                <i className="fa-solid fa-camera-rotate"></i> Ganti Kamera
+              </button>
+            </div>
+            
+            <div 
+              className="webcam-wrapper" 
+              style={{ 
+                height: window.innerWidth < 768 ? '65vh' : 'auto', 
+                aspectRatio: window.innerWidth < 768 ? '3/4' : '4/3' 
+              }}
+            >
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                muted 
+                playsInline
+                style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
+              ></video>
+              <canvas 
+                ref={canvasRef} 
+                className="overlay-canvas"
+                style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
+              ></canvas>
 
               {/* Top Floating Badge Prompt */}
               {isHadir && (
