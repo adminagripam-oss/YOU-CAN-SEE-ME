@@ -589,6 +589,8 @@ export default function TabFaceVerification({
   const matchRateRef         = useRef(0);
   const isMatchedRef         = useRef(false);
   const timerRef             = useRef(null);
+  const hasBeepedRef         = useRef(false);
+  const selectedEmployeeIdRef = useRef('');
 
   const selectedEmployee = employees.find((e) => String(e.id) === String(selectedEmployeeId));
 
@@ -625,8 +627,10 @@ export default function TabFaceVerification({
   const handleEmployeeSelect = async (e) => {
     const empId = e.target.value;
     setSelectedEmployeeId(empId);
+    selectedEmployeeIdRef.current = empId; // Simpan ke ref agar detection loop membaca versi terbaru tanpa restart
     headTurnRef.current        = { left: false, right: false };
     livenessVerifiedRef.current = false;
+    hasBeepedRef.current       = false; // Reset beep state
     masterGFVRef.current       = null;
     masterVectorRef.current    = null;
     matchRateRef.current       = 0;
@@ -1033,10 +1037,10 @@ export default function TabFaceVerification({
                       matched = cosSim >= 0.80; // Match threshold 80% for 128-d cosine similarity
 
                       // Auto-cache GFV for future scans if 128-d match passes
-                      if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeId) {
+                      if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeIdRef.current) {
                         masterGFVRef.current = liveGFV;
                         setGfvMode(true);
-                        cacheGeometricVector(selectedEmployeeId, liveGFV).catch(() => {});
+                        cacheGeometricVector(selectedEmployeeIdRef.current, liveGFV).catch(() => {});
                       }
                     }
 
@@ -1091,7 +1095,7 @@ export default function TabFaceVerification({
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [modelsLoaded, selectedEmployeeId, facingMode]);
+  }, [modelsLoaded, facingMode]); // Dihapus selectedEmployeeId agar kamera tidak restart saat ganti karyawan
 
   // ── Submit Attendance (Transactional async/await) ──────────────────────
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
