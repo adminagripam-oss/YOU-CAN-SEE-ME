@@ -1,9 +1,10 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ isOpen, onClose }) {
-  const { logout } = useAuth();
+  const { isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <>
@@ -19,14 +20,16 @@ export default function Sidebar({ isOpen, onClose }) {
         </div>
 
         <nav className="sidebar-nav">
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            onClick={() => window.innerWidth < 768 && onClose && onClose()}
-          >
-            <i className="fa-solid fa-chart-line"></i>
-            <span>Dashboard</span>
-          </NavLink>
+          {isAuthenticated && (
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+              onClick={() => window.innerWidth < 768 && onClose && onClose()}
+            >
+              <i className="fa-solid fa-chart-line"></i>
+              <span>Dashboard</span>
+            </NavLink>
+          )}
 
           <NavLink
             to="/absensi"
@@ -37,36 +40,53 @@ export default function Sidebar({ isOpen, onClose }) {
             <span>Scanner Absensi</span>
           </NavLink>
 
-          <NavLink
-            to="/karyawan"
-            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            onClick={() => window.innerWidth < 768 && onClose && onClose()}
-          >
-            <i className="fa-solid fa-users"></i>
-            <span>Data Karyawan</span>
-          </NavLink>
+          {isAuthenticated && (
+            <>
+              <NavLink
+                to="/karyawan"
+                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+                onClick={() => window.innerWidth < 768 && onClose && onClose()}
+              >
+                <i className="fa-solid fa-users"></i>
+                <span>Data Karyawan</span>
+              </NavLink>
 
-          <NavLink
-            to="/logs"
-            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            onClick={() => window.innerWidth < 768 && onClose && onClose()}
-          >
-            <i className="fa-solid fa-clock-rotate-left"></i>
-            <span>Log Absensi</span>
-          </NavLink>
+              <NavLink
+                to="/logs"
+                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+                onClick={() => window.innerWidth < 768 && onClose && onClose()}
+              >
+                <i className="fa-solid fa-clock-rotate-left"></i>
+                <span>Log Absensi</span>
+              </NavLink>
+            </>
+          )}
         </nav>
 
-        {/* Sidebar Footer replaced with Logout Button */}
+        {/* Sidebar Footer */}
         <div className="sidebar-footer">
-          <button
-            type="button"
-            className="sidebar-logout-btn"
-            onClick={logout}
-            title="Keluar dari Sesi Login"
-          >
-            <i className="fa-solid fa-right-from-bracket"></i>
-            <span>Logout</span>
-          </button>
+          {isAuthenticated ? (
+            <button
+              type="button"
+              className="sidebar-logout-btn"
+              onClick={logout}
+              title="Keluar dari Sesi Login"
+            >
+              <i className="fa-solid fa-right-from-bracket"></i>
+              <span>Logout Admin</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-logout-btn"
+              onClick={() => navigate('/login')}
+              title="Masuk sebagai Admin"
+              style={{ background: 'var(--accent-primary)' }}
+            >
+              <i className="fa-solid fa-right-to-bracket"></i>
+              <span>Login Admin</span>
+            </button>
+          )}
         </div>
       </aside>
     </>
