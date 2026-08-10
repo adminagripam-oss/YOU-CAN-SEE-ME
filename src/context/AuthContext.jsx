@@ -62,7 +62,7 @@ export function AuthProvider({ children }) {
         localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
         return { success: true, user: adminUser, message: 'Login Mode Offline' };
       }
-      return { success: false, message: err.message };
+      return { success: false, message: 'Akun tidak ditemukan atau koneksi bermasalah.' };
     }
   };
 
