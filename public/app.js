@@ -9,12 +9,13 @@ const API_BASE_URL = (window.location.origin && window.location.origin !== 'null
   : 'http://localhost:8080';
 
 let modelsLoaded = false;
+let human = null;
+
 let currentVerifyDescriptor = null;
 let currentEmpFormDescriptor = null;
 let empFormMode = 'camera'; // 'camera' or 'file'
 
-// CDN Model URI for face-api.js
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+// CDN Model URI for Human (handled internally)
 
 // DOM Initialization
 document.addEventListener('DOMContentLoaded', () => {
@@ -63,15 +64,19 @@ async function initApp() {
     const loaderText = document.getElementById('model-status-text');
     if (loaderText) loaderText.textContent = 'Memuat Model AI Biometrik (SsdMobilenetv1, Landmark68, Recognition)...';
 
-    // Load face-api.js Neural Networks
-    await Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-    ]);
+    // Initialize Human
+    human = new window.Human({
+      modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
+      face: { enabled: true, mesh: true, iris: true, description: true },
+      body: { enabled: false },
+      hand: { enabled: false },
+      object: { enabled: false },
+      gesture: { enabled: false },
+    });
+    await human.load();
 
     modelsLoaded = true;
-    console.log('[FACE-API] Models loaded successfully!');
+    console.log('[HUMAN] Models loaded successfully!');
 
     const verifyLoader = document.getElementById('verify-loader');
     if (verifyLoader) verifyLoader.style.display = 'none';
@@ -84,7 +89,7 @@ async function initApp() {
     setupEventListeners();
 
   } catch (error) {
-    console.error('[ERROR] Gagal memuat model face-api.js:', error);
+    console.error('[ERROR] Gagal memuat model Human:', error);
     const loaderText = document.getElementById('model-status-text');
     if (loaderText) {
       loaderText.textContent = 'Error: Gagal memuat model biometrik dari CDN. Pastikan koneksi internet aktif!';
@@ -136,7 +141,8 @@ function startDetectionLoop(video, canvasId, mode) {
   if (!canvas) return;
 
   const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
-  faceapi.matchDimensions(canvas, displaySize);
+  canvas.width = displaySize.width;
+  canvas.height = displaySize.height;
 
   const btnVerify = document.getElementById('btn-do-verify');
   const faceDetectBadge = document.getElementById('face-detect-badge');
@@ -148,24 +154,25 @@ function startDetectionLoop(video, canvasId, mode) {
       return;
     }
 
-    // Detect Single Face with Landmarks & 128-float Descriptor
-    const detection = await faceapi
-      .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
-      .withFaceLandmarks()
-      .withFaceDescriptor();
+    const result = await human.detect(video);
 
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (detection) {
-      const resizedDetection = faceapi.resizeResults(detection, displaySize);
+    if (result.face && result.face.length > 0 && result.face[0].embedding) {
+      const face = result.face[0];
+      
+      if (face.mesh) {
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+        for (const pt of face.mesh) {
+          ctx.beginPath();
+          ctx.arc(pt[0], pt[1], 1, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
 
-      // Draw Bounding Box & Landmarks
-      faceapi.draw.drawDetections(canvas, resizedDetection);
-      faceapi.draw.drawFaceLandmarks(canvas, resizedDetection);
-
-      // Extract Float32Array (128 dimensions)
-      const descriptor = Array.from(detection.descriptor);
+      // Extract Float32Array (1024 dimensions)
+      const descriptor = Array.from(face.embedding);
 
       if (mode === 'verify') {
         currentVerifyDescriptor = descriptor;
