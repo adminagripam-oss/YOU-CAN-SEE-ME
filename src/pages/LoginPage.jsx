@@ -32,17 +32,18 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
   };
 
   return (
-    <div className="login-page-container">
-      <div className="login-pattern-wrapper" style={{ maxWidth: '400px', margin: '0 auto', paddingTop: '10vh' }}>
+    <div className="glass-login-wrapper">
+      <div className="login-pattern-container">
         
-        <div className="ui-card">
-          <div className="ui-card-header" style={{ textAlign: 'center' }}>
-            <h3 className="ui-card-title">Login Administrator</h3>
-            <p className="ui-card-description">
-              Masuk untuk kelola karyawan dan riwayat absensi.
-            </p>
-          </div>
+        {/* Header Title from Figma Design */}
+        <div className="glass-login-title">
+          <h1 className="figma-login-title">Welcome Admin!</h1>
+          <p className="figma-login-subtitle">
+            Masuk untuk kelola karyawan dan riwayat absensi.
+          </p>
+        </div>
 
+        <div className="glass-card ui-card" style={{ maxWidth: '400px', margin: '0 auto' }}>
           <div className="ui-card-content">
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="form-group">
