@@ -1,5 +1,6 @@
 import React from 'react';
 import { API_BASE_URL } from '../config';
+import { supabase } from '../supabaseClient';
 
 /**
  * Converts a duration string or seconds into "Xj Ym Zd" (jam, menit, detik) format
@@ -72,13 +73,12 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Session',
       onConfirm: async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${log.id}`, { method: 'DELETE' });
-          const data = await res.json();
-          if (data.success) {
-            showToast('Log Dihapus', data.message, 'success');
+          const { error } = await supabase.from('attendance_logs').delete().eq('id', log.id);
+          if (!error) {
+            showToast('Log Dihapus', `Log absensi (ID ${log.id}) berhasil dihapus dari database Supabase.`, 'success');
             refreshLogs();
           } else {
-            showToast('Gagal Menghapus Log', data.message, 'error');
+            showToast('Gagal Menghapus Log', error.message, 'error');
           }
         } catch (err) {
           console.error('[DELETE LOG ERROR]:', err);
@@ -97,13 +97,12 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Semua Log',
       onConfirm: async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/attendance/logs`, { method: 'DELETE' });
-          const data = await res.json();
-          if (data.success) {
-            showToast('Seluruh Log Berhasil Dihapus', data.message, 'success');
+          const { error } = await supabase.from('attendance_logs').delete().neq('id', 0);
+          if (!error) {
+            showToast('Seluruh Log Berhasil Dihapus', 'Seluruh riwayat log absensi berhasil dihapus dari database Supabase.', 'success');
             refreshLogs();
           } else {
-            showToast('Gagal Menghapus Log', data.message, 'error');
+            showToast('Gagal Menghapus Log', error.message, 'error');
           }
         } catch (err) {
           console.error('[CLEAR ALL LOGS ERROR]:', err);
