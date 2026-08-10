@@ -70,6 +70,21 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     setUser(null);
     localStorage.removeItem('logged_in_admin');
+    
+    // Failsafe: Hapus service worker PWA agar update terbaru bisa masuk
+    if ('serviceWorker' in navigator) {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let registration of registrations) {
+          await registration.unregister();
+        }
+      } catch (err) {
+        console.warn('Gagal unregister SW saat logout', err);
+      }
+    }
+
+    // Force redirect ke login untuk menimpa state router
+    window.location.href = '/login';
   };
 
   const value = {
