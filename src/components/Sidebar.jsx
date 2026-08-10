@@ -11,7 +11,7 @@ export default function Sidebar({ isOpen, onClose }) {
       <aside className={`app-sidebar ${isOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
         <div className="sidebar-brand">
           <div className="brand-icon">
-            <img src="/logo.png" alt="AgriFace Logo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+            <img src="/logo.png" alt="AgriFace Logo" style={{ width: '55px', height: '55px', objectFit: 'contain', imageRendering: 'high-quality', filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.1))' }} />
           </div>
           <div className="brand-text">
             <h2>AgriFace</h2>
