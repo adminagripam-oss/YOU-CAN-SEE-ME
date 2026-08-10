@@ -29,7 +29,6 @@ export default function Topbar({
 
         {/* AgriFace Brand Title in Header */}
         <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <img src="/logo.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain', imageRendering: 'high-quality', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }} />
           <span>AgriFace</span>
         </div>
 
