@@ -973,13 +973,21 @@ export default function TabFaceVerification({
                 detection = sortedDetections[0]; // Ambil yang paling besar
               }
 
-              const W = videoRef.current?.clientWidth  || 640;
-              const H = videoRef.current?.clientHeight || 480;
+              // Ambil resolusi asli dari lensa kamera
+              const videoWidth = videoRef.current?.videoWidth || 640;
+              const videoHeight = videoRef.current?.videoHeight || 480;
+              
+              // Set ukuran internal kanvas sama persis dengan resolusi asli video
+              if (canvasRef.current) {
+                canvasRef.current.width = videoWidth;
+                canvasRef.current.height = videoHeight;
+              }
+
               const ctx = canvasRef.current?.getContext('2d');
               
               if (ctx) {
                 // Clear Canvas on every frame to prevent memory leak
-                ctx.clearRect(0, 0, W, H);
+                ctx.clearRect(0, 0, videoWidth, videoHeight);
 
                 if (!detection) {
                   currentDescRef.current = null; currentGFVRef.current = null;
@@ -1079,8 +1087,9 @@ export default function TabFaceVerification({
                   }
 
                   // ── Draw Biometric Node Overlay ─────────────────────────────────
-                  window.faceapi.matchDimensions(canvasRef.current, { width: W, height: H });
-                  const resized = window.faceapi.resizeResults(detection, { width: W, height: H });
+                  const displaySize = { width: videoWidth, height: videoHeight };
+                  window.faceapi.matchDimensions(canvasRef.current, displaySize);
+                  const resized = window.faceapi.resizeResults(detection, displaySize);
 
                   // Draw landmark nodes directly.
                   drawGeometricMesh(
