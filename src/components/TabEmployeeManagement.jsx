@@ -359,7 +359,7 @@ export default function TabEmployeeManagement({
       const createdEmpId = createdEmp.id;
 
       // 2. Save Master Biometrics if Descriptor Available
-      if (currentEmpDescriptorRef.current && currentEmpDescriptorRef.current.length === 128) {
+      if (currentEmpDescriptorRef.current) {
         let bioSaved = false;
         try {
           const resBio = await fetch(`${API_BASE_URL}/api/biometrics/register`, {
@@ -370,8 +370,11 @@ export default function TabEmployeeManagement({
               descriptor: currentEmpDescriptorRef.current,
             }),
           });
-          const dataBio = await resBio.json();
-          if (dataBio.success) bioSaved = true;
+          const textBio = await resBio.text();
+          try {
+            const dataBio = JSON.parse(textBio);
+            if (dataBio.success) bioSaved = true;
+          } catch(e){}
         } catch (err) {
           console.warn('[REGISTER BIO API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
         }
@@ -379,17 +382,18 @@ export default function TabEmployeeManagement({
         if (!bioSaved) {
           const descJson = JSON.stringify(currentEmpDescriptorRef.current);
           const { error: bioErr } = await supabase
-            .from('employees')
-            .update({
-              descriptor_json: descJson,
-              has_master_biometric: true,
-            })
-            .eq('id', createdEmpId);
+            .from('master_biometrics')
+            .upsert({
+              employee_id: createdEmpId,
+              face_vector: descJson,
+            }, { onConflict: 'employee_id' });
 
           if (bioErr) {
             console.error('[SUPABASE DIRECT REGISTER BIO ERROR]:', bioErr);
           } else {
             bioSaved = true;
+            // Also update employee status
+            await supabase.from('employees').update({ has_master_biometric: true }).eq('id', createdEmpId);
           }
         }
 

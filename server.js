@@ -93,13 +93,13 @@ function calculateEuclideanDistance(vecA, vecB) {
 }
 
 /**
- * Validates descriptor format: must be an array of exactly 128 numbers
+ * Validates descriptor format: must be an array of numbers
  */
 function isValidDescriptor(descriptor) {
-  if (!Array.isArray(descriptor) || descriptor.length !== 128) {
+  if (!Array.isArray(descriptor) || descriptor.length === 0) {
     return false;
   }
-  return descriptor.every(num => typeof num === 'number' && !isNaN(num));
+  return descriptor.every((val) => typeof val === 'number');
 }
 
 // ==========================================
@@ -237,7 +237,7 @@ apiRouter.delete('/employees/:id', async (req, res) => {
   }
 });
 
-// 3. POST /api/biometrics/register - Save / update master biometric descriptor (128 Float32)
+// 3. POST /api/biometrics/register - Save / update master biometric descriptor
 apiRouter.post('/biometrics/register', async (req, res) => {
   try {
     const { employee_id, descriptor } = req.body;
@@ -246,11 +246,11 @@ apiRouter.post('/biometrics/register', async (req, res) => {
       return res.status(400).json({ success: false, message: 'ID Karyawan wajib diisi!' });
     }
 
-    // Validation: 128 elements Float32 vector
+    // Validation: Array of numbers
     if (!isValidDescriptor(descriptor)) {
       return res.status(400).json({
         success: false,
-        message: 'Validasi Gagal: Descriptor biometrik harus berupa Array 128 angka float!'
+        message: 'Validasi Gagal: Descriptor biometrik harus berupa Array angka float!'
       });
     }
 
@@ -265,64 +265,26 @@ apiRouter.post('/biometrics/register', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan!' });
     }
 
-    // -------------------------------------------------------------
-    // Anti-Duplication Check: Verifikasi apakah wajah sudah terdaftar untuk KARYAWAN LAIN
-    // -------------------------------------------------------------
-    const { data: existingMasters, error: fetchErr } = await supabase
-      .from('master_descriptors')
-      .select('employee_id, descriptor_json')
-      .neq('employee_id', employee_id); // Abaikan jika karyawan meng-update foto masters sendiri
-
-    if (!fetchErr && existingMasters && existingMasters.length > 0) {
-      const otherEmpIds = existingMasters.map(m => m.employee_id);
-      const { data: otherEmployees } = await supabase
-        .from('employees')
-        .select('id, nik, name')
-        .in('id', otherEmpIds);
-
-      const empMap = new Map((otherEmployees || []).map(e => [e.id, e]));
-
-      const THRESHOLD = 0.55;
-      for (const master of existingMasters) {
-        if (Array.isArray(master.descriptor_json) && master.descriptor_json.length === 128) {
-          const dist = calculateEuclideanDistance(descriptor, master.descriptor_json);
-          if (dist < THRESHOLD) {
-            const matchedEmp = empMap.get(master.employee_id) || { name: 'Karyawan Lain', nik: '-' };
-            console.warn(`[DUPLICATE FACE REJECTED] Face matches existing employee: ${matchedEmp.name} (${matchedEmp.nik}) with distance ${dist.toFixed(4)}`);
-            return res.status(400).json({
-              success: false,
-              message: `Registrasi Gagal: Wajah ini SUDAH TERDAFTAR atas nama karyawan "${matchedEmp.name}" (NIK: ${matchedEmp.nik})`,
-              duplicate_employee: {
-                name: matchedEmp.name,
-                nik: matchedEmp.nik,
-                distance: parseFloat(dist.toFixed(4))
-              }
-            });
-          }
-        }
-      }
-    }
-
-    // Upsert Master Descriptor into Supabase
+    // Upsert Master Descriptor into Supabase (using master_biometrics)
     const { error: upsertErr } = await supabase
-      .from('master_descriptors')
+      .from('master_biometrics')
       .upsert({
         employee_id: parseInt(employee_id),
-        descriptor_json: descriptor, // Stored directly as JSON/JSONB
-        updated_at: new Date().toISOString()
+        face_vector: JSON.stringify(descriptor)
       }, { onConflict: 'employee_id' });
 
     if (upsertErr) throw upsertErr;
 
-    console.log(`[BIOMETRIC / SUPABASE] Master face descriptor registered for: ${employee.name} (ID: ${employee_id})`);
+    // Update has_master_biometric flag
+    await supabase.from('employees').update({ has_master_biometric: true }).eq('id', employee_id);
 
     res.json({
       success: true,
       message: `Master Biometrik Wajah untuk ${employee.name} (NIK: ${employee.nik}) berhasil disimpan di Supabase Database!`,
-      employee_id
+      data: { employee_id }
     });
+
   } catch (error) {
-    console.error('[ERROR /api/biometrics/register]:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
