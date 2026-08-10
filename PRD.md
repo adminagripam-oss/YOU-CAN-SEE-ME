@@ -162,12 +162,13 @@ Sistem secara cerdas membedakan status absensi hari ini:
 - **Analytics Layout (`/analytics`)**:
   - Dashboard Executive & Manager Kebun yang menyajikan metric produktivitas **Kg/HK**, **Ha/HK**, persentase kehadiran afdeling, serta filter berdasarkan Kebun & Afdeling.
 
-### FR-2: Verification Engine 1-to-1 ($O(1)$) Check-In & Check-Out
+### FR-2: Verification Engine 1-to-1 ($O(1)$) Check-In & Check-Out & Transactional State Guard
 - Live webcam mendeteksi bounding box wajah, 68 titik landmark, dan 128-float vector descriptor.
 - Overlay canvas interaktif menampilkan visualisasi jaringan landmark wajah dan indikator kualitas pencahayaan.
 - Perhitungan jarak Euclidean terhadap master biometrik karyawan yang dipilih.
 - Ambang batas (*threshold*) $d < 0.55 \rightarrow$ **VERIFIKASI BERHASIL**.
-- Pencatatan log absensi ke database Supabase beserta tipe absensi (`CHECK-IN` / `CHECK-OUT`).
+- **Transactional Async/Await Order:** Tombol UI dan Toast notification 'Absensi Berhasil' **dilarang** berubah/muncul sebelum transaksi database (Express API / Supabase Direct / Dexie.js) secara eksplisit berhasil (`Promise.resolve`). Jika gagal, state tombol dipertahankan dan Toast error ditampilkan.
+- **State Guard & Multi-Tier Fallback:** Pengecekan status harian menggabungkan Express REST API, Supabase Cloud Direct, serta pemeriksaan antrean `db.attendance_sync_queue` (Dexie.js). Mengunci state `checkedIn = true` jika terdapat antrean lokal hari ini, serta mencegah *State Revert* oleh re-render/interval.
 
 ### FR-3: Registrasi Master Biometrik Wajah
 - Pendaftaran master biometrik melalui dua mode: **Kamera Live** atau **Upload Foto (JPG/PNG/WEBP)**.
@@ -200,8 +201,8 @@ Sistem secara cerdas membedakan status absensi hari ini:
 | `DELETE` | `/api/employees/:id` | Protected | Menghapus karyawan (CASCADE hapus master biometrik & log). |
 | `POST` | `/api/biometrics/register` | Protected | Mendaftarkan/memperbarui 128-float vector master biometrik dengan cek anti-duplikasi. |
 | `GET` | `/api/biometrics/master/:id` | Public/Protected | Mengambil master vector biometrik (128-d & 40-d GFV) spesifik karyawan untuk matching 1-to-1. |
-| `POST` | `/api/attendance/verify` | Public/Protected | Engine verifikasi 1-to-1 ($O(1)$) untuk Check-In & Check-Out. |
-| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Apakah sudah Check-In / Check-Out). |
+| `POST` | `/api/attendance/verify` | Public/Protected | Engine verifikasi 1-to-1 ($O(1)$) untuk Check-In & Check-Out dengan urutan transaksi transaksional. |
+| `GET` | `/api/attendance/status/:id` | Public/Protected | Mengecek status absensi hari ini (Timezone-safe range `.gte` startOfDay & `.lte` endOfDay) mengembalikan `hasCheckedIn` & `hasCheckedOut`. |
 | `GET` | `/api/attendance/logs` | Protected | Mengambil 100 riwayat log absensi terbaru beserta kalkulasi durasi kerja. |
 | `POST` | `/api/attendance/sync` | Protected | Endpoint batch auto-sync untuk menerima antrean absensi offline dari IndexedDB. |
 | `DELETE` | `/api/attendance/logs/:id` | Protected | Menghapus 1 session log absensi spesifik dari database. |
