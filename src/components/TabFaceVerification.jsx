@@ -388,29 +388,27 @@ function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
   // 1. Scanner Corner Brackets
   drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
 
-  // 2. Facial Contour Lines (Subtle Connecting Lines)
-  const drawContourPath = (indices, closed = false) => {
-    ctx.beginPath();
-    indices.forEach((idx, i) => {
-      const p = pts[idx];
-      if (!p) return;
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    if (closed) ctx.closePath();
-    ctx.strokeStyle = `rgba(${R},${G},${B},0.5)`;
-    ctx.lineWidth   = 0.5; // Setebal 0.5px
-    ctx.stroke();
-  };
+  // 2. 3D Triangulation Mesh (Wireframe + Polygon Fill)
+  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = `rgba(${R}, ${G}, ${B}, 0.4)`;
+  ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.08)`;
+  
+  for (const tri of FACE_TRIANGLES) {
+    const p0 = pts[tri[0]];
+    const p1 = pts[tri[1]];
+    const p2 = pts[tri[2]];
+    
+    if (!p0 || !p1 || !p2) continue;
 
-  drawContourPath([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]); // Rahang
-  drawContourPath([17,18,19,20,21]); // Alis Kiri
-  drawContourPath([22,23,24,25,26]); // Alis Kanan
-  drawContourPath([27,28,29,30]);    // Batang Hidung
-  drawContourPath([31,32,33,34,35], true); // Bawah Hidung
-  drawContourPath([36,37,38,39,40,41], true); // Mata Kiri
-  drawContourPath([42,43,44,45,46,47], true); // Mata Kanan
-  drawContourPath([48,49,50,51,52,53,54,55,56,57,58,59], true); // Bibir Luar
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.closePath();
+    
+    ctx.fill();
+    ctx.stroke();
+  }
 
   // 3. Clean Single Facial Landmark Nodes (Dots)
   for (let i = 0; i < 68; i++) {
@@ -557,6 +555,7 @@ export default function TabFaceVerification({
 
   const [headTurnState, setHeadTurnState]       = useState({ left: false, right: false });
   const [livenessVerified, setLivenessVerified] = useState(false);
+  const [livenessChallenge, setLivenessChallenge] = useState('');
 
   // Geometric 1-to-1 Match States
   const [matchRate, setMatchRate] = useState(0);
@@ -591,6 +590,8 @@ export default function TabFaceVerification({
   const timerRef             = useRef(null);
   const hasBeepedRef         = useRef(false);
   const selectedEmployeeIdRef = useRef('');
+  const livenessChallengeRef = useRef('');
+  const scoreHistoryRef      = useRef([]);
 
   const selectedEmployee = employees.find((e) => String(e.id) === String(selectedEmployeeId));
 
@@ -628,6 +629,13 @@ export default function TabFaceVerification({
     const empId = e.target.value;
     setSelectedEmployeeId(empId);
     selectedEmployeeIdRef.current = empId; // Simpan ke ref agar detection loop membaca versi terbaru tanpa restart
+    
+    // Pick random challenge
+    const challenges = ['BLINK', 'TURN_LEFT', 'TURN_RIGHT'];
+    const randomChallenge = challenges[Math.floor(Math.random() * challenges.length)];
+    setLivenessChallenge(randomChallenge);
+    livenessChallengeRef.current = randomChallenge;
+    
     headTurnRef.current        = { left: false, right: false };
     livenessVerifiedRef.current = false;
     hasBeepedRef.current       = false; // Reset beep state
@@ -635,6 +643,7 @@ export default function TabFaceVerification({
     masterVectorRef.current    = null;
     matchRateRef.current       = 0;
     isMatchedRef.current       = false;
+    scoreHistoryRef.current    = [];
     setHeadTurnState({ left: false, right: false });
     setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
     setGfvMode(false); setLastResultMsg(null);
@@ -989,43 +998,38 @@ export default function TabFaceVerification({
                   setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
                   if (!livenessVerifiedRef.current) {
-                    setLivenessStatusMsg('Silakan kedipkan mata Anda untuk verifikasi');
-
-                    // Blink transition: EAR < 0.21 (Closed) -> EAR > 0.24 (Reopened)
-                    if (avgEAR < 0.21) {
-                      eyeClosedRef.current = true;
-                    } else if (eyeClosedRef.current && avgEAR > 0.24) {
-                      // BLINK DETECTED & VERIFIED!
-                      eyeClosedRef.current = false;
-                      livenessVerifiedRef.current = true;
-                      setLivenessVerified(true);
-                      setIsLiveHuman(true);
-                      setLivenessStatusMsg('Liveness Terverifikasi!');
-
-                      const base64Str = captureVideoFrameBase64(videoRef.current);
-                      if (base64Str) setCapturedBase64Image(base64Str);
-                    }
-
-                    // Backup 3D Head Rotation (Toleh Kiri & Kanan)
-                    const jaw  = detection.landmarks.getJawOutline();
-                    const nose = detection.landmarks.getNose();
-                    if (jaw?.length >= 17 && nose?.length >= 4) {
-                      const dL = Math.abs(nose[3].x - jaw[0].x);
-                      const dR = Math.abs(jaw[16].x  - nose[3].x);
-                      const tw = dL + dR;
-                      if (tw > 0) {
-                        const yaw = (dL - dR) / tw;
-                        if (yaw >  0.20) headTurnRef.current.left  = true;
-                        if (yaw < -0.20) headTurnRef.current.right = true;
+                    let passed = false;
+                    const challenge = livenessChallengeRef.current;
+                    
+                    if (challenge === 'BLINK') {
+                      setLivenessStatusMsg('Tantangan Keamanan: Kedipkan Mata Anda');
+                      if (avgEAR < 0.21) {
+                        eyeClosedRef.current = true;
+                      } else if (eyeClosedRef.current && avgEAR > 0.24) {
+                        passed = true;
+                      }
+                    } else if (challenge === 'TURN_LEFT' || challenge === 'TURN_RIGHT') {
+                      setLivenessStatusMsg(challenge === 'TURN_LEFT' ? 'Tantangan Keamanan: Tolehkan Kepala ke KIRI' : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN');
+                      const jaw = detection.landmarks.getJawOutline();
+                      const nose = detection.landmarks.getNose();
+                      if (jaw?.length >= 17 && nose?.length >= 4) {
+                        const dL = Math.abs(nose[3].x - jaw[0].x);
+                        const dR = Math.abs(jaw[16].x  - nose[3].x);
+                        const tw = dL + dR;
+                        if (tw > 0) {
+                          const yaw = (dL - dR) / tw;
+                          if (challenge === 'TURN_LEFT' && yaw > 0.20) passed = true;
+                          if (challenge === 'TURN_RIGHT' && yaw < -0.20) passed = true;
+                        }
                       }
                     }
-                    const nL = headTurnRef.current.left, nR = headTurnRef.current.right;
-                    setHeadTurnState({ left: nL, right: nR });
-                    if (nL && nR && !livenessVerifiedRef.current) {
+
+                    if (passed) {
                       livenessVerifiedRef.current = true;
                       setLivenessVerified(true);
                       setIsLiveHuman(true);
                       setLivenessStatusMsg('Liveness Terverifikasi!');
+
                       const base64Str = captureVideoFrameBase64(videoRef.current);
                       if (base64Str) setCapturedBase64Image(base64Str);
                     }
@@ -1033,30 +1037,40 @@ export default function TabFaceVerification({
 
                   // ── Step 2: Geometric 1-to-1 Match via Cosine Similarity ───────────
                   if (liveGFV || currentDescRef.current) {
-                    let pct = 0, matched = false;
+                    let rawPct = 0;
+                    let threshold = 80.0;
 
                     // Case A: 40-d GFV Cosine Match
                     if (masterGFVRef.current && Array.isArray(masterGFVRef.current) && liveGFV && masterGFVRef.current.length === liveGFV.length) {
                       const cosSim = cosineSimilarity(liveGFV, masterGFVRef.current);
-                      pct     = cosineToMatchPct(cosSim);
-                      matched = cosSim >= 0.85; // Match threshold 85% (0.85)
+                      rawPct = cosineToMatchPct(cosSim);
+                      threshold = 85.0; // Match threshold 85% (0.85)
                     }
                     // Case B: 128-d Face-API Vector Cosine Match
                     else if (masterVectorRef.current && currentDescRef.current && masterVectorRef.current.length === 128 && currentDescRef.current.length === 128) {
                       const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-                      pct     = cosineToMatchPct(cosSim);
-                      matched = cosSim >= 0.80; // Match threshold 80% for 128-d cosine similarity
-
-                      // Auto-cache GFV for future scans if 128-d match passes
-                      if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeIdRef.current) {
-                        masterGFVRef.current = liveGFV;
-                        setGfvMode(true);
-                        cacheGeometricVector(selectedEmployeeIdRef.current, liveGFV).catch(() => {});
-                      }
+                      rawPct = cosineToMatchPct(cosSim);
+                      threshold = 80.0; // Match threshold 80% for 128-d cosine similarity
                     }
 
-                    matchRateRef.current = pct; isMatchedRef.current = matched;
-                    setMatchRate(pct); setIsMatched(matched);
+                    // --- SMOOTHING LOGIC ---
+                    scoreHistoryRef.current.push(rawPct);
+                    if (scoreHistoryRef.current.length > 5) {
+                      scoreHistoryRef.current.shift();
+                    }
+                    const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
+                    
+                    const matched = avgPct >= threshold;
+
+                    // Auto-cache GFV for future scans if 128-d match passes
+                    if (matched && liveGFV && !masterGFVRef.current && selectedEmployeeIdRef.current) {
+                      masterGFVRef.current = liveGFV;
+                      setGfvMode(true);
+                      cacheGeometricVector(selectedEmployeeIdRef.current, liveGFV).catch(() => {});
+                    }
+
+                    matchRateRef.current = avgPct; isMatchedRef.current = matched;
+                    setMatchRate(avgPct); setIsMatched(matched);
 
                     if (matched && !hasBeepedRef.current) {
                       hasBeepedRef.current = true;
