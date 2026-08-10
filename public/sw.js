@@ -1,5 +1,5 @@
-const CACHE_NAME = 'face-attendance-v4';
-const MODEL_CACHE_NAME = 'face-api-models-v4';
+const CACHE_NAME = 'face-attendance-v5';
+const MODEL_CACHE_NAME = 'face-api-models-v5';
 
 // Static assets to pre-cache on install
 const PRECACHE_ASSETS = [
@@ -48,6 +48,11 @@ self.addEventListener('fetch', (event) => {
 
   // Skip non-GET requests and non-http(s) schemes (e.g. chrome-extension://)
   if (event.request.method !== 'GET' || !url.protocol.startsWith('http')) {
+    return;
+  }
+
+  // Bypass cache completely for localhost (Dev Mode)
+  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
     return;
   }
 
