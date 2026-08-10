@@ -443,12 +443,21 @@ export default function TabEmployeeManagement({
       onConfirm: async () => {
         try {
           const res = await fetch(`${API_BASE_URL}/api/employees/${emp.id}`, { method: 'DELETE' });
-          const data = await res.json();
-          if (data.success) {
+          const text = await res.text();
+          let data = {};
+          if (text) {
+            try {
+              data = JSON.parse(text);
+            } catch (e) {
+              console.warn('Failed to parse response:', text);
+            }
+          }
+          
+          if (res.ok || data.success) {
             showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah berhasil dihapus.`, 'success');
             refreshEmployees();
           } else {
-            showToast('Gagal Menghapus', data.message, 'error');
+            showToast('Gagal Menghapus', data.message || `Error HTTP ${res.status}: Respons kosong`, 'error');
           }
         } catch (err) {
           console.error('[DELETE ERROR]:', err);
