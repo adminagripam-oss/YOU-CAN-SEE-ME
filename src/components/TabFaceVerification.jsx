@@ -948,10 +948,21 @@ export default function TabFaceVerification({
                 ? new window.faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
                 : new window.faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
 
-              const detection = await window.faceapi
-                .detectSingleFace(videoRef.current, opts)
+              const allDetections = await window.faceapi
+                .detectAllFaces(videoRef.current, opts)
                 .withFaceLandmarks()
-                .withFaceDescriptor();
+                .withFaceDescriptors();
+
+              // Prioritaskan wajah yang paling dekat / paling besar di kamera (Fokus 1 Wajah)
+              let detection = null;
+              if (allDetections && allDetections.length > 0) {
+                const sortedDetections = allDetections.sort((a, b) => {
+                  const areaA = a.detection.box.width * a.detection.box.height;
+                  const areaB = b.detection.box.width * b.detection.box.height;
+                  return areaB - areaA; // Descending (terbesar pertama)
+                });
+                detection = sortedDetections[0]; // Ambil yang paling besar
+              }
 
               const W = videoRef.current?.clientWidth  || 640;
               const H = videoRef.current?.clientHeight || 480;
