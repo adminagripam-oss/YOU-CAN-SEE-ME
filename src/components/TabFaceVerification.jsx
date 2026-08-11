@@ -920,7 +920,7 @@ export default function TabFaceVerification({
 
               // ── Human Detection ─────────────────────────────────────────────
               const overrideConfig = livenessVerifiedRef.current 
-                ? {} 
+                ? { face: { description: { enabled: true } } } 
                 : { face: { description: { enabled: false } } };
               const result = await human.detect(videoRef.current, overrideConfig);
               const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
