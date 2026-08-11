@@ -919,8 +919,6 @@ export default function TabFaceVerification({
               setLightingWarning(lightingStatus);
 
               // ── Human Detection ─────────────────────────────────────────────
-              // Toggle description (identity embedding) only after liveness is verified to save FPS
-              human.config.face.description = !!livenessVerifiedRef.current;
               const result = await human.detect(videoRef.current);
               const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
 
@@ -991,6 +989,11 @@ export default function TabFaceVerification({
                     if (masterVectorRef.current && currentDescRef.current.length === masterVectorRef.current.length) {
                       const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
                       rawPct = cosineToMatchPct(cosSim);
+                      console.log(`[MATCHING] cosSim: ${cosSim}, rawPct: ${rawPct}%, MasterLen: ${masterVectorRef.current.length}`);
+                    } else if (masterVectorRef.current) {
+                      console.warn(`[MATCHING FAIL] Length mismatch! Current: ${currentDescRef.current.length}, Master: ${masterVectorRef.current.length}`);
+                    } else {
+                      console.warn(`[MATCHING FAIL] masterVectorRef is null!`);
                     }
 
                     // --- SMOOTHING LOGIC ---
