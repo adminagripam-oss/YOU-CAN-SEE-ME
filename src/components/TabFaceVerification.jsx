@@ -989,11 +989,6 @@ export default function TabFaceVerification({
                     if (masterVectorRef.current && currentDescRef.current.length === masterVectorRef.current.length) {
                       const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
                       rawPct = cosineToMatchPct(cosSim);
-                      console.log(`[MATCHING] cosSim: ${cosSim}, rawPct: ${rawPct}%, MasterLen: ${masterVectorRef.current.length}`);
-                    } else if (masterVectorRef.current) {
-                      console.warn(`[MATCHING FAIL] Length mismatch! Current: ${currentDescRef.current.length}, Master: ${masterVectorRef.current.length}`);
-                    } else {
-                      console.warn(`[MATCHING FAIL] masterVectorRef is null!`);
                     }
 
                     // --- SMOOTHING LOGIC ---

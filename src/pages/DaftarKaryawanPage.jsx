@@ -225,7 +225,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         if (empErr) throw empErr;
 
         if (payload.descriptor_json) {
-          await supabase.from('master_descriptors').update({ descriptor_json: payload.descriptor_json }).eq('employee_id', editingEmp.id);
+          await supabase.from('master_descriptors').upsert({ employee_id: editingEmp.id, descriptor_json: payload.descriptor_json });
           await cacheUserMasterVector(editingEmp.id, { descriptor_json: payload.descriptor_json });
         }
       }
