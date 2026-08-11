@@ -7,7 +7,13 @@ import { CheckCircle, Mail, Power, XCircle, ChevronDown } from 'lucide-react';
 
 const humanConfig = {
   modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
-  face: { enabled: true, mesh: true, iris: true, description: true },
+  face: {
+    enabled: true,
+    detector: { enabled: true, rotation: true },
+    mesh: { enabled: true },
+    iris: { enabled: true },
+    description: { enabled: true },
+  },
   body: { enabled: false },
   hand: { enabled: false },
   object: { enabled: false },
