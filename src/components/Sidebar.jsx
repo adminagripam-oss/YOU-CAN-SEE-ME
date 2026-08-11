@@ -44,8 +44,17 @@ export default function Sidebar({ isOpen, onClose }) {
                 className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
                 onClick={() => window.innerWidth < 768 && onClose && onClose()}
               >
+                <i className="fa-solid fa-user-plus"></i>
+                <span>Input Karyawan</span>
+              </NavLink>
+
+              <NavLink
+                to="/daftar-karyawan"
+                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+                onClick={() => window.innerWidth < 768 && onClose && onClose()}
+              >
                 <i className="fa-solid fa-users"></i>
-                <span>Data Karyawan</span>
+                <span>Daftar Karyawan</span>
               </NavLink>
 
               <NavLink

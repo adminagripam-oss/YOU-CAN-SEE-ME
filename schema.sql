@@ -6,6 +6,11 @@ CREATE TABLE IF NOT EXISTS employees (
     nik VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
     department VARCHAR(100) NOT NULL,
+    afdeling VARCHAR(100),
+    nama_kebun VARCHAR(100),
+    status_tk VARCHAR(50),
+    jabatan VARCHAR(100),
+    status_perkawinan VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -28,9 +33,3 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
     euclidean_distance REAL NOT NULL,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 );
-
--- Sample Data (Karyawan Awal)
-INSERT OR IGNORE INTO employees (nik, name, department) VALUES 
-('EMP-001', 'Budi Santoso', 'IT & Software Development'),
-('EMP-002', 'Siti Rahma', 'Human Resources'),
-('EMP-003', 'Andi Wijaya', 'Finance & Accounting');

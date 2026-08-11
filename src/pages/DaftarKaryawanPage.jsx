@@ -1,0 +1,563 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config';
+import { supabase } from '../supabaseClient';
+import { cacheUserMasterVector } from '../db';
+import * as faceapi from '@vladmandic/face-api';
+
+export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, openConfirmModal }) {
+  const navigate = useNavigate();
+
+  // Filters State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatusTk, setFilterStatusTk] = useState('');
+  const [filterStatusPerkawinan, setFilterStatusPerkawinan] = useState('');
+  // Edit Modal State
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingEmp, setEditingEmp] = useState({ id: '', nik: '', name: '', department: '', afdeling: '', nama_kebun: '', status_tk: '', jabatan: '', status_perkawinan: '' });
+  const [editStatusTkCustom, setEditStatusTkCustom] = useState('');
+  const [editUpdateBiometrics, setEditUpdateBiometrics] = useState(false);
+  const [editFormMode, setEditFormMode] = useState('camera'); // 'camera' | 'file'
+  const [editCameraStatusText, setEditCameraStatusText] = useState('Menunggu Wajah di Kamera...');
+  const [editCameraStatusColor, setEditCameraStatusColor] = useState('var(--accent-warning)');
+  const [editPhotoPreview, setEditPhotoPreview] = useState(null);
+  
+  const editCurrentDescriptorRef = useRef(null);
+  const editVideoRef = useRef(null);
+  const editCanvasRef = useRef(null);
+  const editStreamRef = useRef(null);
+  const editFileInputRef = useRef(null);
+
+  // Stop Camera
+  const stopEditCamera = () => {
+    if (editStreamRef.current) {
+      editStreamRef.current.getTracks().forEach((t) => t.stop());
+      editStreamRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!editModalOpen) {
+      stopEditCamera();
+    }
+    return () => stopEditCamera();
+  }, [editModalOpen]);
+
+  // Handle Edit Photo File
+  const handleEditPhotoFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!modelsLoaded) {
+      showToast('Model Belum Siap', 'Tunggu hingga AI Face Recognition selesai dimuat.', 'warning');
+      return;
+    }
+
+    const imgUrl = URL.createObjectURL(file);
+    setEditPhotoPreview(imgUrl);
+    setEditCameraStatusText('Menganalisis Wajah dari Foto...');
+    setEditCameraStatusColor('var(--accent-warning)');
+    
+    try {
+      const img = await faceapi.fetchImage(imgUrl);
+      const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+      if (detection) {
+        editCurrentDescriptorRef.current = Array.from(detection.descriptor);
+        setEditCameraStatusText('1 Wajah Terdeteksi (Siap Disimpan)');
+        setEditCameraStatusColor('var(--accent-success)');
+      } else {
+        editCurrentDescriptorRef.current = null;
+        setEditCameraStatusText('Wajah Tidak Ditemukan! Coba foto lain.');
+        setEditCameraStatusColor('var(--accent-danger)');
+      }
+    } catch (err) {
+      setEditCameraStatusText('Error menganalisis foto.');
+      setEditCameraStatusColor('var(--accent-danger)');
+    }
+  };
+
+  // Start Edit Camera
+  useEffect(() => {
+    let animationFrameId;
+    if (editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded) {
+      startEditCamera();
+    }
+    
+    async function startEditCamera() {
+      try {
+        editCurrentDescriptorRef.current = null;
+        setEditCameraStatusText('Mencari Wajah...');
+        setEditCameraStatusColor('var(--accent-warning)');
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+        editStreamRef.current = stream;
+        
+        if (editVideoRef.current) {
+          editVideoRef.current.srcObject = stream;
+          editVideoRef.current.onloadedmetadata = () => {
+            editVideoRef.current.play();
+            if (editCanvasRef.current) {
+              editCanvasRef.current.width = editVideoRef.current.videoWidth;
+              editCanvasRef.current.height = editVideoRef.current.videoHeight;
+              detectEditFace();
+            }
+          };
+        }
+      } catch (err) {
+        setEditCameraStatusText('Kamera Tidak Bisa Diakses');
+        setEditCameraStatusColor('var(--accent-danger)');
+      }
+    }
+
+    const detectEditFace = async () => {
+      if (!editVideoRef.current || editVideoRef.current.paused || editVideoRef.current.ended) return;
+
+      const detection = await faceapi.detectSingleFace(editVideoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceLandmarks().withFaceDescriptor();
+      
+      if (editCanvasRef.current && editVideoRef.current) {
+        const ctx = editCanvasRef.current.getContext('2d');
+        ctx.clearRect(0, 0, editCanvasRef.current.width, editCanvasRef.current.height);
+        
+        if (detection) {
+          const dims = faceapi.matchDimensions(editCanvasRef.current, editVideoRef.current, true);
+          const resizedResult = faceapi.resizeResults(detection, dims);
+          faceapi.draw.drawDetections(editCanvasRef.current, resizedResult);
+          
+          editCurrentDescriptorRef.current = Array.from(detection.descriptor);
+          setEditCameraStatusText('1 Wajah Terdeteksi (Siap Disimpan)');
+          setEditCameraStatusColor('var(--accent-success)');
+        } else {
+          setEditCameraStatusText('Mencari Wajah...');
+          setEditCameraStatusColor('var(--accent-warning)');
+        }
+      }
+      animationFrameId = requestAnimationFrame(detectEditFace);
+    };
+
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [editModalOpen, editUpdateBiometrics, editFormMode, modelsLoaded]);
+
+  // Open Edit Modal
+  const openEditModal = (emp) => {
+    setEditingEmp({
+      id: emp.id,
+      nik: emp.nik || '',
+      name: emp.name || '',
+      department: emp.department || '',
+      afdeling: emp.afdeling || '',
+      nama_kebun: emp.nama_kebun || '',
+      status_tk: emp.status_tk || '',
+      jabatan: emp.jabatan || emp.department || '',
+      status_perkawinan: emp.status_perkawinan || '',
+    });
+    setEditStatusTkCustom(emp.status_tk && !['BHL', 'Karyawan Tetap (PKWTT)', 'Karyawan Kontrak (PKWT)'].includes(emp.status_tk) ? emp.status_tk : '');
+    setEditUpdateBiometrics(false);
+    setEditPhotoPreview(null);
+    editCurrentDescriptorRef.current = null;
+    setEditModalOpen(true);
+  };
+
+  // Submit Edit Form
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingEmp.nik.trim() || !editingEmp.name.trim() || !editingEmp.jabatan.trim()) {
+      showToast('Peringatan Form', 'Mohon lengkapi NIK, Nama, dan Jabatan!', 'error');
+      return;
+    }
+
+    if (editUpdateBiometrics && !editCurrentDescriptorRef.current) {
+      showToast('Peringatan Form', 'Anda memilih Update Biometrik, namun Wajah belum terdeteksi.', 'error');
+      return;
+    }
+
+    const payload = {
+      nik: editingEmp.nik.trim(),
+      name: editingEmp.name.trim(),
+      department: editingEmp.jabatan.trim(),
+      afdeling: editingEmp.afdeling.trim(),
+      nama_kebun: editingEmp.nama_kebun.trim(),
+      status_tk: editingEmp.status_tk === 'Lainnya...' ? editStatusTkCustom.trim() : editingEmp.status_tk,
+      jabatan: editingEmp.jabatan.trim(),
+      status_perkawinan: editingEmp.status_perkawinan,
+    };
+
+    if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
+      payload.face_vector = JSON.stringify(editCurrentDescriptorRef.current);
+    }
+
+    try {
+      let success = false;
+      let errorMsg = '';
+      
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/employees/${editingEmp.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) success = true;
+        else {
+          const text = await res.text();
+          let data = {};
+          if (text) try { data = JSON.parse(text); } catch(e){}
+          if (data.success) success = true;
+          else errorMsg = data.message || `HTTP ${res.status}`;
+        }
+      } catch (err) {
+        errorMsg = err.message;
+      }
+
+      if (!success) {
+        // Fallback Supabase Direct
+        const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
+        if (empErr) throw empErr;
+
+        if (payload.face_vector) {
+          await supabase.from('master_biometrics').update({ face_vector: payload.face_vector }).eq('employee_id', editingEmp.id);
+          await cacheUserMasterVector(editingEmp.id, { face_vector: payload.face_vector });
+        }
+      }
+
+      showToast('Berhasil', 'Data karyawan berhasil diperbarui.', 'success');
+      setEditModalOpen(false);
+      refreshEmployees();
+    } catch (err) {
+      showToast('Error', err.message, 'error');
+    }
+  };
+
+  const handleDeleteClick = (emp) => {
+    openConfirmModal({
+      title: 'Hapus Karyawan',
+      message: `Anda yakin ingin menghapus "${emp.name}"? Data biometrik dan log absensi terkait karyawan ini juga akan terhapus.`,
+      confirmText: 'Ya, Hapus Data',
+      onConfirm: async () => {
+        try {
+          let success = false;
+          let errorMessage = '';
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/employees/${emp.id}`, { method: 'DELETE' });
+            if (res.ok) success = true;
+            else {
+              const text = await res.text();
+              let data = {};
+              if (text) try { data = JSON.parse(text); } catch (e) {}
+              if (data.success) success = true;
+              else errorMessage = data.message || `Error HTTP ${res.status}`;
+            }
+          } catch (err) { errorMessage = err.message; }
+
+          if (!success) {
+            const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
+            if (delErr) throw delErr;
+            success = true;
+          }
+          
+          if (success) {
+            showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah dihapus.`, 'success');
+            refreshEmployees();
+          } else {
+            showToast('Gagal Menghapus', errorMessage, 'error');
+          }
+        } catch (err) {
+          showToast('Error Sistem', err.message, 'error');
+        }
+      },
+    });
+  };
+
+  // ---------------------------------
+  // Filter Logic
+  // ---------------------------------
+  const filteredEmployees = employees.filter((emp) => {
+    const matchesSearch =
+      emp.nik?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      emp.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+    const matchesStatusTk = filterStatusTk ? emp.status_tk === filterStatusTk : true;
+    const matchesStatusPerkawinan = filterStatusPerkawinan ? emp.status_perkawinan === filterStatusPerkawinan : true;
+
+    return matchesSearch && matchesStatusTk && matchesStatusPerkawinan;
+  });
+
+  // ---------------------------------
+  // Export Logic
+  // ---------------------------------
+  const exportToCSV = () => {
+    if (filteredEmployees.length === 0) {
+      showToast('Data Kosong', 'Tidak ada data untuk diekspor.', 'warning');
+      return;
+    }
+    
+    // Headers
+    const headers = ['NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan', 'Biometrik Siap'];
+    
+    // Rows
+    const rows = filteredEmployees.map(emp => [
+      `"${emp.nik || ''}"`,
+      `"${emp.name || ''}"`,
+      `"${emp.afdeling || ''}"`,
+      `"${emp.nama_kebun || ''}"`,
+      `"${emp.jabatan || emp.department || ''}"`,
+      `"${emp.status_tk || ''}"`,
+      `"${emp.status_perkawinan || ''}"`,
+      `"${emp.has_master_biometric ? 'Ya' : 'Tidak'}"`
+    ]);
+    
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Data_Karyawan_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToPDF = () => {
+    // Print window using browser's built-in PDF printer capability
+    window.print();
+  };
+
+  return (
+    <div style={{ width: '100%', padding: '1rem', boxSizing: 'border-box' }} className="print-container">
+      {/* Hide Print Style for normal view */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print-area, .print-area * {
+            visibility: visible;
+          }
+          .print-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
+      
+      <div className="glass-card print-area" style={{ width: '100%', maxWidth: '100%' }}>
+        
+        {/* Header Title */}
+        <div className="card-title" style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
+          Data Master Karyawan
+        </div>
+        
+        {/* Toolbar & Filters (Hidden when printing) */}
+        <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', marginBottom: '1.5rem', alignItems: 'flex-end' }}>
+          
+          {/* Export & Action Buttons */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button type="button" className="btn" onClick={exportToCSV} style={{ background: '#fff', color: '#333', border: '1px solid #ddd', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <FileSpreadsheet size={16} color="#107C41" /> Export Excel
+            </button>
+            <button type="button" className="btn" onClick={exportToPDF} style={{ background: '#fff', color: '#333', border: '1px solid #ddd', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <FileDown size={16} color="#E81123" /> Export PDF
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => navigate('/karyawan')} style={{ background: '#1e293b', border: '1px solid #334155', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Plus size={16} /> Tambah Karyawan
+            </button>
+          </div>
+
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input 
+              type="text" 
+              placeholder="Cari NIK / Nama..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            />
+            
+            <select 
+              value={filterStatusTk} 
+              onChange={(e) => setFilterStatusTk(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            >
+              <option value="" style={{ color: '#000' }}>Filter Status TK (Semua)</option>
+              <option value="BHL" style={{ color: '#000' }}>BHL</option>
+              <option value="Karyawan Tetap (PKWTT)" style={{ color: '#000' }}>PKWTT</option>
+              <option value="Karyawan Kontrak (PKWT)" style={{ color: '#000' }}>PKWT</option>
+            </select>
+
+            <select 
+              value={filterStatusPerkawinan} 
+              onChange={(e) => setFilterStatusPerkawinan(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            >
+              <option value="" style={{ color: '#000' }}>Filter Perkawinan (Semua)</option>
+              <option value="Lajang" style={{ color: '#000' }}>Lajang</option>
+              <option value="Menikah" style={{ color: '#000' }}>Menikah</option>
+              <option value="Duda/Janda" style={{ color: '#000' }}>Duda/Janda</option>
+            </select>
+          </div>
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>NIK</TableHead>
+              <TableHead>Nama</TableHead>
+              <TableHead>Afdeling</TableHead>
+              <TableHead>Nama Kebun</TableHead>
+              <TableHead>Jabatan</TableHead>
+              <TableHead>Status TK</TableHead>
+              <TableHead>Status Pernikahan</TableHead>
+              <TableHead>Biometrik</TableHead>
+              <TableHead className="no-print">Aksi</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredEmployees.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
+              </TableRow>
+            ) : (
+              filteredEmployees.map((emp) => (
+                <TableRow key={emp.id}>
+                  <TableCell className="font-medium">{emp.nik}</TableCell>
+                  <TableCell>{emp.name}</TableCell>
+                  <TableCell>{emp.afdeling || '-'}</TableCell>
+                  <TableCell>{emp.nama_kebun || '-'}</TableCell>
+                  <TableCell>{emp.jabatan || emp.department || '-'}</TableCell>
+                  <TableCell>{emp.status_tk || '-'}</TableCell>
+                  <TableCell>{emp.status_perkawinan || '-'}</TableCell>
+                  <TableCell>
+                    {emp.has_master_biometric ? (
+                      <span className="status-badge success">Siap</span>
+                    ) : (
+                      <span className="status-badge fail">Belum</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="no-print">
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit">
+                        <Edit2 size={18} color="var(--accent-cyan)" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Hapus">
+                        <Trash2 size={18} color="var(--accent-error)" />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Modal Edit Data Karyawan (Sama seperti sebelumnya) */}
+      {editModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+          <div className="glass-card" style={{ maxWidth: '500px', width: '100%', border: '1px solid var(--accent-primary)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Edit Data Karyawan</span>
+              <button type="button" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.2rem', cursor: 'pointer' }} onClick={() => setEditModalOpen(false)}>
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit}>
+              <div className="form-group">
+                <label>NIK / Employee ID</label>
+                <input type="text" value={editingEmp.nik} onChange={(e) => setEditingEmp({ ...editingEmp, nik: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Nama Lengkap</label>
+                <input type="text" value={editingEmp.name} onChange={(e) => setEditingEmp({ ...editingEmp, name: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Afdeling</label>
+                <input type="text" value={editingEmp.afdeling} onChange={(e) => setEditingEmp({ ...editingEmp, afdeling: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Nama Kebun</label>
+                <input type="text" value={editingEmp.nama_kebun} onChange={(e) => setEditingEmp({ ...editingEmp, nama_kebun: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Status TK</label>
+                <select value={editingEmp.status_tk === 'Lainnya...' ? 'Lainnya...' : (['BHL', 'Karyawan Tetap (PKWTT)', 'Karyawan Kontrak (PKWT)'].includes(editingEmp.status_tk) ? editingEmp.status_tk : (editingEmp.status_tk ? 'Lainnya...' : ''))} onChange={(e) => { const val = e.target.value; setEditingEmp({ ...editingEmp, status_tk: val }); if (val !== 'Lainnya...') setEditStatusTkCustom(''); }}>
+                  <option value="">-- Pilih Status TK --</option>
+                  <option value="BHL">BHL (Buruh Harian Lepas)</option>
+                  <option value="Karyawan Tetap (PKWTT)">Karyawan Tetap (PKWTT)</option>
+                  <option value="Karyawan Kontrak (PKWT)">Karyawan Kontrak (PKWT)</option>
+                  <option value="Lainnya...">Lainnya...</option>
+                </select>
+                {(editingEmp.status_tk === 'Lainnya...' || (editingEmp.status_tk && !['BHL', 'Karyawan Tetap (PKWTT)', 'Karyawan Kontrak (PKWT)'].includes(editingEmp.status_tk))) && (
+                  <input type="text" placeholder="Status Lainnya..." value={editStatusTkCustom} onChange={(e) => { setEditStatusTkCustom(e.target.value); setEditingEmp({ ...editingEmp, status_tk: 'Lainnya...' }); }} style={{ marginTop: '8px' }} required />
+                )}
+              </div>
+              <div className="form-group">
+                <label>Jabatan</label>
+                <input type="text" value={editingEmp.jabatan} onChange={(e) => setEditingEmp({ ...editingEmp, jabatan: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Status Perkawinan</label>
+                <select value={editingEmp.status_perkawinan} onChange={(e) => setEditingEmp({ ...editingEmp, status_perkawinan: e.target.value })}>
+                  <option value="">-- Pilih Status --</option>
+                  <option value="Lajang">Lajang</option>
+                  <option value="Menikah">Menikah</option>
+                  <option value="Duda/Janda">Duda/Janda</option>
+                </select>
+              </div>
+              
+              <div className="form-group" style={{ marginTop: '1rem', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: editUpdateBiometrics ? '10px' : '0' }}>
+                  <input type="checkbox" checked={editUpdateBiometrics} onChange={(e) => setEditUpdateBiometrics(e.target.checked)} />
+                  <span>Perbarui Biometrik Wajah? (Re-Scan)</span>
+                </label>
+                {editUpdateBiometrics && (
+                  <div style={{ marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                      <button type="button" className={`btn ${editFormMode === 'camera' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'camera' ? 'rgba(255,255,255,0.1)' : '' }} onClick={() => setEditFormMode('camera')}><i className="fa-solid fa-video"></i> Gunakan Kamera</button>
+                      <button type="button" className={`btn ${editFormMode === 'file' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'file' ? 'rgba(255,255,255,0.1)' : '' }} onClick={() => setEditFormMode('file')}><i className="fa-solid fa-upload"></i> Unggah File Foto</button>
+                    </div>
+                    {editFormMode === 'camera' ? (
+                      <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
+                        <video ref={editVideoRef} autoPlay muted playsInline></video>
+                        <canvas ref={editCanvasRef} className="overlay-canvas"></canvas>
+                      </div>
+                    ) : (
+                      <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border-color)', padding: '1rem', borderRadius: '10px', textAlign: 'center' }}>
+                        <input type="file" ref={editFileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleEditPhotoFileUpload} />
+                        <button type="button" className="btn" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid var(--accent-primary)', width: 'auto' }} onClick={() => editFileInputRef.current && editFileInputRef.current.click()}><i className="fa-solid fa-image"></i> Pilih Foto</button>
+                        {editPhotoPreview && <img src={editPhotoPreview} style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '8px', marginTop: '10px' }} alt="Preview" />}
+                      </div>
+                    )}
+                    <div style={{ marginTop: '8px', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px' }}>
+                      <span>Status Biometrik:</span>
+                      <strong style={{ color: editCameraStatusColor }}>{editCameraStatusText}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
+                <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setEditModalOpen(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Simpan Perubahan</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

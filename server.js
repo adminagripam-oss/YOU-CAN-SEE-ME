@@ -138,17 +138,28 @@ apiRouter.get('/employees', async (req, res) => {
 // 2. POST /api/employees - Register new employee
 apiRouter.post('/employees', async (req, res) => {
   try {
-    const { nik, name, department } = req.body;
-    if (!nik || !name || !department) {
+    const { nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan } = req.body;
+    if (!nik || !name || !jabatan) {
       return res.status(400).json({
         success: false,
-        message: 'NIK, Nama, dan Departemen wajib diisi!'
+        message: 'NIK, Nama, dan Jabatan wajib diisi!'
       });
     }
 
+    const payload = {
+      nik: nik.trim(),
+      name: name.trim(),
+      department: department ? department.trim() : (jabatan ? jabatan.trim() : ''),
+      afdeling: afdeling ? afdeling.trim() : null,
+      nama_kebun: nama_kebun ? nama_kebun.trim() : null,
+      status_tk: status_tk ? status_tk.trim() : null,
+      jabatan: jabatan ? jabatan.trim() : null,
+      status_perkawinan: status_perkawinan ? status_perkawinan.trim() : null,
+    };
+
     const { data, error } = await supabase
       .from('employees')
-      .insert([{ nik: nik.trim(), name: name.trim(), department: department.trim() }])
+      .insert([payload])
       .select()
       .single();
 
@@ -173,15 +184,26 @@ apiRouter.post('/employees', async (req, res) => {
 apiRouter.put('/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { nik, name, department, face_vector } = req.body;
+    const { nik, name, department, face_vector, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan } = req.body;
 
-    if (!nik || !name || !department) {
-      return res.status(400).json({ success: false, message: 'NIK, Nama, dan Departemen wajib diisi!' });
+    if (!nik || !name || !jabatan) {
+      return res.status(400).json({ success: false, message: 'NIK, Nama, dan Jabatan wajib diisi!' });
     }
+
+    const payload = {
+      nik: nik.trim(),
+      name: name.trim(),
+      department: department ? department.trim() : (jabatan ? jabatan.trim() : ''),
+      afdeling: afdeling ? afdeling.trim() : null,
+      nama_kebun: nama_kebun ? nama_kebun.trim() : null,
+      status_tk: status_tk ? status_tk.trim() : null,
+      jabatan: jabatan ? jabatan.trim() : null,
+      status_perkawinan: status_perkawinan ? status_perkawinan.trim() : null,
+    };
 
     const { data, error } = await supabase
       .from('employees')
-      .update({ nik: nik.trim(), name: name.trim(), department: department.trim() })
+      .update(payload)
       .eq('id', id)
       .select()
       .single();
