@@ -919,10 +919,8 @@ export default function TabFaceVerification({
               setLightingWarning(lightingStatus);
 
               // ── Human Detection ─────────────────────────────────────────────
-              const overrideConfig = livenessVerifiedRef.current 
-                ? { face: { enabled: true, mesh: true, iris: true, description: true } } 
-                : { face: { enabled: true, mesh: true, iris: true, description: false } };
-              const result = await human.detect(videoRef.current, overrideConfig);
+              human.config.face.description.enabled = livenessVerifiedRef.current;
+              const result = await human.detect(videoRef.current);
               const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
 
               const videoWidth = videoRef.current?.videoWidth || 640;
