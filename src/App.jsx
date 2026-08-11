@@ -14,6 +14,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import AbsensiPage from './pages/AbsensiPage';
 import KaryawanPage from './pages/KaryawanPage';
+import DaftarKaryawanPage from './pages/DaftarKaryawanPage';
 import LogsPage from './pages/LogsPage';
 import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
@@ -390,6 +391,18 @@ function AppContent() {
               path="/karyawan"
               element={
                 <KaryawanPage
+                  employees={employees}
+                  modelsLoaded={modelsLoaded}
+                  showToast={showToast}
+                  refreshEmployees={fetchEmployees}
+                  openConfirmModal={openConfirmModal}
+                />
+              }
+            />
+            <Route
+              path="/daftar-karyawan"
+              element={
+                <DaftarKaryawanPage
                   employees={employees}
                   modelsLoaded={modelsLoaded}
                   showToast={showToast}

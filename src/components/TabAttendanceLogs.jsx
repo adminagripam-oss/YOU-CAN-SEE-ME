@@ -1,19 +1,17 @@
-import React from 'react';
-import { API_BASE_URL } from '../config';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle } from 'lucide-react';
 
-/**
- * Converts a duration string or seconds into "Xj Ym Zd" (jam, menit, detik) format
- * Accepts:
- *  - "2j 30m" style strings (passthrough, enhanced)
- *  - "2h 30m" style
- *  - raw seconds number
- *  - "0j 0m" → still show as "0j 0m 0d"
- */
 function formatDurasi(durasi) {
-  if (!durasi) return null;
-
-  // If already a number (seconds), convert directly
+  if (!durasi) return '-';
   if (typeof durasi === 'number') {
     const totalSec = Math.round(durasi);
     const jam = Math.floor(totalSec / 3600);
@@ -21,10 +19,7 @@ function formatDurasi(durasi) {
     const detik = totalSec % 60;
     return `${jam}j ${menit}m ${detik}d`;
   }
-
   const str = String(durasi).trim();
-
-  // Match "Xj Ym" or "Xj Ym Zd" pattern already in Indonesian
   const idMatch = str.match(/^(\d+)j\s*(\d+)m(?:\s*(\d+)d)?$/);
   if (idMatch) {
     const jam = parseInt(idMatch[1], 10);
@@ -32,16 +27,12 @@ function formatDurasi(durasi) {
     const detik = idMatch[3] ? parseInt(idMatch[3], 10) : 0;
     return `${jam}j ${menit}m ${detik}d`;
   }
-
-  // Match "Xh Ym" or "X hours Y minutes" style
   const enMatch = str.match(/(\d+)\s*h(?:ours?)?\s*(\d+)\s*m(?:in(?:utes?)?)?/i);
   if (enMatch) {
     const jam = parseInt(enMatch[1], 10);
     const menit = parseInt(enMatch[2], 10);
     return `${jam}j ${menit}m 0d`;
   }
-
-  // Match pure seconds "3600s" or "3600 seconds"
   const secMatch = str.match(/^(\d+)\s*(?:s|sec(?:onds?)?)?$/i);
   if (secMatch) {
     const totalSec = parseInt(secMatch[1], 10);
@@ -50,8 +41,6 @@ function formatDurasi(durasi) {
     const detik = totalSec % 60;
     return `${jam}j ${menit}m ${detik}d`;
   }
-
-  // Fallback: return as is but append "d" if possible
   return str;
 }
 
@@ -62,23 +51,101 @@ export default function TabAttendanceLogs({
   openConfirmModal,
   refreshLogs,
 }) {
-  // Single Log Delete Trigger
-  const handleDeleteSingleLog = (log) => {
-    const tsDate = new Date(log.timestamp);
-    const timePart = tsDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editData, setEditData] = useState(null);
 
+  // GROUP LOGS BY NIK + DATE
+  const groupedLogs = useMemo(() => {
+    if (!logs) return [];
+    const groups = {};
+
+    logs.forEach(log => {
+      const tsDate = new Date(log.timestamp);
+      const dateKey = tsDate.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'); // YYYY-MM-DD format for internal grouping
+      const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+      const key = `${log.nik}_${dateKey}`;
+      
+      if (!groups[key]) {
+        groups[key] = {
+          id: key,
+          date: dateKey,
+          displayDate: displayDate,
+          nik: log.nik,
+          name: log.name,
+          department: log.department,
+          checkIn: '-',
+          checkOut: '-',
+          durasi: null,
+          keterangan: 'Hadir', // default
+          lokasi: '',
+          inLog: null,
+          outLog: null
+        };
+      }
+
+      const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT')) || (log.location && log.location.includes('CHECK-OUT'));
+      const timePart = tsDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const cleanLocation = (log.location || '').replace(/\s*\[CHECK-(IN|OUT)\]/g, '').trim();
+
+      // Extract Keterangan safely
+      let ket = 'Hadir';
+      if (log.status) {
+        if (log.status.includes('Izin')) ket = 'Izin';
+        else if (log.status.includes('Sakit')) ket = 'Sakit';
+        else if (log.status.includes('Mangkir')) ket = 'Mangkir';
+      }
+
+      if (!isCheckOut) {
+        groups[key].checkIn = timePart;
+        groups[key].inLog = log;
+        groups[key].lokasi = cleanLocation;
+        if (ket !== 'Hadir') groups[key].keterangan = ket;
+      } else {
+        groups[key].checkOut = timePart;
+        groups[key].outLog = log;
+        groups[key].durasi = log.durasi;
+        if (cleanLocation && groups[key].lokasi === '') {
+          groups[key].lokasi = cleanLocation;
+        }
+        if (ket !== 'Hadir') groups[key].keterangan = ket;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
+  }, [logs]);
+
+  // FILTER
+  const filteredLogs = useMemo(() => {
+    return groupedLogs.filter(log => {
+      const q = searchQuery.toLowerCase();
+      return (
+        log.name.toLowerCase().includes(q) ||
+        log.nik.toLowerCase().includes(q)
+      );
+    });
+  }, [groupedLogs, searchQuery]);
+
+
+  // DELETE
+  const handleDeleteGroup = (group) => {
     openConfirmModal({
-      title: 'Hapus Session Log Absensi?',
-      message: `Apakah Anda yakin ingin menghapus catatan log absensi untuk "${log.name}" (${timePart}) dari database Supabase?`,
-      confirmText: 'Hapus Session',
+      title: 'Hapus Riwayat Absensi?',
+      message: `Apakah Anda yakin ingin menghapus catatan absensi ${group.name} pada ${group.displayDate}? Data Check-In dan Check-Out (jika ada) akan dihapus secara permanen.`,
+      confirmText: 'Hapus Data',
       onConfirm: async () => {
         try {
-          const { error } = await supabase.from('attendance_logs').delete().eq('id', log.id);
+          const idsToDelete = [];
+          if (group.inLog) idsToDelete.push(group.inLog.id);
+          if (group.outLog) idsToDelete.push(group.outLog.id);
+
+          const { error } = await supabase.from('attendance_logs').delete().in('id', idsToDelete);
+          
           if (!error) {
-            showToast('Log Dihapus', `Log absensi (ID ${log.id}) berhasil dihapus dari database Supabase.`, 'success');
+            showToast('Data Dihapus', `Data absensi berhasil dihapus.`, 'success');
             refreshLogs();
           } else {
-            showToast('Gagal Menghapus Log', error.message, 'error');
+            showToast('Gagal Menghapus', error.message, 'error');
           }
         } catch (err) {
           console.error('[DELETE LOG ERROR]:', err);
@@ -88,223 +155,260 @@ export default function TabAttendanceLogs({
     });
   };
 
-  // Clear All Logs Trigger
-  const handleClearAllLogs = () => {
-    openConfirmModal({
-      title: 'Hapus SELURUH Riwayat Log Absensi?',
-      message:
-        'PERINGATAN HAPUS TOTAL: Apakah Anda benar-benar yakin ingin menghapus SELURUH riwayat log absensi di database Supabase? Tindakan ini tidak dapat dibatalkan!',
-      confirmText: 'Hapus Semua Log',
-      onConfirm: async () => {
-        try {
-          const { error } = await supabase.from('attendance_logs').delete().neq('id', 0);
-          if (!error) {
-            showToast('Seluruh Log Berhasil Dihapus', 'Seluruh riwayat log absensi berhasil dihapus dari database Supabase.', 'success');
-            refreshLogs();
-          } else {
-            showToast('Gagal Menghapus Log', error.message, 'error');
-          }
-        } catch (err) {
-          console.error('[CLEAR ALL LOGS ERROR]:', err);
-          showToast('Error Sistem', err.message, 'error');
-        }
-      },
+  // EDIT
+  const handleOpenEdit = (group) => {
+    setEditData({
+      ...group,
+      editCheckIn: group.checkIn !== '-' ? group.checkIn : '',
+      editCheckOut: group.checkOut !== '-' ? group.checkOut : '',
+      editKeterangan: group.keterangan
     });
+    setIsEditModalOpen(true);
+  };
+
+  const saveEdit = async () => {
+    try {
+      let success = true;
+
+      // Update inLog if it exists and checkIn changed
+      if (editData.inLog && editData.editCheckIn) {
+        // Construct new timestamp
+        const oldDate = new Date(editData.inLog.timestamp);
+        const [hours, minutes, seconds] = editData.editCheckIn.split(':');
+        oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+        
+        let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
+        newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
+
+        const { error } = await supabase.from('attendance_logs').update({ 
+          timestamp: oldDate.toISOString(),
+          status: newStatus
+        }).eq('id', editData.inLog.id);
+        
+        if (error) success = false;
+      }
+
+      // Update outLog if it exists and checkOut changed
+      if (editData.outLog && editData.editCheckOut) {
+        const oldDate = new Date(editData.outLog.timestamp);
+        const [hours, minutes, seconds] = editData.editCheckOut.split(':');
+        oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+        
+        let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
+        newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
+
+        const { error } = await supabase.from('attendance_logs').update({ 
+          timestamp: oldDate.toISOString(),
+          status: newStatus
+        }).eq('id', editData.outLog.id);
+        
+        if (error) success = false;
+      }
+
+      if (success) {
+        showToast('Berhasil', 'Log absensi berhasil diperbarui.', 'success');
+        setIsEditModalOpen(false);
+        refreshLogs();
+      } else {
+        showToast('Gagal', 'Terjadi kesalahan saat mengupdate log.', 'error');
+      }
+    } catch (err) {
+      showToast('Error', err.message, 'error');
+    }
+  };
+
+  // EXPORT CSV
+  const exportToCSV = () => {
+    if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
+    let csvContent = "data:text/csv;charset=utf-8,Tanggal,NIK,Nama Karyawan,Afdeling,Check In,Check Out,Durasi,Keterangan,Lokasi\n";
+    filteredLogs.forEach(row => {
+      csvContent += `${row.displayDate},${row.nik},${row.name},${row.department},${row.checkIn},${row.checkOut},${row.durasi ? formatDurasi(row.durasi) : '-'},${row.keterangan},"${row.lokasi}"\n`;
+    });
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Data_Log_Absensi.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // EXPORT PDF
+  const exportToPDF = () => {
+    window.print();
+  };
+
+  const renderKeteranganIcon = (ket) => {
+    switch (ket) {
+      case 'Hadir': return <span className="status-badge success" style={{ gap: '4px', fontSize:'0.75rem' }}><CheckCircle size={14}/> Hadir</span>;
+      case 'Izin': return <span className="status-badge info" style={{ background:'rgba(56, 189, 248, 0.1)', color:'#38bdf8', border:'1px solid rgba(56, 189, 248, 0.3)', gap: '4px', fontSize:'0.75rem' }}><Mail size={14}/> Izin</span>;
+      case 'Sakit': return <span className="status-badge warning" style={{ background:'rgba(245, 158, 11, 0.1)', color:'#f59e0b', border:'1px solid rgba(245, 158, 11, 0.3)', gap: '4px', fontSize:'0.75rem' }}><Power size={14}/> Sakit</span>;
+      case 'Mangkir': return <span className="status-badge danger" style={{ background:'rgba(239, 68, 68, 0.1)', color:'#ef4444', border:'1px solid rgba(239, 68, 68, 0.3)', gap: '4px', fontSize:'0.75rem' }}><XCircle size={14}/> Mangkir</span>;
+      default: return ket;
+    }
   };
 
   return (
     <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-      {/* Table Header Area */}
-      <div
-        style={{
-          padding: '1.25rem 1.5rem',
-          borderBottom: '1px solid var(--border-color)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-        }}
-      >
-        <div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <i className="fa-solid fa-list-check" style={{ color: 'var(--accent-cyan)' }}></i>
-            Riwayat Log Absensi Biometrik
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Pencatatan seluruh percobaan absensi Check-In &amp; Check-Out beserta durasi kerja.
-          </p>
+      
+      {/* Header & Toolbar */}
+      <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)' }}>
+              Riwayat Log Absensi Biometrik
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+              Pencatatan data gabungan absensi harian karyawan.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-action edit" onClick={exportToCSV} style={{ padding: '8px 14px' }}>
+              <FileSpreadsheet size={16} /> Export Excel
+            </button>
+            <button className="btn-action delete" onClick={exportToPDF} style={{ padding: '8px 14px', background: 'var(--accent-primary)', color: '#fff', border: 'none' }}>
+              <FileDown size={16} /> Export PDF
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            type="button"
-            className="btn-action edit"
-            style={{ padding: '8px 14px', fontSize: '0.82rem' }}
-            onClick={onRefreshLogs}
-          >
-            <i className="fa-solid fa-arrows-rotate"></i> Refresh Log
-          </button>
-          <button
-            type="button"
-            className="btn-action delete"
-            style={{ padding: '8px 14px', fontSize: '0.82rem' }}
-            onClick={handleClearAllLogs}
-          >
-            <i className="fa-solid fa-trash-can"></i> Hapus Semua Log
-          </button>
+        {/* Search Bar */}
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+          <Search size={18} color="var(--text-muted)" />
+          <input
+            type="text"
+            placeholder="Cari berdasarkan Nama atau NIK..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ border: 'none', background: 'transparent', color: 'var(--text-main)', width: '100%', outline: 'none', fontSize: '0.9rem' }}
+          />
         </div>
       </div>
 
-      {/* Shadcn UI Table */}
+      {/* Table */}
       <div className="table-container" style={{ marginTop: 0 }}>
-        <table className="shadcn-table">
-          <thead>
-            <tr>
-              <th>Waktu</th>
-              <th>Tipe</th>
-              <th>NIK</th>
-              <th>Nama Karyawan</th>
-              <th>Departemen</th>
-              <th>Durasi Kerja</th>
-              <th>Status</th>
-              <th>Lokasi</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!logs || logs.length === 0 ? (
-              <tr className="shadcn-tr-empty">
-                <td colSpan="9">
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '2.5rem 0',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    <i className="fa-regular fa-clock" style={{ fontSize: '2rem', opacity: 0.35 }}></i>
-                    <span style={{ fontSize: '0.9rem' }}>Belum ada log absensi yang tercatat.</span>
-                  </div>
-                </td>
-              </tr>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tanggal</TableHead>
+              <TableHead>Check In</TableHead>
+              <TableHead>NIK</TableHead>
+              <TableHead>Nama Karyawan</TableHead>
+              <TableHead>Afdeling</TableHead>
+              <TableHead>Check Out</TableHead>
+              <TableHead>Durasi</TableHead>
+              <TableHead>Keterangan</TableHead>
+              <TableHead>Lokasi</TableHead>
+              <TableHead>Aksi</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredLogs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={10} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                  Belum ada log absensi yang tercatat.
+                </TableCell>
+              </TableRow>
             ) : (
-              logs.map((log) => {
-                const isSuccess = log.status && log.status.includes('BERHASIL');
-                const badgeClass = isSuccess ? 'success' : 'fail';
-
-                const tsDate = new Date(log.timestamp);
-                const datePart = tsDate.toLocaleDateString('id-ID', {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric',
-                });
-                const timePart = tsDate.toLocaleTimeString('id-ID', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                });
-
-                const isCheckOut =
-                  log.attendance_type === 'CHECK-OUT' ||
-                  (log.status && log.status.includes('CHECK-OUT')) ||
-                  (log.location && log.location.includes('CHECK-OUT'));
-
-                const typeBadge = isCheckOut ? (
-                  <span
-                    className="status-badge"
-                    style={{
-                      background: 'rgba(245,158,11,0.18)',
-                      color: '#fbbf24',
-                      border: '1px solid rgba(245,158,11,0.35)',
-                      gap: '4px',
-                    }}
-                  >
-                    <i className="fa-solid fa-right-from-bracket"></i> OUT
-                  </span>
-                ) : (
-                  <span className="status-badge success" style={{ gap: '4px' }}>
-                    <i className="fa-solid fa-right-to-bracket"></i> IN
-                  </span>
-                );
-
-                // Build durasi cell with jam/menit/detik format
-                let durasiCell = <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>;
-                if (isCheckOut && log.durasi) {
-                  const formatted = formatDurasi(log.durasi);
-                  durasiCell = (
-                    <span className="durasi-badge">
-                      <i className="fa-regular fa-clock"></i> {formatted}
-                    </span>
-                  );
-                } else if (!isCheckOut && isSuccess) {
-                  durasiCell = (
-                    <span className="durasi-badge checkin">
-                      <i className="fa-solid fa-right-to-bracket"></i> Sedang Bekerja
-                    </span>
-                  );
-                }
-
-                const cleanLocation = (log.location || '').replace(/\s*\[CHECK-(IN|OUT)\]/g, '');
-
-                return (
-                  <tr key={log.id}>
-                    <td>
-                      <div className="time-cell">
-                        <span className="date-part">{datePart}</span>
-                        <span className="time-part">{timePart}</span>
-                      </div>
-                    </td>
-                    <td>{typeBadge}</td>
-                    {/* NIK uses CSS variable for theme-aware color */}
-                    <td className="nik-cell">{log.nik}</td>
-                    <td>{log.name}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{log.department}</td>
-                    <td>{durasiCell}</td>
-                    <td>
-                      <span className={`status-badge ${badgeClass}`} style={{ fontSize: '0.72rem' }}>
-                        {isSuccess ? 'BERHASIL' : 'GAGAL'}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{cleanLocation}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-action delete"
-                        style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                        onClick={() => handleDeleteSingleLog(log)}
-                      >
-                        <i className="fa-solid fa-trash"></i> Hapus
+              filteredLogs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
+                  <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
+                  <TableCell className="nik-cell">{log.nik}</TableCell>
+                  <TableCell>{log.name}</TableCell>
+                  <TableCell style={{ color: 'var(--text-muted)' }}>{log.department}</TableCell>
+                  <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
+                  <TableCell>
+                    {log.durasi ? (
+                      <span className="durasi-badge"><i className="fa-regular fa-clock"></i> {formatDurasi(log.durasi)}</span>
+                    ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
+                       <span className="durasi-badge checkin" style={{ fontSize:'0.7rem', padding:'2px 6px' }}>Sedang Bekerja</span>
+                    ) : '-'}
+                  </TableCell>
+                  <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
+                  <TableCell style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {log.lokasi || '-'}
+                  </TableCell>
+                  <TableCell>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
+                        <Edit2 size={14} />
                       </button>
-                    </td>
-                  </tr>
-                );
-              })
+                      <button className="btn-action delete" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleDeleteGroup(log)} title="Hapus">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
-          </tbody>
-          {logs && logs.length > 0 && (
-            <tfoot>
-              <tr>
-                <td
-                  colSpan="9"
-                  style={{
-                    padding: '10px 16px',
-                    fontSize: '0.8rem',
-                    color: 'var(--text-muted)',
-                    borderTop: '1px solid var(--border-color)',
-                    background: 'var(--bg-secondary)',
-                  }}
-                >
-                  Total <strong>{logs.length}</strong> entri tercatat hari ini &amp; historis.
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
+          </TableBody>
+        </Table>
       </div>
+
+      {/* EDIT MODAL */}
+      {isEditModalOpen && editData && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+          <div className="glass-card" style={{ maxWidth: '450px', width: '100%', border: '1px solid var(--accent-primary)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>Edit Log Absensi</h3>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                Karyawan: <strong style={{ color: 'var(--text-main)' }}>{editData.name} ({editData.nik})</strong><br/>
+                Tanggal: <strong style={{ color: 'var(--text-main)' }}>{editData.displayDate}</strong>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-In</label>
+                <input 
+                  type="time" 
+                  step="1"
+                  value={editData.editCheckIn} 
+                  onChange={(e) => setEditData({...editData, editCheckIn: e.target.value})} 
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                  disabled={!editData.inLog}
+                />
+                {!editData.inLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-in</small>}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-Out</label>
+                <input 
+                  type="time" 
+                  step="1"
+                  value={editData.editCheckOut} 
+                  onChange={(e) => setEditData({...editData, editCheckOut: e.target.value})} 
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                  disabled={!editData.outLog}
+                />
+                {!editData.outLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-out</small>}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Keterangan</label>
+                <select 
+                  value={editData.editKeterangan} 
+                  onChange={(e) => setEditData({...editData, editKeterangan: e.target.value})} 
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                >
+                  <option value="Hadir">Hadir</option>
+                  <option value="Izin">Izin</option>
+                  <option value="Sakit">Sakit</option>
+                  <option value="Mangkir">Mangkir</option>
+                </select>
+              </div>
+
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>Batal</button>
+              <button type="button" className="btn btn-primary" onClick={saveEdit}>Simpan Perubahan</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

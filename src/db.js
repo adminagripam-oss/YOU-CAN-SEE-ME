@@ -41,7 +41,12 @@ export async function cacheUserMasterVector(user) {
     const payload = {
       nik: user.nik,
       name: user.name,
-      department: user.department,
+      department: user.department || user.jabatan,
+      afdeling: user.afdeling || null,
+      nama_kebun: user.nama_kebun || null,
+      status_tk: user.status_tk || null,
+      jabatan: user.jabatan || null,
+      status_perkawinan: user.status_perkawinan || null,
       descriptor_json: user.descriptor_json || user.descriptor || user.face_vector || null,
       face_vector: user.face_vector || user.descriptor_json || user.descriptor || null,
       geometric_descriptor_json: user.geometric_descriptor_json || null,

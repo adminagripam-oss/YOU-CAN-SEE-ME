@@ -43,10 +43,10 @@
 
 /* 2. DARK THEME VARIABLES */
 [data-theme="dark"] {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-card: #1e293b;
-  --bg-input: #0f172a;
+  --bg-primary: #0F0F0F;
+  --bg-secondary: #1E1E1E;
+  --bg-card: #1E1E1E;
+  --bg-input: #0F0F0F;
   --border-color: rgba(255, 255, 255, 0.15);
   --border-hover: rgba(255, 255, 255, 0.3);
   --border-focus: #6366f1;
@@ -85,7 +85,7 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: Arial, Helvetica, sans-serif;
   -webkit-tap-highlight-color: transparent;
 }
 

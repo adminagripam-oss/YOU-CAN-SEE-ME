@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../config';
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
 import { Human } from '@vladmandic/human';
+import { CheckCircle, Mail, Power, XCircle, ChevronDown } from 'lucide-react';
 
 const humanConfig = {
   modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
@@ -42,20 +43,20 @@ function extractGFV(landmarks) {
     const pts = landmarks.positions;
     if (!pts || pts.length < 68) return null;
 
-    const lEye  = cen(pts.slice(36, 42));
-    const rEye  = cen(pts.slice(42, 48));
+    const lEye = cen(pts.slice(36, 42));
+    const rEye = cen(pts.slice(42, 48));
     const lBrow = cen(pts.slice(17, 22));
     const rBrow = cen(pts.slice(22, 27));
     const midEye = cen([lEye, rEye]);
-    const ipd    = pd(lEye, rEye);
+    const ipd = pd(lEye, rEye);
     if (ipd < 5) return null;                    // face too small / too far
 
-    const n  = (v) => parseFloat((v / ipd).toFixed(6));   // normalize by IPD
+    const n = (v) => parseFloat((v / ipd).toFixed(6));   // normalize by IPD
     const ns = (v) => parseFloat(v.toFixed(6));            // already ratio
 
     const noseTip = pts[30];
     const noseBtm = pts[33];
-    const chin    = pts[8];
+    const chin = pts[8];
 
     return [
       // ── Eyes (0–5) ──────────────────────────────────────────────────────
@@ -87,25 +88,25 @@ function extractGFV(landmarks) {
       n(pd(noseTip, pts[51])),   // 21 nose tip → upper lip
       n(pd(midEye, chin)),       // 22 eye midpoint → chin
       // ── Jaw segment distances (23–31) ───────────────────────────────────
-      n(pd(pts[0],  pts[16])),   // 23 face width (jaw corners)
-      n(pd(pts[4],  pts[12])),   // 24 cheek width
-      n(pd(pts[2],  pts[14])),   // 25 jaw intermediate width
-      n(pd(pts[0],  pts[8])),    // 26 L jaw height
+      n(pd(pts[0], pts[16])),   // 23 face width (jaw corners)
+      n(pd(pts[4], pts[12])),   // 24 cheek width
+      n(pd(pts[2], pts[14])),   // 25 jaw intermediate width
+      n(pd(pts[0], pts[8])),    // 26 L jaw height
       n(pd(pts[16], pts[8])),    // 27 R jaw height
-      n(pd(pts[0],  pts[4])),    // 28 L jaw segment
-      n(pd(pts[4],  pts[8])),    // 29 L-mid jaw segment
-      n(pd(pts[8],  pts[12])),   // 30 R-mid jaw segment
+      n(pd(pts[0], pts[4])),    // 28 L jaw segment
+      n(pd(pts[4], pts[8])),    // 29 L-mid jaw segment
+      n(pd(pts[8], pts[12])),   // 30 R-mid jaw segment
       n(pd(pts[12], pts[16])),   // 31 R jaw segment
       // ── Symmetry offsets / signed (32–35) ───────────────────────────────
-      ns((lEye.x    - midEye.x) / ipd),  // 32 L eye horiz offset
-      ns((rEye.x    - midEye.x) / ipd),  // 33 R eye horiz offset
+      ns((lEye.x - midEye.x) / ipd),  // 32 L eye horiz offset
+      ns((rEye.x - midEye.x) / ipd),  // 33 R eye horiz offset
       ns((noseTip.x - midEye.x) / ipd),  // 34 nose horiz offset
       ns((pts[57].x - midEye.x) / ipd),  // 35 mouth horiz offset
       // ── Scale-invariant facial ratios (36–39) ───────────────────────────
-      ns(pd(midEye, chin)        / pd(pts[0], pts[16])),    // 36 face aspect ratio
-      ns(pd(pts[27], noseTip)    / pd(noseTip, chin)),       // 37 upper/lower face split
-      ns(pd(pts[48], pts[54])    / pd(pts[0], pts[16])),     // 38 mouth / face-width ratio
-      ns(pd(pts[17], pts[26])    / pd(pts[0], pts[16])),     // 39 brow span / face-width ratio
+      ns(pd(midEye, chin) / pd(pts[0], pts[16])),    // 36 face aspect ratio
+      ns(pd(pts[27], noseTip) / pd(noseTip, chin)),       // 37 upper/lower face split
+      ns(pd(pts[48], pts[54]) / pd(pts[0], pts[16])),     // 38 mouth / face-width ratio
+      ns(pd(pts[17], pts[26]) / pd(pts[0], pts[16])),     // 39 brow span / face-width ratio
     ];
   } catch {
     return null;
@@ -126,7 +127,7 @@ function checkLightingQuality(videoEl) {
     const imgData = offscreenCtx.getImageData(0, 0, 32, 32).data;
     let sum = 0;
     for (let i = 0; i < imgData.length; i += 4) {
-      sum += (0.299 * imgData[i] + 0.587 * imgData[i+1] + 0.114 * imgData[i+2]);
+      sum += (0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2]);
     }
     const avg = sum / (32 * 32);
     if (avg < 40) return "Area Terlalu Gelap";
@@ -151,7 +152,7 @@ function playBeepSound() {
     gainNode.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.1);
-  } catch (e) {}
+  } catch (e) { }
 }
 
 /**
@@ -183,7 +184,7 @@ function cosineSimilarity(vecA, vecB) {
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < vecA.length; i++) {
     const a = vecA[i], b = vecB[i];
-    dot   += a * b;
+    dot += a * b;
     normA += a * a;
     normB += b * b;
   }
@@ -227,7 +228,7 @@ const FACE_TRIANGLES = [
   [21, 22, 27], [22, 23, 27], [23, 24, 27], [24, 25, 27], [25, 26, 27],
 
   // ── LEFT TEMPLE (jaw corner 0 → brow 17 → eye 36) ────────────────────
-  [0, 17, 36], [0,  1, 36],
+  [0, 17, 36], [0, 1, 36],
 
   // ── RIGHT TEMPLE (jaw corner 16 → brow 26 → eye 45) ─────────────────
   [16, 26, 45], [15, 16, 45],
@@ -261,7 +262,7 @@ const FACE_TRIANGLES = [
   [30, 31, 32], [30, 32, 33], [30, 33, 34], [30, 34, 35],
 
   // ── LEFT CHEEK UPPER (eye → nose bridge → jaw) ────────────────────────
-  [1,  2, 36], [2,  3, 41], [3,  4, 41],
+  [1, 2, 36], [2, 3, 41], [3, 4, 41],
   [36, 41, 31], [41, 40, 31],
   [2, 36, 41],
 
@@ -271,13 +272,13 @@ const FACE_TRIANGLES = [
   [14, 45, 46],
 
   // ── LEFT CHEEK LOWER (jaw → nose ala → mouth corner) ─────────────────
-  [3,  4, 31], [4,  5, 31], [5,  6, 31],
-  [6,  7, 48], [5, 48, 31],
+  [3, 4, 31], [4, 5, 31], [5, 6, 31],
+  [6, 7, 48], [5, 48, 31],
   [31, 40, 41], [40, 48, 41],
 
   // ── RIGHT CHEEK LOWER (jaw → nose ala → mouth corner) ────────────────
-  [12, 11, 35], [11, 10, 35], [10,  9, 35],
-  [9,  8, 54], [10, 54, 35],
+  [12, 11, 35], [11, 10, 35], [10, 9, 35],
+  [9, 8, 54], [10, 54, 35],
   [35, 46, 47], [46, 54, 47],
 
   // ── UPPER LIP REGION (nose → mouth) ───────────────────────────────────
@@ -297,11 +298,11 @@ const FACE_TRIANGLES = [
   [60, 64, 65], [60, 65, 66], [60, 66, 67],
 
   // ── LOWER FACE LEFT (mouth corner → jaw → chin) ───────────────────────
-  [6,  7, 59], [7,  8, 58], [8,  57, 58],
+  [6, 7, 59], [7, 8, 58], [8, 57, 58],
   [6, 48, 59], [48, 59, 6],
 
   // ── LOWER FACE RIGHT (mouth corner → jaw → chin) ─────────────────────
-  [9, 10, 55], [9, 56, 55], [8,  9, 56],
+  [9, 10, 55], [9, 56, 55], [8, 9, 56],
   [9, 54, 10], [54, 10, 11],
 
   // ── CHIN FILL ─────────────────────────────────────────────────────────
@@ -329,19 +330,19 @@ function drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, matched) {
   const x0 = minX - pad, y0 = minY - pad;
   const x1 = maxX + pad, y1 = maxY + pad;
   const len = Math.min((x1 - x0), (y1 - y0)) * 0.14;
-  const lw  = 2.5;
+  const lw = 2.5;
   const alpha = matched ? 0.95 : 0.75;
 
   ctx.save();
   ctx.strokeStyle = `rgba(${R},${G},${B},${alpha})`;
-  ctx.lineWidth   = lw;
-  ctx.lineCap     = 'square';
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'square';
 
   const corners = [
-    [x0, y0,  len,  0,  0,  len],   // top-left
-    [x1, y0, -len,  0,  0,  len],   // top-right
-    [x0, y1,  len,  0,  0, -len],   // bottom-left
-    [x1, y1, -len,  0,  0, -len],   // bottom-right
+    [x0, y0, len, 0, 0, len],   // top-left
+    [x1, y0, -len, 0, 0, len],   // top-right
+    [x0, y1, len, 0, 0, -len],   // bottom-left
+    [x1, y1, -len, 0, 0, -len],   // bottom-right
   ];
   for (const [ox, oy, hx, hy, vx, vy] of corners) {
     ctx.beginPath(); ctx.moveTo(ox + hx, oy); ctx.lineTo(ox, oy); ctx.lineTo(ox, oy + vy); ctx.stroke();
@@ -395,12 +396,13 @@ function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
 
   drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
 
-  ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.6)`;
+  // Perbesar ukuran titik (radius dari 1.2 menjadi 2.5) dan buat lebih tegas (opacity 0.85)
+  ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.85)`;
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
     if (!p) continue;
     ctx.beginPath();
-    ctx.arc(p[0], p[1], 1.2, 0, 2 * Math.PI);
+    ctx.arc(p[0], p[1], 2.5, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
@@ -413,7 +415,7 @@ function _drawIrisPupil(ctx, pupilPt, R, G, B) {
   ctx.beginPath();
   ctx.arc(pupilPt.x, pupilPt.y, 5.5, 0, 2 * Math.PI);
   ctx.strokeStyle = `rgba(${R},${G},${B},0.95)`;
-  ctx.lineWidth   = 1.5;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
   // Pupil center dot
   ctx.beginPath();
@@ -427,7 +429,7 @@ function _drawIrisPupil(ctx, pupilPt, R, G, B) {
 function _drawCrosshair(ctx, x, y, R, G, B) {
   ctx.save();
   ctx.strokeStyle = `rgba(${R},${G},${B},0.95)`;
-  ctx.lineWidth   = 1.2;
+  ctx.lineWidth = 1.2;
   const sz = 4;
   ctx.beginPath();
   ctx.moveTo(x - sz, y); ctx.lineTo(x + sz, y);
@@ -443,13 +445,13 @@ function _measureLine(ctx, a, b, label, R, G, B) {
   ctx.beginPath();
   ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
   ctx.strokeStyle = `rgba(${R},${G},${B},0.55)`;
-  ctx.lineWidth   = 0.85;
+  ctx.lineWidth = 0.85;
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font        = 'bold 8px monospace';
-  ctx.fillStyle   = `rgba(${R},${G},${B},0.90)`;
+  ctx.font = 'bold 8px monospace';
+  ctx.fillStyle = `rgba(${R},${G},${B},0.90)`;
   ctx.shadowColor = 'rgba(0,0,0,0.8)';
-  ctx.shadowBlur  = 3;
+  ctx.shadowBlur = 3;
   ctx.fillText(label, (a.x + b.x) / 2 + 2, (a.y + b.y) / 2 - 4);
   ctx.restore();
 }
@@ -461,7 +463,7 @@ function _measureLine(ctx, a, b, label, R, G, B) {
 
 function formatDuration(secs) {
   const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 function fmtTime(ts) {
   if (!ts) return '—';
@@ -472,7 +474,7 @@ function captureVideoFrameBase64(videoEl) {
   if (!videoEl || videoEl.readyState < 2) return null;
   try {
     const canvas = document.createElement('canvas');
-    canvas.width  = videoEl.videoWidth  || 640;
+    canvas.width = videoEl.videoWidth || 640;
     canvas.height = videoEl.videoHeight || 480;
     const ctx = canvas.getContext('2d');
     ctx.translate(canvas.width, 0);
@@ -518,30 +520,31 @@ function calculateEAR(pts, eyePoints) {
   return (vert1 + vert2) / (2.0 * horiz);
 }
 
-const MP_LEFT_EYE  = [130, 133, 243, 27, 23, 119];
-const MP_RIGHT_EYE = [359, 362, 255, 254, 339, 253];
+const MP_LEFT_EYE = [33, 133, 160, 158, 144, 153];
+const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
 }) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
-  const [nikInput, setNikInput]             = useState('');
+  const [nikInput, setNikInput] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('Hadir');
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
 
   // Liveness States (Blink & Head Turn)
-  const [isLiveHuman, setIsLiveHuman]           = useState(false);
+  const [isLiveHuman, setIsLiveHuman] = useState(false);
   const [livenessStatusMsg, setLivenessStatusMsg] = useState('Harap posisikan wajah Anda di tengah layar');
-  const [currentEAR, setCurrentEAR]             = useState(0.3);
+  const [currentEAR, setCurrentEAR] = useState(0.3);
   const [capturedBase64Image, setCapturedBase64Image] = useState(null);
 
-  const [headTurnState, setHeadTurnState]       = useState({ left: false, right: false });
+  const [headTurnState, setHeadTurnState] = useState({ left: false, right: false });
   const [livenessVerified, setLivenessVerified] = useState(false);
   const [livenessChallenge, setLivenessChallenge] = useState('');
 
   // Geometric 1-to-1 Match States
   const [matchRate, setMatchRate] = useState(0);
   const [isMatched, setIsMatched] = useState(false);
-  const [gfvMode, setGfvMode]     = useState(false);
+  const [gfvMode, setGfvMode] = useState(false);
 
   // Camera settings
   const [facingMode, setFacingMode] = useState('user'); // 'user' = depan, 'environment' = belakang
@@ -552,27 +555,27 @@ export default function TabFaceVerification({
     checkedIn: false, checkInTime: null, checkOutTime: null, loaded: false,
   });
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [isSubmitting, setIsSubmitting]     = useState(false);
-  const [lastResultMsg, setLastResultMsg]   = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastResultMsg, setLastResultMsg] = useState(null);
 
   // Refs
-  const videoRef             = useRef(null);
-  const canvasRef            = useRef(null);
-  const currentDescRef       = useRef(null);
-  const currentGFVRef        = useRef(null);
-  const streamRef            = useRef(null);
-  const headTurnRef          = useRef({ left: false, right: false });
-  const livenessVerifiedRef  = useRef(false);
-  const eyeClosedRef         = useRef(false); // for blink detection transition
-  const masterGFVRef         = useRef(null);
-  const masterVectorRef      = useRef(null);
-  const matchRateRef         = useRef(0);
-  const isMatchedRef         = useRef(false);
-  const timerRef             = useRef(null);
-  const hasBeepedRef         = useRef(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const currentDescRef = useRef(null);
+  const currentGFVRef = useRef(null);
+  const streamRef = useRef(null);
+  const headTurnRef = useRef({ left: false, right: false });
+  const livenessVerifiedRef = useRef(false);
+  const eyeClosedRef = useRef(false); // for blink detection transition
+  const masterGFVRef = useRef(null);
+  const masterVectorRef = useRef(null);
+  const matchRateRef = useRef(0);
+  const isMatchedRef = useRef(false);
+  const timerRef = useRef(null);
+  const hasBeepedRef = useRef(false);
   const selectedEmployeeIdRef = useRef('');
   const livenessChallengeRef = useRef('');
-  const scoreHistoryRef      = useRef([]);
+  const scoreHistoryRef = useRef([]);
 
   const selectedEmployee = employees.find((e) => String(e.id) === String(selectedEmployeeId));
 
@@ -610,21 +613,22 @@ export default function TabFaceVerification({
     const empId = e.target.value;
     setSelectedEmployeeId(empId);
     selectedEmployeeIdRef.current = empId; // Simpan ke ref agar detection loop membaca versi terbaru tanpa restart
-    
+
     // Pick random challenge
     const challenges = ['BLINK', 'TURN_LEFT', 'TURN_RIGHT'];
     const randomChallenge = challenges[Math.floor(Math.random() * challenges.length)];
     setLivenessChallenge(randomChallenge);
     livenessChallengeRef.current = randomChallenge;
-    
-    headTurnRef.current        = { left: false, right: false };
+
+    headTurnRef.current = { left: false, right: false };
+    eyeClosedRef.current = false;
     livenessVerifiedRef.current = false;
-    hasBeepedRef.current       = false; // Reset beep state
-    masterGFVRef.current       = null;
-    masterVectorRef.current    = null;
-    matchRateRef.current       = 0;
-    isMatchedRef.current       = false;
-    scoreHistoryRef.current    = [];
+    hasBeepedRef.current = false; // Reset beep state
+    masterGFVRef.current = null;
+    masterVectorRef.current = null;
+    matchRateRef.current = 0;
+    isMatchedRef.current = false;
+    scoreHistoryRef.current = [];
     setHeadTurnState({ left: false, right: false });
     setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
     setGfvMode(false); setLastResultMsg(null);
@@ -663,7 +667,7 @@ export default function TabFaceVerification({
               if (data.success) {
                 vec = data.face_vector || data.descriptor_json;
               }
-            } catch (jsonErr) {}
+            } catch (jsonErr) { }
           }
         } catch (e) {
           console.warn('[LOAD MASTER API WARN]:', e.message);
@@ -697,7 +701,7 @@ export default function TabFaceVerification({
 
       if (vec) {
         if (typeof vec === 'string') {
-          try { vec = JSON.parse(vec); } catch {}
+          try { vec = JSON.parse(vec); } catch { }
         }
         if (Array.isArray(vec) || vec instanceof Float32Array || typeof vec === 'object') {
           masterVectorRef.current = Array.from(Object.values(vec));
@@ -741,7 +745,7 @@ export default function TabFaceVerification({
         try {
           const data = JSON.parse(text);
           if (data?.success) statusData = data;
-        } catch (jsonErr) {}
+        } catch (jsonErr) { }
       }
     } catch (err) {
       console.warn('[FETCH ATTENDANCE STATUS API WARN - FALLBACK TO SUPABASE/DEXIE]:', err.message);
@@ -804,7 +808,7 @@ export default function TabFaceVerification({
             !!lastCheckIn &&
             (!lastCheckOut ||
               new Date(lastCheckIn.timestamp || lastCheckIn.created_at) >
-                new Date(lastCheckOut.timestamp || lastCheckOut.created_at));
+              new Date(lastCheckOut.timestamp || lastCheckOut.created_at));
 
           statusData = {
             hasCheckedIn: !!lastCheckIn,
@@ -895,11 +899,11 @@ export default function TabFaceVerification({
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            width: { ideal: 640 }, 
-            height: { ideal: 720 }, 
-            facingMode: facingMode 
-          }, 
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 720 },
+            facingMode: facingMode
+          },
           audio: false,
         });
         if (videoRef.current) { videoRef.current.srcObject = stream; streamRef.current = stream; }
@@ -909,25 +913,28 @@ export default function TabFaceVerification({
 
           if (!isDetecting && videoRef.current && videoRef.current.readyState === 4 && modelsLoaded) {
             isDetecting = true;
-            
+
             try {
               const lightingStatus = checkLightingQuality(videoRef.current);
               setLightingWarning(lightingStatus);
 
               // ── Human Detection ─────────────────────────────────────────────
-              const result = await human.detect(videoRef.current);
+              const overrideConfig = livenessVerifiedRef.current 
+                ? {} 
+                : { face: { description: { enabled: false } } };
+              const result = await human.detect(videoRef.current, overrideConfig);
               const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
 
               const videoWidth = videoRef.current?.videoWidth || 640;
               const videoHeight = videoRef.current?.videoHeight || 480;
-              
+
               if (canvasRef.current) {
                 canvasRef.current.width = videoWidth;
                 canvasRef.current.height = videoHeight;
               }
 
               const ctx = canvasRef.current?.getContext('2d');
-              
+
               if (ctx) {
                 ctx.clearRect(0, 0, videoWidth, videoHeight);
 
@@ -935,32 +942,35 @@ export default function TabFaceVerification({
                   currentDescRef.current = null;
                   setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
                 } else {
-                  currentDescRef.current = Array.from(detection.embedding);
+                  if (detection.embedding) {
+                    currentDescRef.current = Array.from(detection.embedding);
+                  }
 
                   // ── EYE ASPECT RATIO (EAR) BLINK DETECTION (ANTI-SPOOFING) ─────────
                   const landmarksPos = detection.mesh; // 478 points
-                  const leftEAR  = calculateEAR(landmarksPos, MP_LEFT_EYE);
+                  const leftEAR = calculateEAR(landmarksPos, MP_LEFT_EYE);
                   const rightEAR = calculateEAR(landmarksPos, MP_RIGHT_EYE);
-                  const avgEAR   = (leftEAR + rightEAR) / 2.0;
+                  const avgEAR = (leftEAR + rightEAR) / 2.0;
                   setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
                   if (!livenessVerifiedRef.current) {
                     let passed = false;
                     const challenge = livenessChallengeRef.current;
-                    
+
                     if (challenge === 'BLINK') {
-                      setLivenessStatusMsg('Tantangan Keamanan: Kedipkan Mata Anda');
-                      if (avgEAR < 0.21) {
+                      setLivenessStatusMsg('Tantangan Keamanan: Kedipkan / Tutup Mata Sejenak');
+                      if (avgEAR < 0.23) {
                         eyeClosedRef.current = true;
-                      } else if (eyeClosedRef.current && avgEAR > 0.24) {
+                      } else if (eyeClosedRef.current && avgEAR > 0.25) {
                         passed = true;
                       }
                     } else if (challenge === 'TURN_LEFT' || challenge === 'TURN_RIGHT') {
                       setLivenessStatusMsg(challenge === 'TURN_LEFT' ? 'Tantangan Keamanan: Tolehkan Kepala ke KIRI' : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN');
                       const yaw = detection.rotation?.angle?.yaw || 0;
-                      
-                      if (challenge === 'TURN_LEFT' && yaw > 0.30) passed = true;
-                      if (challenge === 'TURN_RIGHT' && yaw < -0.30) passed = true;
+
+                      // Setelah diverifikasi: Toleh Kiri fisik (kamera mirror) -> yaw POSITIF di frame mentah. Toleh Kanan -> yaw NEGATIF.
+                      if (challenge === 'TURN_LEFT' && yaw > 0.15) passed = true;
+                      if (challenge === 'TURN_RIGHT' && yaw < -0.15) passed = true;
                     }
 
                     if (passed) {
@@ -990,7 +1000,7 @@ export default function TabFaceVerification({
                       scoreHistoryRef.current.shift();
                     }
                     const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
-                    
+
                     const matched = avgPct >= threshold;
 
                     matchRateRef.current = avgPct; isMatchedRef.current = matched;
@@ -1014,17 +1024,17 @@ export default function TabFaceVerification({
             } catch (err) {
               console.warn("Detection loop error:", err);
             }
-            
+
             isDetecting = false;
           }
-          
+
           if (isRunning) {
             animationFrameId = requestAnimationFrame(detectionLoop);
           }
         }
-        
+
         animationFrameId = requestAnimationFrame(detectionLoop);
-        
+
       } catch (err) {
         setHasCameraError(true);
         console.error('Kamera error:', err);
@@ -1209,9 +1219,9 @@ export default function TabFaceVerification({
   };
 
   // Computed helpers
-  const isHadir    = selectedStatus === 'Hadir';
-  const step1Done  = livenessVerified;
-  const step2Done  = isMatched;
+  const isHadir = selectedStatus === 'Hadir';
+  const step1Done = livenessVerified;
+  const step2Done = isMatched;
   const canCheckIn = !isHadir || (step1Done && step2Done && currentDescRef.current);
 
   const workDuration = (() => {
@@ -1251,139 +1261,178 @@ export default function TabFaceVerification({
           </div>
 
           {/* Status Dropdown */}
-          <div className="form-group">
-            <label htmlFor="verify-status-select">Keterangan</label>
-            <select
-              id="verify-status-select"
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
+          <div className="form-group" style={{ position: 'relative' }}>
+            <label>Keterangan</label>
+            <div
+              onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)',
+                background: 'var(--bg-input)', cursor: 'pointer', color: 'inherit'
+              }}
             >
-              <option value="Hadir">🟢 Hadir (Verified Wajah)</option>
-              <option value="Izin">🔵 Izin</option>
-              <option value="Sakit">🟡 Sakit</option>
-              <option value="Mangkir">🔴 Mangkir</option>
-            </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {selectedStatus === 'Hadir' && <><CheckCircle size={18} color="#10b981" /> Hadir (Verified Wajah)</>}
+                {selectedStatus === 'Izin' && <><Mail size={18} color="#38bdf8" /> Izin</>}
+                {selectedStatus === 'Sakit' && <><Power size={18} color="#f59e0b" /> Sakit</>}
+                {selectedStatus === 'Mangkir' && <><XCircle size={18} color="#ef4444" /> Mangkir</>}
+              </div>
+              <ChevronDown size={18} color="var(--text-muted)" />
+            </div>
+
+            {isStatusDropdownOpen && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0,
+                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                borderRadius: '8px', marginTop: '4px', zIndex: 10,
+                boxShadow: 'var(--shadow-md)', overflow: 'hidden'
+              }}>
+                {[
+                  { value: 'Hadir', label: 'Hadir (Verified Wajah)', icon: <CheckCircle size={18} color="#10b981" /> },
+                  { value: 'Izin', label: 'Izin', icon: <Mail size={18} color="#38bdf8" /> },
+                  { value: 'Sakit', label: 'Sakit', icon: <Power size={18} color="#f59e0b" /> },
+                  { value: 'Mangkir', label: 'Mangkir', icon: <XCircle size={18} color="#ef4444" /> }
+                ].map(opt => (
+                  <div
+                    key={opt.value}
+                    onClick={() => { setSelectedStatus(opt.value); setIsStatusDropdownOpen(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '10px 14px', cursor: 'pointer',
+                      background: selectedStatus === opt.value ? 'rgba(99,102,241,0.1)' : 'transparent',
+                      borderBottom: '1px solid rgba(255,255,255,0.05)'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = selectedStatus === opt.value ? 'rgba(99,102,241,0.1)' : 'transparent'}
+                  >
+                    {opt.icon} {opt.label}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Live Camera */}
-          <div className="form-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <label style={{ margin: 0 }}>Kamera Scanner</label>
-              <button 
-                type="button" 
-                onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
-                style={{ 
-                  padding: '6px 14px', 
-                  borderRadius: '20px', 
-                  border: 'none', 
-                  background: 'var(--accent-primary)', 
-                  color: '#fff', 
-                  fontSize: '0.8rem', 
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: '0 2px 6px rgba(99,102,241,0.4)'
-                }}
-              >
-                <i className="fa-solid fa-camera-rotate"></i> Ganti Kamera
-              </button>
-            </div>
-            
-            <div 
-              className="webcam-wrapper" 
-              style={{ 
-                height: window.innerWidth < 768 ? '65vh' : 'auto', 
-                aspectRatio: window.innerWidth < 768 ? '3/4' : '4/3' 
-              }}
-            >
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                muted 
-                playsInline
-                style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
-              ></video>
-              <canvas 
-                ref={canvasRef} 
-                className="overlay-canvas"
-                style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
-              ></canvas>
-
-              {/* Top Floating Badge Prompt */}
-              {isHadir && (
-                <div
+          {isHadir && (
+            <div className="form-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ margin: 0 }}>Kamera Scanner</label>
+                <button
+                  type="button"
+                  onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
                   style={{
-                    position: 'absolute',
-                    top: '10px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    zIndex: 10,
-                    padding: '6px 16px',
+                    padding: '6px 14px',
                     borderRadius: '20px',
-                    background: isLiveHuman && isMatched
-                      ? 'rgba(16, 185, 129, 0.94)'
-                      : isLiveHuman
-                        ? 'rgba(59, 130, 246, 0.92)'
-                        : 'rgba(15, 23, 42, 0.88)',
-                    color: '#ffffff',
+                    border: 'none',
+                    background: 'var(--accent-primary)',
+                    color: '#fff',
                     fontSize: '0.8rem',
-                    fontWeight: 800,
-                    pointerEvents: 'none',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-                    backdropFilter: 'blur(4px)',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
+                    boxShadow: '0 2px 6px rgba(99,102,241,0.4)'
                   }}
                 >
-                  {isLiveHuman && isMatched ? (
-                    <>✓ SIAP ABSEN — {matchRate.toFixed(1)}% Match</>
-                  ) : isLiveHuman ? (
-                    <>✓ Liveness Terverifikasi! · Mencocokkan...</>
-                  ) : (
-                    <>{livenessStatusMsg}</>
-                  )}
-                </div>
-              )}
+                  <i className="fa-solid fa-camera-rotate"></i> Ganti Kamera
+                </button>
+              </div>
 
-              {/* Lighting Warning Badge */}
-              {lightingWarning && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '50px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    zIndex: 10,
-                    padding: '4px 12px',
-                    borderRadius: '12px',
-                    background: 'rgba(239, 68, 68, 0.9)', // Red warning
-                    color: '#ffffff',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    pointerEvents: 'none',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <i className="fa-solid fa-triangle-exclamation"></i> {lightingWarning}
-                </div>
-              )}
+              <div
+                className="webcam-wrapper"
+                style={{
+                  height: window.innerWidth < 768 ? '65vh' : 'auto',
+                  aspectRatio: window.innerWidth < 768 ? '3/4' : '4/3'
+                }}
+              >
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
+                ></video>
+                <canvas
+                  ref={canvasRef}
+                  className="overlay-canvas"
+                  style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
+                ></canvas>
 
-              {!modelsLoaded && (
-                <div className="loading-overlay">
-                  <div className="spinner"></div>
-                  <span>{modelStatusText}</span>
-                </div>
-              )}
+                {/* Top Floating Badge Prompt */}
+                {isHadir && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '10px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      zIndex: 10,
+                      padding: '6px 16px',
+                      borderRadius: '20px',
+                      background: isLiveHuman && isMatched
+                        ? 'rgba(16, 185, 129, 0.94)'
+                        : isLiveHuman
+                          ? 'rgba(59, 130, 246, 0.92)'
+                          : 'rgba(15, 23, 42, 0.88)',
+                      color: '#ffffff',
+                      fontSize: '0.8rem',
+                      fontWeight: 800,
+                      pointerEvents: 'none',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                      backdropFilter: 'blur(4px)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    {isLiveHuman && isMatched ? (
+                      <>✓ SIAP ABSEN — {matchRate.toFixed(1)}% Match</>
+                    ) : isLiveHuman ? (
+                      <>✓ Liveness Terverifikasi! · Mencocokkan...</>
+                    ) : (
+                      <>{livenessStatusMsg}</>
+                    )}
+                  </div>
+                )}
+
+                {/* Lighting Warning Badge */}
+                {lightingWarning && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '50px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      zIndex: 10,
+                      padding: '4px 12px',
+                      borderRadius: '12px',
+                      background: 'rgba(239, 68, 68, 0.9)', // Red warning
+                      color: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      pointerEvents: 'none',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <i className="fa-solid fa-triangle-exclamation"></i> {lightingWarning}
+                  </div>
+                )}
+
+                {!modelsLoaded && (
+                  <div className="loading-overlay">
+                    <div className="spinner"></div>
+                    <span>{modelStatusText}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ── Liveness & Match Status Chips ──────────────────────── */}
           {isHadir && (
