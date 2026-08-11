@@ -674,16 +674,16 @@ export default function TabFaceVerification({
         }
       }
 
-      // Tier 3: Fetch directly from Supabase Cloud Database (master_biometrics)
+      // Tier 3: Fetch directly from Supabase Cloud Database (master_descriptors)
       if (!vec) {
         try {
           const { data: masterData } = await supabase
-            .from('master_biometrics')
-            .select('face_vector')
+            .from('master_descriptors')
+            .select('descriptor_json')
             .eq('employee_id', empId)
             .maybeSingle();
 
-          vec = masterData?.face_vector || null;
+          vec = masterData?.descriptor_json || null;
         } catch (e) {
           console.warn('[LOAD MASTER SUPABASE WARN]:', e.message);
         }
@@ -721,7 +721,7 @@ export default function TabFaceVerification({
           name: empObj?.name || '',
           department: empObj?.department || '',
           descriptor_json: masterVectorRef.current,
-          face_vector: masterVectorRef.current
+          descriptor_json: masterVectorRef.current
         });
       }
 

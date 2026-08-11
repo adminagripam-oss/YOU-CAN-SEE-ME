@@ -269,10 +269,10 @@ export default function TabEmployeeManagement({
         if (!bioSaved) {
           const descJson = JSON.stringify(currentEmpDescriptorRef.current);
           const { error: bioErr } = await supabase
-            .from('master_biometrics')
+            .from('master_descriptors')
             .upsert({
               employee_id: createdEmpId,
-              face_vector: descJson,
+              descriptor_json: descJson,
             }, { onConflict: 'employee_id' });
 
           if (bioErr) {

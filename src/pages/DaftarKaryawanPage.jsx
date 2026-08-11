@@ -194,7 +194,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     };
 
     if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
-      payload.face_vector = JSON.stringify(editCurrentDescriptorRef.current);
+      payload.descriptor_json = JSON.stringify(editCurrentDescriptorRef.current);
     }
 
     try {
@@ -224,9 +224,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
         if (empErr) throw empErr;
 
-        if (payload.face_vector) {
-          await supabase.from('master_biometrics').update({ face_vector: payload.face_vector }).eq('employee_id', editingEmp.id);
-          await cacheUserMasterVector(editingEmp.id, { face_vector: payload.face_vector });
+        if (payload.descriptor_json) {
+          await supabase.from('master_descriptors').update({ descriptor_json: payload.descriptor_json }).eq('employee_id', editingEmp.id);
+          await cacheUserMasterVector(editingEmp.id, { descriptor_json: payload.descriptor_json });
         }
       }
 
