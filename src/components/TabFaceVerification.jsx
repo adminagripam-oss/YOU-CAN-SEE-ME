@@ -7,16 +7,7 @@ import { CheckCircle, Mail, Power, XCircle, ChevronDown } from 'lucide-react';
 
 const humanConfig = {
   modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
-  face: {
-    enabled: true,
-    detector: { enabled: true, rotation: true },
-    mesh: { enabled: true },
-    iris: { enabled: true },
-    description: { enabled: true },
-    emotion: { enabled: false },
-    antispoof: { enabled: false },
-    liveness: { enabled: false },
-  },
+  face: { enabled: true, mesh: true, iris: true, description: true },
   body: { enabled: false },
   hand: { enabled: false },
   object: { enabled: false },
@@ -929,7 +920,7 @@ export default function TabFaceVerification({
 
               // ── Human Detection ─────────────────────────────────────────────
               // Toggle description (identity embedding) only after liveness is verified to save FPS
-              human.config.face.description.enabled = !!livenessVerifiedRef.current;
+              human.config.face.description = !!livenessVerifiedRef.current;
               const result = await human.detect(videoRef.current);
               const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
 
