@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, cacheGeometricVector } from '../db';
 import { Human } from '@vladmandic/human';
@@ -203,7 +203,7 @@ export default function TabEmployeeManagement({
       let createdEmp = null;
 
       try {
-        const resEmp = await fetch(`${API_BASE_URL}/api/employees`, {
+        const resEmp = await fetchWithTimeout(`${API_BASE_URL}/api/employees`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -215,8 +215,10 @@ export default function TabEmployeeManagement({
             jabatan: empJabatan.trim(),
             status_perkawinan: empStatusPerkawinan,
           }),
+          timeout: 3000,
         });
         const dataEmp = await resEmp.json();
+
         if (dataEmp.success && dataEmp.data) {
           createdEmp = dataEmp.data;
         }
@@ -255,15 +257,17 @@ export default function TabEmployeeManagement({
       if (currentEmpDescriptorRef.current) {
         let bioSaved = false;
         try {
-          const resBio = await fetch(`${API_BASE_URL}/api/biometrics/register`, {
+          const resBio = await fetchWithTimeout(`${API_BASE_URL}/api/biometrics/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               employee_id: createdEmpId,
               descriptor: currentEmpDescriptorRef.current,
             }),
+            timeout: 3000,
           });
           const textBio = await resBio.text();
+
           try {
             const dataBio = JSON.parse(textBio);
             if (dataBio.success) bioSaved = true;

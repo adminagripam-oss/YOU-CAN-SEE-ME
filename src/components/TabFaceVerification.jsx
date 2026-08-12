@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, fetchWithTimeout } from '../config';
+
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
 import { Human } from '@vladmandic/human';
@@ -675,8 +676,9 @@ export default function TabFaceVerification({
       // ── Tier 2: Express Backend API ───────────────────────────────────
       if (!vec) {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/biometrics/master/${empIdInt}`);
+          const res = await fetchWithTimeout(`${API_BASE_URL}/api/biometrics/master/${empIdInt}`, { timeout: 3000 });
           if (res.ok) {
+
             const text = await res.text();
             try {
               const data = JSON.parse(text);
@@ -1197,11 +1199,13 @@ export default function TabFaceVerification({
           ...(durasiDetik !== null && { durasi: durasiDetik }),
         };
 
-        const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
+          timeout: 3000,
         });
+
 
         const data = await res.json();
         if (res.ok && data.success) {
