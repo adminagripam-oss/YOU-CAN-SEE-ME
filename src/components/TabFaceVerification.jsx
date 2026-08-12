@@ -518,7 +518,8 @@ function captureVideoFrameBase64(videoEl) {
  */
 
 function calculateEAR(pts, eyePoints) {
-  if (!pts || pts.length < 478) return 0.3;
+  // Iris dinonaktifkan → mesh punya 468 poin (bukan 478). Guard disesuaikan.
+  if (!pts || pts.length < 468) return 0.3;
   const [p1, p4, p2, p3, p6, p5] = eyePoints;
   const pt1 = pts[p1], pt4 = pts[p4], pt2 = pts[p2], pt6 = pts[p6], pt3 = pts[p3], pt5 = pts[p5];
   if (!pt1 || !pt4 || !pt2 || !pt6 || !pt3 || !pt5) return 0.3;
@@ -961,47 +962,21 @@ export default function TabFaceVerification({
   // Throttle ref untuk diagnostic log (log max 1x per 3 detik, hindari spam)
   const diagLogThrottleRef = useRef(0);
 
-  // Frame throttle: jalankan AI inference setiap N frame.
-  // Nilai 3 → proses frame ke-1,4,7,... → hemat ~67% CPU/GPU di HP
-  const frameCounterRef = useRef(0);
-  const INFERENCE_EVERY_N_FRAMES = 3;
-
-  // Caching deteksi terakhir agar rendering node tidak berkedip saat frame di-skip
-  const lastDetectionRef = useRef(null);
-  const lastDetectionTimeRef = useRef(0);
-
   /**
    * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
    * Menerima canvas 640×480 yang sudah ter-crop — bukan video mentah.
    * Mengembalikan detection result dari human.detect().
+   *
+   * Catatan performa mobile: frame throttle (skip-N) sebelumnya digunakan di sini,
+   * namun menyebabkan node dan border wajah menghilang karena hook mengosongkan
+   * canvas saat detection bernilai null. Solusi yang lebih aman adalah menonaktifkan
+   * iris (iris: false di humanConfig) yang menghemat ~40% GPU mobile tanpa
+   * merusak pipeline rendering.
    */
   const detectFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
-
-    frameCounterRef.current += 1;
-    const now = Date.now();
-
-    // Frame throttle: skip N-1 dari setiap N frame untuk hemat GPU mobile
-    if (frameCounterRef.current % INFERENCE_EVERY_N_FRAMES !== 0) {
-      // Jika wajah benar-benar tidak terdeteksi lebih dari 1.5 detik, hapus cache
-      if (now - lastDetectionTimeRef.current > 1500) {
-        lastDetectionRef.current = null;
-      }
-      return lastDetectionRef.current; // kembalikan cache wajah agar node tetap digambar
-    }
-
-    // Jalankan deteksi wajah asli
     const result = await human.detect(croppedCanvas);
-    const face = result?.face?.[0] ?? null;
-
-    if (face) {
-      lastDetectionRef.current = face;
-      lastDetectionTimeRef.current = now;
-    } else if (now - lastDetectionTimeRef.current > 1500) {
-      lastDetectionRef.current = null;
-    }
-
-    return face;
+    return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
 
   /**
