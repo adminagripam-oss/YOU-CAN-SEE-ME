@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { API_BASE_URL } from '../config';
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
@@ -653,52 +654,76 @@ export default function TabFaceVerification({
   // Load stored vector for selected employee (4-Tier Fetch: IndexedDB -> Server API -> Supabase Direct -> Props)
   const loadMasterVectors = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
+
+    // Pastikan empId selalu integer untuk kompatibilitas query Supabase (INTEGER column)
+    const empIdInt = parseInt(empId, 10);
+    if (isNaN(empIdInt)) {
+      console.warn('[LOAD MASTER VECTORS] empId tidak valid:', empId);
+      return;
+    }
+
     try {
       let vec = null;
 
-      // Tier 1: Local IndexedDB Cache
-      const cached = await getCachedUserMasterVector(empId);
+      // ── Tier 1: Local IndexedDB Cache ─────────────────────────────────
+      const cached = await getCachedUserMasterVector(empIdInt);
       if (cached) {
         vec = cached.descriptor_json || cached.face_vector;
+        console.log('[LOAD MASTER T1-INDEXEDDB] Cache hit, employee:', empIdInt);
       }
 
-      // Tier 2: Fetch from Express Backend API Endpoint
+      // ── Tier 2: Express Backend API ───────────────────────────────────
       if (!vec) {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/biometrics/master/${empId}`);
+          const res = await fetch(`${API_BASE_URL}/api/biometrics/master/${empIdInt}`);
           if (res.ok) {
             const text = await res.text();
             try {
               const data = JSON.parse(text);
               if (data.success) {
                 vec = data.face_vector || data.descriptor_json;
+                if (vec) console.log('[LOAD MASTER T2-API] Vektor ditemukan via API');
               }
             } catch (jsonErr) { }
+          } else {
+            console.warn(`[LOAD MASTER T2-API] HTTP ${res.status} — fallback ke Supabase`);
           }
         } catch (e) {
-          console.warn('[LOAD MASTER API WARN]:', e.message);
+          console.warn('[LOAD MASTER T2-API WARN]:', e.message, '— fallback ke Supabase');
         }
       }
 
-      // Tier 3: Fetch directly from Supabase Cloud Database (master_descriptors)
+      // ── Tier 3: Supabase Direct — tabel master_descriptors ───────────
+      // PENTING: gunakan empIdInt (integer) bukan empId (string)
+      // Supabase strict-typed: STRING "34" ≠ INTEGER 34 → query return null
       if (!vec) {
         try {
-          const { data: masterData } = await supabase
+          const { data: masterData, error: masterErr } = await supabase
             .from('master_descriptors')
             .select('descriptor_json')
-            .eq('employee_id', empId)
+            .eq('employee_id', empIdInt)   // ← integer, bukan string
             .maybeSingle();
 
-          vec = masterData?.descriptor_json || null;
+          if (masterErr) {
+            console.warn('[LOAD MASTER T3-SUPABASE WARN]:', masterErr.message);
+          } else if (masterData?.descriptor_json) {
+            vec = masterData.descriptor_json;
+            console.log('[LOAD MASTER T3-SUPABASE] Vektor ditemukan di master_descriptors');
+          } else {
+            console.warn('[LOAD MASTER T3-SUPABASE] Tidak ada data untuk employee_id:', empIdInt,
+              '— Karyawan mungkin belum didaftarkan biometriknya.');
+          }
         } catch (e) {
-          console.warn('[LOAD MASTER SUPABASE WARN]:', e.message);
+          console.warn('[LOAD MASTER T3-SUPABASE WARN]:', e.message);
         }
       }
 
-      // Tier 4: Fallback to employees list from props (legacy support if needed)
+      // ── Tier 4: Fallback ke props employees (kolom legacy) ────────────
       if (!vec) {
-        const empObj = employees.find((it) => String(it.id) === String(empId));
+        const empObj = employees.find((it) => String(it.id) === String(empIdInt));
         vec = empObj?.face_vector || empObj?.descriptor_json || empObj?.facial_descriptor;
+        if (vec) console.log('[LOAD MASTER T4-PROPS] Vektor ditemukan di employees props');
+        else console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor di props. Employee ID:', empIdInt);
       }
 
       // Parse & Store in Refs
@@ -706,13 +731,33 @@ export default function TabFaceVerification({
       setGfvMode(false);
 
       if (vec) {
-        if (typeof vec === 'string') {
-          try { vec = JSON.parse(vec); } catch { }
+        let parsedVec = vec;
+
+        // Recursive unwrap: tangani kasus double/triple-stringified dari DB
+        // Contoh: '"[1,2,3]"' → '[1,2,3]' → [1,2,3]
+        while (typeof parsedVec === 'string') {
+          try {
+            parsedVec = JSON.parse(parsedVec);
+          } catch (e) {
+            // Bukan JSON valid — hentikan loop, biarkan validasi di bawah menanganinya
+            break;
+          }
         }
-        if (Array.isArray(vec) || vec instanceof Float32Array || typeof vec === 'object') {
-          masterVectorRef.current = Array.from(Object.values(vec));
+
+        // Validasi tipe data ketat sebelum disimpan ke ref
+        if (Array.isArray(parsedVec)) {
+          // Kasus ideal: sudah berupa Array angka
+          masterVectorRef.current = parsedVec;
+        } else if (parsedVec instanceof Float32Array) {
+          // Kasus Float32Array (format TensorFlow.js)
+          masterVectorRef.current = Array.from(parsedVec);
+        } else if (typeof parsedVec === 'object' && parsedVec !== null) {
+          // Kasus object {0: val, 1: val, ...} (serialisasi non-array)
+          masterVectorRef.current = Array.from(Object.values(parsedVec));
         } else {
+          // Gagal parse — jangan isi ref dengan data rusak
           masterVectorRef.current = null;
+          console.warn('[LOAD MASTER VECTORS] Vektor tidak valid setelah unwrap:', typeof parsedVec);
         }
       } else {
         masterVectorRef.current = null;
@@ -727,7 +772,6 @@ export default function TabFaceVerification({
           name: empObj?.name || '',
           department: empObj?.department || '',
           descriptor_json: masterVectorRef.current,
-          descriptor_json: masterVectorRef.current
         });
       }
 
@@ -896,164 +940,171 @@ export default function TabFaceVerification({
     });
   };
 
-  // ── Camera + Geometric Detection Loop ──────────────────────────────────
-  useEffect(() => {
-    let animationFrameId = null;
-    let isDetecting = false;
-    let isRunning = true;
+  // ── Camera + Geometric Detection Loop (via useNormalizedFaceMesh hook) ──
+  //
+  // Hook ini menggantikan startCamera() + detectionLoop() yang lama.
+  // Tanggung jawab hook:
+  //   • getUserMedia (constraint 640×480)
+  //   • Center-Crop 4:3 ke offscreen canvas → eliminasi distorsi device
+  //   • EMA Smoothing per-koordinat landmark (meredam jitter kamera)
+  //   • Normalisasi Bounding Box → localX/localY/localZ (device-independent)
+  // Tanggung jawab onFaceProcessed callback (di sini):
+  //   • Lighting check, EAR liveness, cosine match, draw overlay
 
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 720 },
-            facingMode: facingMode
-          },
-          audio: false,
-        });
-        if (videoRef.current) { videoRef.current.srcObject = stream; streamRef.current = stream; }
+  // Throttle ref untuk diagnostic log (log max 1x per 3 detik, hindari spam)
+  const diagLogThrottleRef = useRef(0);
 
-        async function detectionLoop() {
-          if (!isRunning) return;
+  /**
+   * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
+   * Menerima canvas 640×480 yang sudah ter-crop — bukan video mentah.
+   * Mengembalikan detection result dari human.detect().
+   */
+  const detectFacesCallback = useCallback(async (croppedCanvas) => {
+    if (!modelsLoaded) return null;
+    // human.detect menerima HTMLCanvasElement / HTMLVideoElement / ImageData
+    const result = await human.detect(croppedCanvas);
+    // Kembalikan face[0] saja (single-face mode) atau null jika tidak ada
+    return result?.face?.[0] ?? null;
+  }, [modelsLoaded]);
 
-          if (!isDetecting && videoRef.current && videoRef.current.readyState === 4 && modelsLoaded) {
-            isDetecting = true;
+  /**
+   * Dipanggil hook setiap frame saat wajah berhasil diproses.
+   * Semua logika biometrik (EAR, cosine, draw) tetap di sini agar
+   * tidak ada perubahan pada flow submit & state management.
+   */
+  const onFaceProcessed = useCallback(({ detection, smoothedMesh, normalizedMesh, boundingBox, ctx }) => {
+    // ── Lighting Check ────────────────────────────────────────────────────
+    const lightingStatus = checkLightingQuality(videoRef.current);
+    setLightingWarning(lightingStatus);
 
-            try {
-              const lightingStatus = checkLightingQuality(videoRef.current);
-              setLightingWarning(lightingStatus);
+    // ── Simpan embedding ke ref (untuk submit) ────────────────────────────
+    if (detection.embedding) {
+      currentDescRef.current = Array.from(detection.embedding);
+    }
 
-              // ── Human Detection ─────────────────────────────────────────────
-              const result = await human.detect(videoRef.current);
-              const detection = result && result.face && result.face.length > 0 ? result.face[0] : null;
+    // ── EYE ASPECT RATIO (EAR) Blink Detection (Anti-Spoofing) ───────────
+    // smoothedMesh sudah di-smooth EMA oleh hook; gunakan untuk EAR agar stabil
+    const leftEAR  = calculateEAR(smoothedMesh, MP_LEFT_EYE);
+    const rightEAR = calculateEAR(smoothedMesh, MP_RIGHT_EYE);
+    const avgEAR   = (leftEAR + rightEAR) / 2.0;
+    setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
-              const videoWidth = videoRef.current?.videoWidth || 640;
-              const videoHeight = videoRef.current?.videoHeight || 480;
+    if (!livenessVerifiedRef.current) {
+      let passed = false;
+      const challenge = livenessChallengeRef.current;
 
-              if (canvasRef.current) {
-                canvasRef.current.width = videoWidth;
-                canvasRef.current.height = videoHeight;
-              }
-
-              const ctx = canvasRef.current?.getContext('2d');
-
-              if (ctx) {
-                ctx.clearRect(0, 0, videoWidth, videoHeight);
-
-                if (!detection) {
-                  currentDescRef.current = null;
-                  setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
-                } else {
-                  if (detection.embedding) {
-                    currentDescRef.current = Array.from(detection.embedding);
-                  }
-
-                  // ── EYE ASPECT RATIO (EAR) BLINK DETECTION (ANTI-SPOOFING) ─────────
-                  const landmarksPos = detection.mesh; // 478 points
-                  const leftEAR = calculateEAR(landmarksPos, MP_LEFT_EYE);
-                  const rightEAR = calculateEAR(landmarksPos, MP_RIGHT_EYE);
-                  const avgEAR = (leftEAR + rightEAR) / 2.0;
-                  setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
-
-                  if (!livenessVerifiedRef.current) {
-                    let passed = false;
-                    const challenge = livenessChallengeRef.current;
-
-                    if (challenge === 'BLINK') {
-                      setLivenessStatusMsg('Tantangan Keamanan: Kedipkan / Tutup Mata Sejenak');
-                      if (avgEAR < 0.23) {
-                        eyeClosedRef.current = true;
-                      } else if (eyeClosedRef.current && avgEAR > 0.25) {
-                        passed = true;
-                      }
-                    } else if (challenge === 'TURN_LEFT' || challenge === 'TURN_RIGHT') {
-                      setLivenessStatusMsg(challenge === 'TURN_LEFT' ? 'Tantangan Keamanan: Tolehkan Kepala ke KIRI' : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN');
-                      const yaw = detection.rotation?.angle?.yaw || 0;
-
-                      // Setelah diverifikasi: Toleh Kiri fisik (kamera mirror) -> yaw POSITIF di frame mentah. Toleh Kanan -> yaw NEGATIF.
-                      if (challenge === 'TURN_LEFT' && yaw > 0.15) passed = true;
-                      if (challenge === 'TURN_RIGHT' && yaw < -0.15) passed = true;
-                    }
-
-                    if (passed) {
-                      livenessVerifiedRef.current = true;
-                      setLivenessVerified(true);
-                      setIsLiveHuman(true);
-                      setLivenessStatusMsg('Liveness Terverifikasi!');
-
-                      const base64Str = captureVideoFrameBase64(videoRef.current);
-                      if (base64Str) setCapturedBase64Image(base64Str);
-                    }
-                  }
-
-                  // ── Step 2: 1-to-1 Match via Cosine Similarity ───────────
-                  if (currentDescRef.current) {
-                    let rawPct = 0;
-                    let threshold = 60.0; // MediaPipe model threshold
-
-                    if (masterVectorRef.current && currentDescRef.current.length === masterVectorRef.current.length) {
-                      const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-                      rawPct = cosineToMatchPct(cosSim);
-                    }
-
-                    // --- SMOOTHING LOGIC ---
-                    scoreHistoryRef.current.push(rawPct);
-                    if (scoreHistoryRef.current.length > 5) {
-                      scoreHistoryRef.current.shift();
-                    }
-                    const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
-
-                    const matched = avgPct >= threshold;
-
-                    matchRateRef.current = avgPct; isMatchedRef.current = matched;
-                    setMatchRate(avgPct); setIsMatched(matched);
-
-                    if (matched && !hasBeepedRef.current) {
-                      hasBeepedRef.current = true;
-                      playBeepSound();
-                    }
-                  }
-
-                  // ── Draw Biometric Node Overlay ─────────────────────────────────
-                  drawGeometricMesh(
-                    ctx,
-                    detection.mesh,
-                    livenessVerifiedRef.current,
-                    detection.score
-                  );
-                }
-              }
-            } catch (err) {
-              console.warn("Detection loop error:", err);
-            }
-
-            isDetecting = false;
-          }
-
-          if (isRunning) {
-            animationFrameId = requestAnimationFrame(detectionLoop);
-          }
+      if (challenge === 'BLINK') {
+        setLivenessStatusMsg('Tantangan Keamanan: Kedipkan / Tutup Mata Sejenak');
+        if (avgEAR < 0.23) {
+          eyeClosedRef.current = true;
+        } else if (eyeClosedRef.current && avgEAR > 0.25) {
+          passed = true;
         }
+      } else if (challenge === 'TURN_LEFT' || challenge === 'TURN_RIGHT') {
+        setLivenessStatusMsg(
+          challenge === 'TURN_LEFT'
+            ? 'Tantangan Keamanan: Tolehkan Kepala ke KIRI'
+            : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN'
+        );
+        const yaw = detection.rotation?.angle?.yaw || 0;
+        if (challenge === 'TURN_LEFT'  && yaw >  0.15) passed = true;
+        if (challenge === 'TURN_RIGHT' && yaw < -0.15) passed = true;
+      }
 
-        animationFrameId = requestAnimationFrame(detectionLoop);
-
-      } catch (err) {
-        setHasCameraError(true);
-        console.error('Kamera error:', err);
+      if (passed) {
+        livenessVerifiedRef.current = true;
+        setLivenessVerified(true);
+        setIsLiveHuman(true);
+        setLivenessStatusMsg('Liveness Terverifikasi!');
+        const base64Str = captureVideoFrameBase64(videoRef.current);
+        if (base64Str) setCapturedBase64Image(base64Str);
       }
     }
 
-    startCamera();
+    // ── 1-to-1 Match via Cosine Similarity ───────────────────────────────
+    if (currentDescRef.current) {
+      let rawPct = 0;
+      const threshold = 60.0;
 
-    return () => {
-      isRunning = false;
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+      // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
+      // Buka DevTools Console → tab Console untuk membaca log ini.
+      // Hapus blok ini setelah masalah terselesaikan.
+      const now = Date.now();
+      if (now - diagLogThrottleRef.current > 3000) {
+        diagLogThrottleRef.current = now;
+        console.group('🔍 [FACE MATCH DIAGNOSTIC]');
+        console.log('currentDesc (embedding) → panjang:', currentDescRef.current?.length ?? 'NULL');
+        console.log('masterVector            → panjang:', masterVectorRef.current?.length ?? 'NULL — Pastikan karyawan sudah didaftarkan biometriknya!');
+        if (currentDescRef.current && masterVectorRef.current) {
+          if (currentDescRef.current.length !== masterVectorRef.current.length) {
+            console.warn('❌ DIMENSI TIDAK COCOK:', currentDescRef.current.length, '≠', masterVectorRef.current.length);
+          } else {
+            const testSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
+            console.log('✅ Cosine Similarity RAW:', (testSim * 100).toFixed(2) + '%');
+          }
+        }
+        console.groupEnd();
       }
-    };
-  }, [modelsLoaded, facingMode]); // Dihapus selectedEmployeeId agar kamera tidak restart saat ganti karyawan
+      // ── END DIAGNOSTIC LOG ───────────────────────────────────────────────
+
+      if (masterVectorRef.current && currentDescRef.current.length === masterVectorRef.current.length) {
+        const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
+        rawPct = cosineToMatchPct(cosSim);
+      }
+
+      // Score history smoothing (window 5 frames)
+      scoreHistoryRef.current.push(rawPct);
+      if (scoreHistoryRef.current.length > 5) scoreHistoryRef.current.shift();
+      const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
+
+      const matched = avgPct >= threshold;
+      matchRateRef.current  = avgPct;
+      isMatchedRef.current  = matched;
+      setMatchRate(avgPct);
+      setIsMatched(matched);
+
+      if (matched && !hasBeepedRef.current) {
+        hasBeepedRef.current = true;
+        playBeepSound();
+      }
+    }
+
+    // ── Draw Biometric Node Overlay ───────────────────────────────────────
+    // Gunakan smoothedMesh (koordinat piksel canvas 640×480, sudah di-smooth EMA)
+    // agar visualisasi konsisten di semua device
+    ctx.clearRect(0, 0, 640, 480);
+    drawGeometricMesh(
+      ctx,
+      smoothedMesh,
+      livenessVerifiedRef.current,
+      detection.score
+    );
+  }, []);
+
+  /** Callback saat tidak ada wajah terdeteksi di frame */
+  const onNoFace = useCallback(() => {
+    currentDescRef.current = null;
+    setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+  }, []);
+
+  /** Callback jika kamera gagal dibuka */
+  const onCameraError = useCallback((err) => {
+    setHasCameraError(true);
+    console.error('[Kamera Error]:', err);
+  }, []);
+
+  // Panggil hook — kamera + rAF loop dikelola di sini
+  useNormalizedFaceMesh({
+    videoRef,
+    canvasRef,
+    active: modelsLoaded,      // Hanya mulai setelah model AI selesai dimuat
+    facingMode,
+    smoothAlpha: 0.35,         // EMA alpha: lebih kecil = lebih smooth tapi sedikit lag
+    detectFaces: detectFacesCallback,
+    onFaceProcessed,
+    onNoFace,
+    onCameraError,
+  });
 
   // ── Submit Attendance (Transactional async/await) ──────────────────────
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
@@ -1116,6 +1167,19 @@ export default function TabFaceVerification({
     let successMsg = '';
     let recordTimestamp = new Date().toISOString();
 
+    // ── Hitung Durasi Kerja (detik) saat CHECK-OUT ────────────────────────
+    // Durasi = selisih waktu antara checkInTime dan waktu CHECK-OUT sekarang.
+    // Disimpan dalam satuan detik (integer) agar mudah diformat di LogsPage.
+    let durasiDetik = null;
+    if (attendanceType === 'CHECK_OUT' && attendanceStatus.checkInTime) {
+      const checkInMs  = new Date(attendanceStatus.checkInTime).getTime();
+      const checkOutMs = new Date(recordTimestamp).getTime();
+      const selisihMs  = checkOutMs - checkInMs;
+      if (selisihMs > 0) {
+        durasiDetik = Math.round(selisihMs / 1000); // konversi ms → detik
+      }
+    }
+
     if (navigator.onLine) {
       try {
         const payload = {
@@ -1125,6 +1189,8 @@ export default function TabFaceVerification({
           location: `${locationStr} - GeoMesh Scanner`,
           attendance_type: attendanceType,
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+          // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
+          ...(durasiDetik !== null && { durasi: durasiDetik }),
         };
 
         const res = await fetch(`${API_BASE_URL}/api/attendance/verify`, {
@@ -1152,6 +1218,9 @@ export default function TabFaceVerification({
             status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
             euclidean_distance: euclideanDist,
             timestamp: recordTimestamp,
+            attendance_type: attendanceType,
+            // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
+            ...(durasiDetik !== null && { durasi: durasiDetik }),
           };
           const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
           if (!sbErr) {
@@ -1181,6 +1250,8 @@ export default function TabFaceVerification({
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified) [OFFLINE]' : selectedStatus,
           attendance_type: attendanceType,
           euclidean_distance: euclideanDist,
+          // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
+          ...(durasiDetik !== null && { durasi: durasiDetik }),
         });
 
         isSuccess = true;
