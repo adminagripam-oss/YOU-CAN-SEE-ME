@@ -1148,6 +1148,10 @@ export default function TabFaceVerification({
       ? selectedStatus.toUpperCase()
       : (attendanceType === 'CHECK_OUT' ? 'CHECK-OUT' : 'CHECK-IN');
 
+    // Format attendance_type dengan DASH agar konsisten dengan logika deteksi
+    // di TabAttendanceLogs.jsx (isCheckOut = log.attendance_type === 'CHECK-OUT')
+    const attendanceTypeDash = attendanceType === 'CHECK_OUT' ? 'CHECK-OUT' : 'CHECK-IN';
+
     let locationStr = 'HP Mobile', userLat = null, userLng = null;
     if (navigator.geolocation) {
       try {
@@ -1187,7 +1191,7 @@ export default function TabFaceVerification({
           nik: (targetEmp.nik || nikInput).trim() || null,
           scan_descriptor: currentDescRef.current || [],
           location: `${locationStr} - GeoMesh Scanner`,
-          attendance_type: attendanceType,
+          attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
           // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
           ...(durasiDetik !== null && { durasi: durasiDetik }),
@@ -1214,11 +1218,14 @@ export default function TabFaceVerification({
         try {
           const logPayload = {
             employee_id: parseInt(selectedEmployeeId),
-            location: `${locationStr} - GeoMesh Scanner [Supabase Direct] [${attendanceType}]`,
+            nik: (targetEmp.nik || nikInput).trim() || null,
+            name: targetEmp.name || null,
+            department: targetEmp.department || null,
+            location: `${locationStr} - GeoMesh Scanner`,
+            attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
             status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
             euclidean_distance: euclideanDist,
             timestamp: recordTimestamp,
-            attendance_type: attendanceType,
             // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
             ...(durasiDetik !== null && { durasi: durasiDetik }),
           };
@@ -1247,8 +1254,8 @@ export default function TabFaceVerification({
           location: `${locationStr} [OFFLINE DEXIE]`,
           lat: userLat,
           lng: userLng,
+          attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified) [OFFLINE]' : selectedStatus,
-          attendance_type: attendanceType,
           euclidean_distance: euclideanDist,
           // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
           ...(durasiDetik !== null && { durasi: durasiDetik }),
