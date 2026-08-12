@@ -391,7 +391,8 @@ function drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, matched) {
  * @param {number}  detectionScore
  */
 function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
-  if (!pts || pts.length < 478) return;
+  // Iris dinonaktifkan → mesh punya 468 poin (bukan 478). Guard disesuaikan.
+  if (!pts || pts.length < 468) return;
 
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
