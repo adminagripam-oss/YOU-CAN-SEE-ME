@@ -11,3 +11,27 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (
     : 'http://localhost:8080'
 );
 
+/**
+ * Custom fetch wrapper with a configurable timeout.
+ * Prevents mobile apps on different networks from freezing during TCP handshake timeouts.
+ */
+export async function fetchWithTimeout(resource, options = {}) {
+  const { timeout = 3000 } = options; // Default timeout 3 detik
+  
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
+

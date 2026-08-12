@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Human } from '@vladmandic/human';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, fetchWithTimeout } from './config';
+
 import { supabase } from './supabaseClient';
 import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
@@ -89,8 +90,9 @@ function AppContent() {
 
     // Tier 1: Express REST API Endpoint
     try {
-      const res = await fetch(`${API_BASE_URL}/api/employees`);
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/employees`, { timeout: 3000 });
       const data = await res.json();
+
       if (data.success && data.data) {
         empData = data.data;
       }
@@ -159,8 +161,9 @@ function AppContent() {
 
     // Tier 1: Express REST API Endpoint
     try {
-      const res = await fetch(`${API_BASE_URL}/api/attendance/logs`);
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/logs`, { timeout: 3000 });
       const data = await res.json();
+
       if (data.success && data.data) {
         logData = data.data;
       }
