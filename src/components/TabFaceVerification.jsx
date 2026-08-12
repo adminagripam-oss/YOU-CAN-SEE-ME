@@ -1155,19 +1155,63 @@ export default function TabFaceVerification({
     // di TabAttendanceLogs.jsx (isCheckOut = log.attendance_type === 'CHECK-OUT')
     const attendanceTypeDash = attendanceType === 'CHECK_OUT' ? 'CHECK-OUT' : 'CHECK-IN';
 
-    let locationStr = 'HP Mobile', userLat = null, userLng = null;
-    if (navigator.geolocation) {
+    // ── GPS Geolocation Enforcements ────────────────────────────────────
+    let locationStr = 'HP Mobile';
+    let userLat = null;
+    let userLng = null;
+    let userAccuracy = null;
+    const isAbsenHadir = (selectedStatus === 'Hadir');
+
+    if (isAbsenHadir) {
+      if (!navigator.geolocation) {
+        showToast('GPS Tidak Didukung', 'Perangkat Anda tidak mendukung pelacakan lokasi GPS.', 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      setLivenessStatusMsg('🌐 Sedang mendapatkan lokasi GPS...');
+      showToast('Melacak Lokasi', 'Mencari sinyal GPS dengan akurasi tinggi...', 'info');
+
       try {
-        const pos = await new Promise((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 })
-        );
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 0
+          });
+        });
+
         userLat = pos.coords.latitude;
         userLng = pos.coords.longitude;
-        locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
-      } catch {
-        locationStr = 'HP Mobile (GPS)';
+        userAccuracy = pos.coords.accuracy;
+
+        console.log(`[FRONTEND GPS] Lat: ${userLat}, Lng: ${userLng}, Accuracy: ${userAccuracy}m`);
+
+        if (userAccuracy > 100) {
+          showToast(
+            'Akurasi GPS Rendah',
+            `Akurasi GPS (${userAccuracy.toFixed(1)}m) kurang baik (maksimal 100m). Harap cari tempat terbuka atau sinyal yang lebih baik.`,
+            'error'
+          );
+          setIsSubmitting(false);
+          setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+          return;
+        }
+
+        locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)}) [Akurasi: ${userAccuracy.toFixed(1)}m]`;
+      } catch (gpsError) {
+        console.error('[FRONTEND GPS ERROR]:', gpsError);
+        showToast(
+          'Gagal Mendapatkan Lokasi',
+          'Gagal melacak lokasi GPS Anda. Pastikan fitur lokasi HP aktif dan izin browser diberikan.',
+          'error'
+        );
+        setIsSubmitting(false);
+        setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+        return;
       }
     }
+
 
     // 2. Lakukan Operasi Database (API / Supabase Direct / Dexie.js Offline)
     let isSuccess = false;
@@ -1198,6 +1242,8 @@ export default function TabFaceVerification({
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
           // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
           ...(durasiDetik !== null && { durasi: durasiDetik }),
+          latitude: userLat,
+          longitude: userLng,
         };
 
         const res = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/verify`, {
@@ -1233,7 +1279,10 @@ export default function TabFaceVerification({
             timestamp: recordTimestamp,
             // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
             ...(durasiDetik !== null && { durasi: durasiDetik }),
+            latitude: userLat,
+            longitude: userLng,
           };
+
           const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
           if (!sbErr) {
             isSuccess = true;
