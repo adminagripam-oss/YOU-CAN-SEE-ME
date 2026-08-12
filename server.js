@@ -93,6 +93,26 @@ seedInitialData();
 // HELPER FUNCTIONS & UTILITIES
 // ==========================================
 
+// Geofencing Constants (Office/HQ Coordinates)
+const OFFICE_LAT = -6.200000;      // Lintang Kantor Pusat (Jakarta)
+const OFFICE_LON = 106.816600;     // Bujur Kantor Pusat (Jakarta)
+const MAX_RADIUS_METERS = 50.0;    // Radius Maksimum (50 meter)
+
+/**
+ * Calculates geographical distance between two points in meters using Haversine Formula
+ */
+function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Radius bumi dalam meter
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Jarak dalam satuan meter
+}
+
 /**
  * Calculates Euclidean Distance between two 128-dimensional Float vectors
  * Formula: sqrt( sum( (a[i] - b[i])^2 ) )
@@ -369,10 +389,49 @@ apiRouter.get('/biometrics/master/:employeeId', async (req, res) => {
 // 4. POST /api/attendance/verify - Core 1-to-1 Matching Endpoint (Check-In / Check-Out)
 apiRouter.post('/attendance/verify', async (req, res) => {
   try {
-    const { employee_id, nik, name, department, scan_descriptor, location = 'Kantor Pusat', attendance_type = 'CHECK_IN', status: customStatus } = req.body;
+    const { 
+      employee_id, 
+      nik, 
+      name, 
+      department, 
+      scan_descriptor, 
+      location = 'Kantor Pusat', 
+      attendance_type = 'CHECK_IN', 
+      status: customStatus,
+      durasi,
+      latitude,
+      longitude 
+    } = req.body;
 
     // Check if status is manual assignment (Izin, Sakit, Mangkir)
     const isManualStatus = customStatus && ['Izin', 'Sakit', 'Mangkir'].includes(customStatus);
+
+    // ── GEOFENCING VALIDATION (Haversine Formula) ──────────────────────────
+    // Hanya lakukan pengecekan geofencing jika statusnya adalah absen 'Hadir'
+    if (!isManualStatus) {
+      if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+        return res.status(400).json({
+          success: false,
+          message: 'Absensi Ditolak: Koordinat GPS (latitude & longitude) wajib dikirim!'
+        });
+      }
+
+      const distanceToOffice = calculateHaversineDistance(
+        parseFloat(latitude),
+        parseFloat(longitude),
+        OFFICE_LAT,
+        OFFICE_LON
+      );
+
+      console.log(`[GPS GEOFENCE] Jarak Karyawan ke Kantor: ${distanceToOffice.toFixed(2)}m (Max: ${MAX_RADIUS_METERS}m)`);
+
+      if (distanceToOffice > MAX_RADIUS_METERS) {
+        return res.status(403).json({
+          success: false,
+          message: `Absensi Ditolak: Anda berada di luar jangkauan area kantor (Jarak Anda: ${distanceToOffice.toFixed(1)} meter, Batas Maksimum: ${MAX_RADIUS_METERS} meter)`
+        });
+      }
+    }
 
     // 1. Input Validation: Check Descriptor Format (Only required for Hadir)
     if (!isManualStatus && !isValidDescriptor(scan_descriptor)) {
@@ -425,10 +484,16 @@ apiRouter.post('/attendance/verify', async (req, res) => {
       const nowTs = new Date().toISOString();
       const logPayload = {
         employee_id: employee.id,
+        nik: employee.nik,
+        name: employee.name,
+        department: employee.department,
         location: `${location} [${customStatus}]`,
         status: customStatus,
         timestamp: nowTs,
-        euclidean_distance: 0
+        euclidean_distance: 0,
+        attendance_type: customStatus,
+        latitude: latitude !== undefined ? parseFloat(latitude) : null,
+        longitude: longitude !== undefined ? parseFloat(longitude) : null
       };
 
       await supabase.from('attendance_logs').insert(logPayload);
@@ -497,10 +562,17 @@ apiRouter.post('/attendance/verify', async (req, res) => {
     // 6. Log Attendance to Supabase Database (Pencatatan Audit Audit Log)
     const logPayload = {
       employee_id: employee.id,
+      nik: employee.nik,
+      name: employee.name,
+      department: employee.department,
       location: `${location} [${typeLabel}]`,
       status,
       timestamp: nowTs,
-      euclidean_distance: parseFloat(distance.toFixed(4))
+      euclidean_distance: parseFloat(distance.toFixed(4)),
+      attendance_type: typeLabel,
+      durasi: durasi || null,
+      latitude: latitude !== undefined ? parseFloat(latitude) : null,
+      longitude: longitude !== undefined ? parseFloat(longitude) : null
     };
 
     const { error: logInsertErr } = await supabase.from('attendance_logs').insert(logPayload);
@@ -560,6 +632,7 @@ apiRouter.post('/attendance/verify', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error: ' + error.message });
   }
 });
+
 
 // 5. GET /api/attendance/logs - Retrieve attendance history with duration
 apiRouter.get('/attendance/logs', async (req, res) => {
@@ -765,13 +838,21 @@ apiRouter.post('/attendance/sync', async (req, res) => {
       const typeLabel = item.attendance_type || (item.status?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
       insertPayloads.push({
         employee_id: item.employee_id,
+        nik: item.nik || null,
+        name: item.name || null,
+        department: item.department || null,
         location: item.location ? `${item.location} (Sync Offline) [${typeLabel}]` : `HP Mobile (Sync Offline) [${typeLabel}]`,
         status: item.status || 'VERIFIKASI BERHASIL',
         euclidean_distance: item.euclidean_distance || 0,
-        timestamp: item.timestamp || new Date().toISOString()
+        timestamp: item.timestamp || new Date().toISOString(),
+        attendance_type: typeLabel,
+        durasi: item.durasi || null,
+        latitude: item.lat !== undefined ? parseFloat(item.lat) : null,
+        longitude: item.lng !== undefined ? parseFloat(item.lng) : null
       });
       syncedIds.push(item.id);
     }
+
 
     const { error } = await supabase.from('attendance_logs').insert(insertPayloads);
     if (error) throw error;
