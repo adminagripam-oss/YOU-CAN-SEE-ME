@@ -94,9 +94,12 @@ seedInitialData();
 // ==========================================
 
 // Geofencing Constants (Office/HQ Coordinates)
-const OFFICE_LAT = -6.200000;      // Lintang Kantor Pusat (Jakarta)
-const OFFICE_LON = 106.816600;     // Bujur Kantor Pusat (Jakarta)
-const MAX_RADIUS_METERS = 50.0;    // Radius Maksimum (50 meter)
+// ⚠️ SESUAIKAN KOORDINAT INI dengan lokasi kantor/afdeling Anda yang sebenarnya!
+// Cara mendapatkan koordinat: buka Google Maps → klik lokasi kantor → salin lat,lng dari URL
+const OFFICE_LAT = -6.200000;      // ← GANTI dengan Lintang kantor/afdeling Anda
+const OFFICE_LON = 106.816600;     // ← GANTI dengan Bujur kantor/afdeling Anda
+const MAX_RADIUS_METERS = 100000;  // Sementara 100km (nonaktifkan radius sementara). Ubah ke 50-100 setelah koordinat benar.
+
 
 /**
  * Calculates geographical distance between two points in meters using Haversine Formula
