@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin } from 'lucide-react';
 
 function formatDurasi(durasi) {
   if (!durasi) return '-';
@@ -43,6 +43,22 @@ function formatDurasi(durasi) {
     return `${jam}j ${menit}m ${detik}d`;
   }
   return str;
+}
+
+/**
+ * Mengurai koordinat GPS dari string lokasi yang disimpan di database.
+ * Contoh input: "GPS (-2.12345, 108.56789) [Akurasi: 15.2m] - GeoMesh Scanner"
+ * Mengembalikan { lat, lng, accuracy } atau null jika bukan format GPS.
+ */
+function parseLokasiGPS(lokasi) {
+  if (!lokasi) return null;
+  const match = lokasi.match(/GPS\s*\(([\-\d.]+),\s*([\-\d.]+)\)(?:\s*\[Akurasi:\s*([\d.]+)m\])?/);
+  if (!match) return null;
+  return {
+    lat: parseFloat(match[1]),
+    lng: parseFloat(match[2]),
+    accuracy: match[3] ? parseFloat(match[3]) : null,
+  };
 }
 
 export default function TabAttendanceLogs({
@@ -396,8 +412,45 @@ export default function TabAttendanceLogs({
                     ) : '-'}
                   </TableCell>
                   <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
-                  <TableCell style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {log.lokasi || '-'}
+                  <TableCell style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
+                    {(() => {
+                      const gps = parseLokasiGPS(log.lokasi);
+                      if (gps) {
+                        const mapsUrl = `https://www.google.com/maps?q=${gps.lat},${gps.lng}`;
+                        return (
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={log.lokasi}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              color: '#10b981',
+                              textDecoration: 'none',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            <MapPin size={13} style={{ flexShrink: 0 }} />
+                            {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}
+                            {gps.accuracy && (
+                              <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
+                                &nbsp;±{gps.accuracy.toFixed(0)}m
+                              </span>
+                            )}
+                          </a>
+                        );
+                      }
+                      return (
+                        <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                          {log.lokasi || '-'}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     <div style={{ display: 'flex', gap: '6px' }}>
