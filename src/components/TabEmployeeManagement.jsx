@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, cacheGeometricVector } from '../db';
+import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { Human } from '@vladmandic/human';
 
 const humanConfig = {
@@ -51,93 +52,65 @@ export default function TabEmployeeManagement({
   const currentEmpGFVRef = useRef(null); // 40-d Geometric Feature Vector
   const regVideoRef = useRef(null);
   const regCanvasRef = useRef(null);
-  const regStreamRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Live Camera for Master Face Registration
-  useEffect(() => {
-    let intervalId = null;
+  // Injected detection callback untuk human.js di register mode
+  const detectRegFacesCallback = useCallback(async (croppedCanvas) => {
+    if (!modelsLoaded) return null;
+    const result = await human.detect(croppedCanvas);
+    return result?.face?.[0] ?? null;
+  }, [modelsLoaded]);
 
-    if (empFormMode === 'camera') {
-      async function startRegCamera() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: 'user' },
-            audio: false,
-          });
-          regStreamRef.current = stream;
-          if (regVideoRef.current) {
-            regVideoRef.current.srcObject = stream;
-          }
-
-          intervalId = setInterval(async () => {
-            if (!regVideoRef.current || !modelsLoaded) return;
-
-            const video = regVideoRef.current;
-            const canvas = regCanvasRef.current;
-            if (!video.videoWidth) return;
-
-            const displaySize = { width: video.videoWidth, height: video.videoHeight };
-            if (canvas) {
-              canvas.width = displaySize.width;
-              canvas.height = displaySize.height;
-            }
-
-            const result = await human.detect(video);
-            
-            if (canvas) {
-              const ctx = canvas.getContext('2d');
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              
-              if (result.face && result.face.length > 0) {
-                const face = result.face[0];
-                
-                // Draw 478 Mesh Points
-                if (face.mesh && face.mesh.length > 0) {
-                  ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
-                  for (const pt of face.mesh) {
-                    ctx.beginPath();
-                    ctx.arc(pt[0], pt[1], 1, 0, 2 * Math.PI);
-                    ctx.fill();
-                  }
-                }
-                
-                if (face.embedding) {
-                  currentEmpDescriptorRef.current = Array.from(face.embedding);
-                  currentEmpGFVRef.current = []; // Obsolete GFV
-                  setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi [1024-dim Human]`);
-                  setCameraStatusColor('var(--accent-success)');
-                }
-              } else {
-                currentEmpDescriptorRef.current = null;
-                currentEmpGFVRef.current = null;
-                setCameraStatusText('Menunggu Wajah di Kamera...');
-                setCameraStatusColor('var(--accent-warning)');
-              }
-            }
-          }, 200);
-        } catch (err) {
-          console.error('[REG CAMERA ERROR]:', err);
-          setCameraStatusText('Gagal Membuka Kamera: ' + err.message);
-          setCameraStatusColor('var(--accent-error)');
-        }
-      }
-
-      startRegCamera();
-    } else {
-      currentEmpDescriptorRef.current = null;
-      if (regStreamRef.current) {
-        regStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
+  // Callback saat wajah diproses di register mode
+  const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx }) => {
+    if (detection.embedding) {
+      currentEmpDescriptorRef.current = Array.from(detection.embedding);
+      currentEmpGFVRef.current = []; // Obsolete GFV
+      setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi [1024-dim Human]`);
+      setCameraStatusColor('var(--accent-success)');
     }
 
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (regStreamRef.current) {
-        regStreamRef.current.getTracks().forEach((track) => track.stop());
+    // Menggambar 478 Mesh Points ke canvas overlay
+    ctx.clearRect(0, 0, 640, 480);
+    if (smoothedMesh && smoothedMesh.length > 0) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+      for (const pt of smoothedMesh) {
+        ctx.beginPath();
+        // pt adalah array [x, y, z] yang sudah ter-smooth dan terpetakan di resolusi 640x480
+        ctx.arc(pt[0], pt[1], 1.2, 0, 2 * Math.PI);
+        ctx.fill();
       }
-    };
-  }, [empFormMode, modelsLoaded]);
+    }
+  }, []);
+
+  // Callback saat tidak ada wajah di register mode
+  const onRegNoFace = useCallback(() => {
+    currentEmpDescriptorRef.current = null;
+    currentEmpGFVRef.current = null;
+    setCameraStatusText('Menunggu Wajah di Kamera...');
+    setCameraStatusColor('var(--accent-warning)');
+  }, []);
+
+  // Callback saat kamera gagal dibuka di register mode
+  const onRegCameraError = useCallback((err) => {
+    console.error('[REG CAMERA ERROR]:', err);
+    setCameraStatusText('Gagal Membuka Kamera: ' + err.message);
+    setCameraStatusColor('var(--accent-error)');
+  }, []);
+
+  // Hubungkan ke useNormalizedFaceMesh hook
+  useNormalizedFaceMesh({
+    videoRef: regVideoRef,
+    canvasRef: regCanvasRef,
+    active: modelsLoaded && empFormMode === 'camera',
+    facingMode: 'user',
+    smoothAlpha: 0.35,
+    detectFaces: detectRegFacesCallback,
+    onFaceProcessed: onRegFaceProcessed,
+    onNoFace: onRegNoFace,
+    onCameraError: onRegCameraError,
+  });
+
 
   // Handle Photo File Upload
   const handlePhotoFileUpload = (e) => {
@@ -478,10 +451,21 @@ export default function TabEmployeeManagement({
 
             {empFormMode === 'camera' && (
               <div className="webcam-wrapper" style={{ aspectRatio: '4/3' }}>
-                <video ref={regVideoRef} autoPlay muted playsInline></video>
-                <canvas ref={regCanvasRef} className="overlay-canvas"></canvas>
+                <video
+                  ref={regVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  style={{ transform: 'scaleX(-1)' }}
+                ></video>
+                <canvas
+                  ref={regCanvasRef}
+                  className="overlay-canvas"
+                  style={{ transform: 'scaleX(-1)' }}
+                ></canvas>
               </div>
             )}
+
 
             {empFormMode === 'file' && (
               <div
