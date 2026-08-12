@@ -37,8 +37,8 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    background: 'var(--bg-input)',
-    border: '1px solid var(--border-color)',
+    background: theme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+    border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}`,
     borderRadius: '10px',
     padding: '0 14px',
     height: '48px',
@@ -51,11 +51,12 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
     flex: 1,
     border: 'none',
     background: 'transparent',
-    color: 'var(--text-main)',
+    color: theme === 'dark' ? '#f1f5f9' : '#1e293b',
     fontSize: '0.9rem',
     outline: 'none',
     height: '100%',
     minWidth: 0,
+    colorScheme: theme === 'dark' ? 'dark' : 'light',
   };
 
   const iconStyle = {
