@@ -1423,8 +1423,8 @@ export default function TabFaceVerification({
               <div
                 className="webcam-wrapper"
                 style={{
-                  height: window.innerWidth < 768 ? '65vh' : 'auto',
-                  aspectRatio: window.innerWidth < 768 ? '3/4' : '4/3'
+                  height: 'auto',
+                  aspectRatio: '4/3'
                 }}
               >
                 <video
