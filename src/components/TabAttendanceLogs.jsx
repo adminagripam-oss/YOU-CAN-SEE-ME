@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import { API_BASE_URL } from '../config';
 import {
   Table,
   TableBody,
@@ -127,7 +128,9 @@ export default function TabAttendanceLogs({
   }, [groupedLogs, searchQuery]);
 
 
-  // DELETE
+  // DELETE — Menghapus data via Express API (bukan direct Supabase)
+  // Alasan: Supabase anon key terkena RLS dan diam-diam menolak DELETE
+  // tanpa melempar error. Express API bisa di-konfig pakai service role key.
   const handleDeleteGroup = (group) => {
     openConfirmModal({
       title: 'Hapus Riwayat Absensi?',
@@ -135,21 +138,51 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Data',
       onConfirm: async () => {
         try {
+          // Kumpulkan ID yang akan dihapus
           const idsToDelete = [];
-          if (group.inLog) idsToDelete.push(group.inLog.id);
-          if (group.outLog) idsToDelete.push(group.outLog.id);
+          if (group.inLog?.id)  idsToDelete.push(group.inLog.id);
+          if (group.outLog?.id) idsToDelete.push(group.outLog.id);
 
-          const { error } = await supabase.from('attendance_logs').delete().in('id', idsToDelete);
-          
-          if (!error) {
-            showToast('Data Dihapus', `Data absensi berhasil dihapus.`, 'success');
-            refreshLogs();
-          } else {
-            showToast('Gagal Menghapus', error.message, 'error');
+          if (idsToDelete.length === 0) {
+            showToast('Tidak Ada Data', 'Tidak ada ID log yang valid untuk dihapus.', 'warning');
+            return;
           }
+
+          console.log('[DELETE] Menghapus IDs:', idsToDelete);
+
+          // Hapus setiap log satu per satu via Express API endpoint
+          // (melewati RLS karena berjalan di server-side)
+          const deleteResults = await Promise.all(
+            idsToDelete.map(async (id) => {
+              const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${id}`, {
+                method: 'DELETE',
+              });
+              const result = await res.json();
+              console.log(`[DELETE] ID ${id} →`, res.status, result.message || result);
+              return { id, ok: res.ok, message: result.message };
+            })
+          );
+
+          const allSuccess = deleteResults.every((r) => r.ok);
+          const failedIds = deleteResults.filter((r) => !r.ok).map((r) => r.id);
+
+          if (allSuccess) {
+            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus dari database.`, 'success');
+          } else {
+            console.error('[DELETE] Gagal menghapus IDs:', failedIds);
+            showToast(
+              'Sebagian Gagal',
+              `${deleteResults.filter(r => r.ok).length} berhasil, ${failedIds.length} gagal. Cek console untuk detail.`,
+              'warning'
+            );
+          }
+
+          // Refresh tabel setelah operasi (berhasil atau tidak)
+          refreshLogs();
         } catch (err) {
           console.error('[DELETE LOG ERROR]:', err);
-          showToast('Error Sistem', err.message, 'error');
+          showToast('Error Sistem', `Gagal menghapus: ${err.message}`, 'error');
+          refreshLogs();
         }
       },
     });

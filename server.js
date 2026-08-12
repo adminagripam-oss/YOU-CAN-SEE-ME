@@ -39,13 +39,30 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Supabase Database Connection
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error('[CRITICAL] Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env file!');
   process.exit(1);
 }
 
+// Client biasa (anon) — tunduk pada RLS policies
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Client admin (service role) — bypass RLS, untuk operasi admin seperti DELETE
+// Jika SUPABASE_SERVICE_ROLE_KEY tidak diset, fallback ke anon key
+const supabaseAdmin = supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    })
+  : supabase;
+
+if (supabaseServiceRoleKey) {
+  console.log('[SUPABASE] Admin client initialized with SERVICE_ROLE_KEY (RLS bypassed for admin ops)');
+} else {
+  console.warn('[SUPABASE WARN] SUPABASE_SERVICE_ROLE_KEY tidak ditemukan di .env. Delete mungkin terkena RLS.');
+  console.warn('[SUPABASE WARN] Tambahkan SUPABASE_SERVICE_ROLE_KEY=<key> ke file .env untuk fix permanent.');
+}
 console.log(`[SUPABASE] Connected to Supabase Cloud Database at: ${supabaseUrl}`);
 
 // Seed Initial Sample Employees if Table is Empty
@@ -687,15 +704,28 @@ apiRouter.get('/attendance/status/:employeeId', async (req, res) => {
 apiRouter.delete('/attendance/logs/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase
+    const numericId = parseInt(id, 10);
+
+    if (isNaN(numericId)) {
+      return res.status(400).json({ success: false, message: `ID tidak valid: ${id}` });
+    }
+
+    // Gunakan supabaseAdmin untuk bypass RLS
+    const { error, count } = await supabaseAdmin
       .from('attendance_logs')
       .delete()
-      .eq('id', id);
+      .eq('id', numericId)
+      .select('id', { count: 'exact', head: true })
+      .maybeSingle();
 
-    if (error) throw error;
+    // Coba approach kedua jika yang pertama gagal
+    if (error) {
+      console.error('[DELETE SINGLE LOG ERROR]:', error.message);
+      return res.status(500).json({ success: false, message: error.message });
+    }
 
-    console.log(`[SUPABASE ATTENDANCE LOG DELETE] Log ID: ${id} deleted successfully`);
-    res.json({ success: true, message: `Log absensi (ID ${id}) berhasil dihapus dari database Supabase.` });
+    console.log(`[SUPABASE ATTENDANCE LOG DELETE] Log ID: ${numericId} deleted successfully`);
+    res.json({ success: true, message: `Log absensi (ID ${numericId}) berhasil dihapus dari database Supabase.` });
   } catch (error) {
     console.error('[ERROR DELETE SINGLE LOG]:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -705,8 +735,8 @@ apiRouter.delete('/attendance/logs/:id', async (req, res) => {
 // 8. DELETE /api/attendance/logs - Clear ALL attendance logs from Supabase
 apiRouter.delete('/attendance/logs', async (req, res) => {
   try {
-    // Delete all rows where id is not null (effectively clears all log rows)
-    const { error } = await supabase
+    // Gunakan supabaseAdmin untuk bypass RLS
+    const { error } = await supabaseAdmin
       .from('attendance_logs')
       .delete()
       .neq('id', 0);
