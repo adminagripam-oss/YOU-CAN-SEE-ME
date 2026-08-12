@@ -154,12 +154,26 @@ export default function TabAttendanceLogs({
           // (melewati RLS karena berjalan di server-side)
           const deleteResults = await Promise.all(
             idsToDelete.map(async (id) => {
-              const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${id}`, {
-                method: 'DELETE',
-              });
-              const result = await res.json();
-              console.log(`[DELETE] ID ${id} →`, res.status, result.message || result);
-              return { id, ok: res.ok, message: result.message };
+              try {
+                const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${id}`, {
+                  method: 'DELETE',
+                });
+                
+                let result = {};
+                const text = await res.text();
+                try {
+                  result = text ? JSON.parse(text) : {};
+                } catch (jsonErr) {
+                  console.warn(`[DELETE WARN] Failed to parse JSON for ID ${id}:`, text);
+                  result = { message: text || 'Non-JSON response' };
+                }
+
+                console.log(`[DELETE] ID ${id} →`, res.status, result.message || result);
+                return { id, ok: res.ok, message: result.message };
+              } catch (fetchErr) {
+                console.error(`[DELETE ERROR] Fetch failed for ID ${id}:`, fetchErr);
+                return { id, ok: false, message: fetchErr.message };
+              }
             })
           );
 
