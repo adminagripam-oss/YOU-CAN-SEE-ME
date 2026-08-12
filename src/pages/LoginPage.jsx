@@ -6,6 +6,7 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -31,6 +32,50 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
     }
   };
 
+  // Shared style untuk wrapper input dengan icon
+  const inputWrapperStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    background: 'var(--bg-input)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '10px',
+    padding: '0 14px',
+    height: '48px',
+    width: '100%',
+    boxSizing: 'border-box',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+  };
+
+  const inputStyle = {
+    flex: 1,
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--text-main)',
+    fontSize: '0.9rem',
+    outline: 'none',
+    height: '100%',
+    minWidth: 0,
+  };
+
+  const iconStyle = {
+    color: 'var(--text-muted)',
+    flexShrink: 0,
+    fontSize: '0.95rem',
+    width: '16px',
+    textAlign: 'center',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.78rem',
+    fontWeight: 700,
+    letterSpacing: '0.06em',
+    color: 'var(--text-muted)',
+    marginBottom: '8px',
+    textTransform: 'uppercase',
+  };
+
   return (
     <div className="glass-login-wrapper">
       <div className="login-pattern-container">
@@ -47,28 +92,82 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
         <div className="glass-card ui-card" style={{ maxWidth: '400px', margin: '0 auto' }}>
           <div className="ui-card-content">
             <form onSubmit={handleLogin} className="space-y-4">
-              <div className="form-group">
-                <label htmlFor="login-username">Username</label>
-                <input
-                  type="text"
-                  id="login-username"
-                  placeholder="Masukkan username..."
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={isLoading}
-                />
+
+              {/* ── Username Field ─────────────────────────────────────── */}
+              <div style={{ marginBottom: '16px' }}>
+                <label htmlFor="login-username" style={labelStyle}>
+                  Username
+                </label>
+                <div
+                  style={inputWrapperStyle}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.15)';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <i className="fa-solid fa-user" style={iconStyle}></i>
+                  <input
+                    type="text"
+                    id="login-username"
+                    placeholder="Masukkan username..."
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={isLoading}
+                    style={inputStyle}
+                  />
+                </div>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="login-password">Password</label>
-                <input
-                  type="password"
-                  id="login-password"
-                  placeholder="Masukkan password..."
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={isLoading}
-                />
+              {/* ── Password Field ─────────────────────────────────────── */}
+              <div style={{ marginBottom: '8px' }}>
+                <label htmlFor="login-password" style={labelStyle}>
+                  Password
+                </label>
+                <div
+                  style={inputWrapperStyle}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.15)';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <i className="fa-solid fa-lock" style={iconStyle}></i>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    id="login-password"
+                    placeholder="Masukkan password..."
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading}
+                    style={inputStyle}
+                  />
+                  {/* Toggle Show/Hide Password */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      padding: '0',
+                      flexShrink: 0,
+                      fontSize: '0.85rem',
+                      lineHeight: 1,
+                    }}
+                    tabIndex={-1}
+                    aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  >
+                    <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '1.5rem' }}>
