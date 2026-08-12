@@ -344,3 +344,33 @@ Untuk menjamin vektor master selalu tersedia saat karyawan dipilih:
 - **Direct SDK Integration untuk Perintah Hapus**: API untuk menghapus log absensi dipindahkan murni menggunakan pemanggilan SDK Supabase (`supabase.from('attendance_logs').delete()`) di komponen klien untuk menghindari error konektivitas Vercel ke port backend yang terisolasi.
 - **Sistem Kunci Wajah Spesifik (Single Face Locking)**: Beralih dari penggunaan `detectSingleFace` ke `detectAllFaces` lalu mengekstrak wajah dengan luas dimensi *(bounding box area)* terbesar. Hal ini mengizinkan sistem untuk secara otomatis dan konsisten mengunci fokus pemrosesan hanya pada satu wajah karyawan yang berdiri paling dekat di depan kamera, dan mengabaikan wajah karyawan lain di *background* meskipun secara tak sengaja tertangkap kamera.
 - **UI Re-branding**: Mengintegrasikan logo AGRIFACE secara menonjol pada halaman Login (dimensi resolusi tinggi) dengan gaya desain yang lebih bersih tanpa ikon/kotak yang bertumpuk pada Sidebar maupun Topbar (Text-only brand logo).
+
+---
+
+## 11. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.4.0)
+
+Pembaruan versi **v2.4.0** membawa optimalisasi masif pada integrasi jaringan multi-device, peningkatan performa pemrosesan AI di perangkat mobile (HP), penyelarasan keamanan Row Level Security (RLS) Supabase, serta penguatan pondasi Mode Offline PWA:
+
+### 11.1 Dinamisasi API Base URL untuk Koneksi HP (LAN Auto-IP Resolution)
+* **Akar Masalah**: Sebelumnya, `API_BASE_URL` di-hardcode ke `localhost:8080`, menyebabkan browser HP yang mengakses aplikasi via jaringan Wi-Fi lokal gagal menghubungi server backend (karena `localhost` di HP merujuk ke HP itu sendiri).
+* **Solusi Dinamis**: `API_BASE_URL` kini dikonfigurasi secara dinamis berbasis `window.location.hostname`. Jika aplikasi diakses dari HP via IP lokal laptop (misalnya `192.168.1.15:5173`), API secara otomatis diarahkan ke port backend di host tersebut (`http://192.168.1.15:8080`), sehingga fitur integrasi backend berjalan lancar di HP.
+
+### 11.2 Penyelarasan RLS (Row Level Security) Supabase untuk Vercel Serverless
+* **Akar Masalah**: PWA yang dideploy di Vercel online tidak dapat menjangkau port Express API lokal yang berada di belakang jaringan LAN. Ketika frontend melakukan fallback langsung ke Supabase Cloud (`supabase-js`), Supabase menolak operasi penulisan/penghapusan karena RLS aktif di database tanpa policy untuk role `anon`.
+* **Solusi Kebijakan RLS**: Menerapkan SQL Migration untuk membuka policy `SELECT`, `INSERT`, `UPDATE`, dan `DELETE` secara eksplisit bagi role `anon` pada tabel:
+  - `attendance_logs` (Pencatatan absensi langsung)
+  - `employees` (Pendaftaran/pembaruan karyawan)
+  - `master_descriptors` (Penyimpanan vektor wajah master)
+* **Fallback 3-Tier Hapus Log**: Menambahkan mekanisme fallback penghapusan langsung ke Supabase Cloud di frontend jika Express API terdeteksi offline/unreachable saat diakses via internet Vercel.
+
+### 11.3 Integrasi Limit Waktu API (Quick Timeout 3 Detik)
+* **Akar Masalah**: Saat HP berada di luar jaringan lokal (misal menggunakan paket data 4G/5G), browser menunggu proses TCP Handshake ke IP Express lokal hingga 30+ detik sebelum melempar error, membuat UI tampak membeku (stuck) tanpa notifikasi sukses/gagal.
+* **Solusi**: Memperkenalkan helper `fetchWithTimeout` dengan batasan **3 detik** di seluruh pemanggilan API lokal (`TabEmployeeManagement`, `TabFaceVerification`, dan `App.jsx`). Jika Express server tidak merespon dalam 3 detik, aplikasi langsung memotong jalur dan melakukan fallback ke Supabase Cloud secara instan.
+
+### 11.4 Optimalisasi Kinerja Kamera & AI Registrasi
+* **useNormalizedFaceMesh Integration**: Merefaktor total kamera pada pendaftaran karyawan (`TabEmployeeManagement.jsx`) agar menggunakan hook terstandarisasi `useNormalizedFaceMesh`. Proses ini memotong gambar ke aspect-ratio `4:3` secara independen, menghilangkan distorsi "gepeng" (squashed) pada titik hijau mesh wajah di layar HP, dan menambahkan efek cermin (`scaleX(-1)`) untuk pengalaman pengguna yang lebih baik.
+
+### 11.5 Peta Jalan Mode Offline PWA (Fase Berikutnya)
+* **Service Worker Asset Caching**: Mengonfigurasi `sw.js` untuk menyimpan berkas statis (HTML, JS, CSS) beserta bobot model AI dari CDN (`@vladmandic/human/models` seberat ~20MB) ke cache browser HP agar aplikasi dapat dibuka saat tidak ada koneksi sama sekali.
+* **IndexedDB Sync Buffer**: Mematangkan alur antrean Dexie.js agar absensi luring (offline) disimpan secara aman dalam antrean, serta otomatis memicu sinkronisasi massal *(background sync)* ke database Supabase Cloud begitu perangkat mendeteksi koneksi internet kembali aktif.
+
