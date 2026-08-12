@@ -5,7 +5,7 @@ import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
 import { Human } from '@vladmandic/human';
-import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, MapPinOff, Navigation } from 'lucide-react';
+import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
 
 const humanConfig = {
   modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
@@ -533,6 +533,7 @@ const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
+  gpsPermission = 'granted', liveCoords = null,
 }) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [nikInput, setNikInput] = useState('');
@@ -557,12 +558,6 @@ export default function TabFaceVerification({
   // Camera settings
   const [facingMode, setFacingMode] = useState('user'); // 'user' = depan, 'environment' = belakang
   const [lightingWarning, setLightingWarning] = useState('');
-
-  // ── GPS Permission & Live Location States ─────────────────────────────────
-  // 'unknown' | 'checking' | 'granted' | 'denied' | 'unavailable'
-  const [gpsPermission, setGpsPermission] = useState('unknown');
-  const [liveCoords, setLiveCoords] = useState(null); // { lat, lng, accuracy }
-  const gpsWatchIdRef = useRef(null);
 
   // Attendance & Timer States
   const [attendanceStatus, setAttendanceStatus] = useState({
@@ -608,111 +603,6 @@ export default function TabFaceVerification({
       }
     }
   }, [currentUser, employees]);
-
-  // ── GPS Permission Gate: aktif saat kamera scanner terbuka (isHadir) ───────
-  // Menggunakan Permissions API (jika tersedia) untuk mendeteksi status izin
-  // secara reaktif. Falls back ke getCurrentPosition probe jika tidak ada API.
-  useEffect(() => {
-    if (selectedStatus !== 'Hadir') {
-      // Kamera tidak aktif, bersihkan watcher GPS
-      if (gpsWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-        gpsWatchIdRef.current = null;
-      }
-      setGpsPermission('unknown');
-      setLiveCoords(null);
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      setGpsPermission('unavailable');
-      return;
-    }
-
-    setGpsPermission('checking');
-
-    // Coba gunakan Permissions API untuk deteksi status tanpa meminta langsung
-    if (navigator.permissions) {
-      navigator.permissions.query({ name: 'geolocation' }).then((result) => {
-        const applyState = (state) => {
-          if (state === 'granted') {
-            setGpsPermission('granted');
-            // Mulai live watcher jika belum ada
-            if (gpsWatchIdRef.current === null) {
-              gpsWatchIdRef.current = navigator.geolocation.watchPosition(
-                (pos) => {
-                  setLiveCoords({
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                    accuracy: pos.coords.accuracy,
-                  });
-                },
-                () => { setLiveCoords(null); },
-                { enableHighAccuracy: true, maximumAge: 10000 }
-              );
-            }
-          } else if (state === 'denied') {
-            setGpsPermission('denied');
-            setLiveCoords(null);
-          } else {
-            // 'prompt' — belum diputuskan, minta sekali probe
-            setGpsPermission('prompt');
-          }
-        };
-
-        applyState(result.state);
-        result.onchange = () => applyState(result.state);
-      }).catch(() => {
-        // Permissions API gagal, fallback ke probe langsung
-        setGpsPermission('prompt');
-      });
-    } else {
-      // Browser tidak support Permissions API (iOS Safari lama)
-      setGpsPermission('prompt');
-    }
-
-    return () => {
-      if (gpsWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-        gpsWatchIdRef.current = null;
-      }
-    };
-  }, [selectedStatus]);
-
-  /** Dipanggil saat user menekan tombol "Aktifkan Lokasi" di banner GPS */
-  const requestGpsPermission = () => {
-    if (!navigator.geolocation) return;
-    setGpsPermission('checking');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGpsPermission('granted');
-        setLiveCoords({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        });
-        // Mulai watcher setelah izin diberikan
-        if (gpsWatchIdRef.current === null) {
-          gpsWatchIdRef.current = navigator.geolocation.watchPosition(
-            (p) => setLiveCoords({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
-            () => {},
-            { enableHighAccuracy: true, maximumAge: 10000 }
-          );
-        }
-        showToast('Lokasi Aktif', 'GPS berhasil diaktifkan. Koordinat Anda siap direkam.', 'success');
-      },
-      (err) => {
-        setGpsPermission('denied');
-        setLiveCoords(null);
-        if (err.code === 1) {
-          showToast('Izin Ditolak', 'Izin lokasi ditolak. Aktifkan di pengaturan browser/HP Anda.', 'error');
-        } else {
-          showToast('GPS Gagal', 'Tidak dapat mendapatkan lokasi. Pastikan GPS HP aktif.', 'error');
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  };
 
   // Live work-duration timer
   useEffect(() => {
@@ -1605,101 +1495,7 @@ export default function TabFaceVerification({
                   style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
                 ></canvas>
 
-                {/* ── GPS Permission Overlay ──────────────────────────────── */}
-                {(gpsPermission === 'denied' || gpsPermission === 'unavailable' || gpsPermission === 'prompt') && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      zIndex: 20,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '12px',
-                      background: 'rgba(10, 10, 20, 0.82)',
-                      backdropFilter: 'blur(6px)',
-                      borderRadius: '12px',
-                      padding: '20px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{
-                      width: '56px', height: '56px', borderRadius: '50%',
-                      background: gpsPermission === 'denied' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
-                      border: `2px solid ${gpsPermission === 'denied' ? '#ef4444' : '#f59e0b'}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      animation: 'pulse 2s infinite',
-                    }}>
-                      <MapPinOff size={28} color={gpsPermission === 'denied' ? '#ef4444' : '#f59e0b'} />
-                    </div>
-                    <div>
-                      <p style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', margin: '0 0 4px' }}>
-                        {gpsPermission === 'denied'
-                          ? '📍 Izin Lokasi Ditolak'
-                          : gpsPermission === 'unavailable'
-                          ? '📍 GPS Tidak Tersedia'
-                          : '📍 Aktifkan Lokasi untuk Absen'}
-                      </p>
-                      <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.78rem', margin: 0, lineHeight: 1.5 }}>
-                        {gpsPermission === 'denied'
-                          ? 'Buka Pengaturan Browser → Izin Lokasi → Izinkan'
-                          : gpsPermission === 'unavailable'
-                          ? 'Perangkat tidak mendukung GPS'
-                          : 'Data lokasi wajib direkam saat absensi'}
-                      </p>
-                    </div>
-                    {gpsPermission !== 'unavailable' && (
-                      <button
-                        onClick={requestGpsPermission}
-                        style={{
-                          padding: '10px 24px',
-                          borderRadius: '24px',
-                          border: 'none',
-                          background: 'linear-gradient(135deg, #10b981, #059669)',
-                          color: '#fff',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          boxShadow: '0 4px 14px rgba(16,185,129,0.4)',
-                        }}
-                      >
-                        <MapPin size={16} /> Aktifkan Lokasi GPS
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* ── GPS Checking Spinner ────────────────────────────────── */}
-                {gpsPermission === 'checking' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      bottom: '10px',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      zIndex: 15,
-                      padding: '5px 14px',
-                      borderRadius: '20px',
-                      background: 'rgba(99,102,241,0.88)',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      backdropFilter: 'blur(4px)',
-                    }}
-                  >
-                    <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-                    Mendeteksi GPS...
-                  </div>
-                )}
-
-                {/* ── GPS Granted Badge ───────────────────────────────────── */}
+                {/* ── GPS Granted Badge (koordinat live di bawah kamera) ───── */}
                 {gpsPermission === 'granted' && liveCoords && (
                   <div
                     style={{
