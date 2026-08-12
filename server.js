@@ -710,15 +710,12 @@ apiRouter.delete('/attendance/logs/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: `ID tidak valid: ${id}` });
     }
 
-    // Gunakan supabaseAdmin untuk bypass RLS
-    const { error, count } = await supabaseAdmin
+    // Gunakan supabaseAdmin untuk bypass RLS dengan query sederhana
+    const { error } = await supabaseAdmin
       .from('attendance_logs')
       .delete()
-      .eq('id', numericId)
-      .select('id', { count: 'exact', head: true })
-      .maybeSingle();
+      .eq('id', numericId);
 
-    // Coba approach kedua jika yang pertama gagal
     if (error) {
       console.error('[DELETE SINGLE LOG ERROR]:', error.message);
       return res.status(500).json({ success: false, message: error.message });
