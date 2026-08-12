@@ -966,6 +966,10 @@ export default function TabFaceVerification({
   const frameCounterRef = useRef(0);
   const INFERENCE_EVERY_N_FRAMES = 3;
 
+  // Caching deteksi terakhir agar rendering node tidak berkedip saat frame di-skip
+  const lastDetectionRef = useRef(null);
+  const lastDetectionTimeRef = useRef(0);
+
   /**
    * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
    * Menerima canvas 640×480 yang sudah ter-crop — bukan video mentah.
@@ -974,16 +978,30 @@ export default function TabFaceVerification({
   const detectFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
 
-    // Frame throttle: skip N-1 dari setiap N frame untuk hemat GPU mobile
     frameCounterRef.current += 1;
+    const now = Date.now();
+
+    // Frame throttle: skip N-1 dari setiap N frame untuk hemat GPU mobile
     if (frameCounterRef.current % INFERENCE_EVERY_N_FRAMES !== 0) {
-      return null; // skip frame ini, tidak jalankan heavy inference
+      // Jika wajah benar-benar tidak terdeteksi lebih dari 1.5 detik, hapus cache
+      if (now - lastDetectionTimeRef.current > 1500) {
+        lastDetectionRef.current = null;
+      }
+      return lastDetectionRef.current; // kembalikan cache wajah agar node tetap digambar
     }
 
-    // human.detect menerima HTMLCanvasElement / HTMLVideoElement / ImageData
+    // Jalankan deteksi wajah asli
     const result = await human.detect(croppedCanvas);
-    // Kembalikan face[0] saja (single-face mode) atau null jika tidak ada
-    return result?.face?.[0] ?? null;
+    const face = result?.face?.[0] ?? null;
+
+    if (face) {
+      lastDetectionRef.current = face;
+      lastDetectionTimeRef.current = now;
+    } else if (now - lastDetectionTimeRef.current > 1500) {
+      lastDetectionRef.current = null;
+    }
+
+    return face;
   }, [modelsLoaded]);
 
   /**
