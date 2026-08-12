@@ -177,17 +177,40 @@ export default function TabAttendanceLogs({
             })
           );
 
-          const allSuccess = deleteResults.every((r) => r.ok);
-          const failedIds = deleteResults.filter((r) => !r.ok).map((r) => r.id);
+          let allSuccess = deleteResults.every((r) => r.ok);
+          let failedIds = deleteResults.filter((r) => !r.ok).map((r) => r.id);
+
+          // ── Fallback: Supabase Direct Delete ──────────────────────────────
+          // Jika penghapusan via API gagal/unreachable (misal di Vercel online
+          // dan server lokal mati), coba hapus langsung ke database Supabase Cloud.
+          // Berhasil karena RLS policy DELETE untuk anon role sudah dipasang.
+          if (!allSuccess) {
+            console.warn('[DELETE API WARN - FALLING BACK TO SUPABASE DIRECT]: Mencoba hapus langsung...');
+            try {
+              const { error: sbErr } = await supabase
+                .from('attendance_logs')
+                .delete()
+                .in('id', idsToDelete);
+
+              if (!sbErr) {
+                allSuccess = true;
+                console.log('[DELETE FALLBACK OK]: Berhasil menghapus via Supabase Cloud');
+              } else {
+                console.error('[DELETE FALLBACK ERROR]: Gagal via Supabase Cloud:', sbErr.message);
+              }
+            } catch (sbEx) {
+              console.error('[DELETE FALLBACK EXCEPTION]:', sbEx.message);
+            }
+          }
 
           if (allSuccess) {
-            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus dari database.`, 'success');
+            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
           } else {
-            console.error('[DELETE] Gagal menghapus IDs:', failedIds);
+            console.error('[DELETE] Semua jalur penghapusan gagal untuk IDs:', failedIds);
             showToast(
-              'Sebagian Gagal',
-              `${deleteResults.filter(r => r.ok).length} berhasil, ${failedIds.length} gagal. Cek console untuk detail.`,
-              'warning'
+              'Gagal Menghapus',
+              'Penghapusan gagal di API lokal maupun database awan.',
+              'error'
             );
           }
 
