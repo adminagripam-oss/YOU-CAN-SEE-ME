@@ -986,9 +986,9 @@ export default function TabFaceVerification({
 
     // ── EYE ASPECT RATIO (EAR) Blink Detection (Anti-Spoofing) ───────────
     // smoothedMesh sudah di-smooth EMA oleh hook; gunakan untuk EAR agar stabil
-    const leftEAR  = calculateEAR(smoothedMesh, MP_LEFT_EYE);
+    const leftEAR = calculateEAR(smoothedMesh, MP_LEFT_EYE);
     const rightEAR = calculateEAR(smoothedMesh, MP_RIGHT_EYE);
-    const avgEAR   = (leftEAR + rightEAR) / 2.0;
+    const avgEAR = (leftEAR + rightEAR) / 2.0;
     setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
     if (!livenessVerifiedRef.current) {
@@ -1009,7 +1009,7 @@ export default function TabFaceVerification({
             : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN'
         );
         const yaw = detection.rotation?.angle?.yaw || 0;
-        if (challenge === 'TURN_LEFT'  && yaw >  0.15) passed = true;
+        if (challenge === 'TURN_LEFT' && yaw > 0.15) passed = true;
         if (challenge === 'TURN_RIGHT' && yaw < -0.15) passed = true;
       }
 
@@ -1026,7 +1026,7 @@ export default function TabFaceVerification({
     // ── 1-to-1 Match via Cosine Similarity ───────────────────────────────
     if (currentDescRef.current) {
       let rawPct = 0;
-      const threshold = 70.0;
+      const threshold = 80.0;
 
 
       // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
@@ -1061,8 +1061,8 @@ export default function TabFaceVerification({
       const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
 
       const matched = avgPct >= threshold;
-      matchRateRef.current  = avgPct;
-      isMatchedRef.current  = matched;
+      matchRateRef.current = avgPct;
+      isMatchedRef.current = matched;
       setMatchRate(avgPct);
       setIsMatched(matched);
 
@@ -1179,9 +1179,9 @@ export default function TabFaceVerification({
     // Disimpan dalam satuan detik (integer) agar mudah diformat di LogsPage.
     let durasiDetik = null;
     if (attendanceType === 'CHECK_OUT' && attendanceStatus.checkInTime) {
-      const checkInMs  = new Date(attendanceStatus.checkInTime).getTime();
+      const checkInMs = new Date(attendanceStatus.checkInTime).getTime();
       const checkOutMs = new Date(recordTimestamp).getTime();
-      const selisihMs  = checkOutMs - checkInMs;
+      const selisihMs = checkOutMs - checkInMs;
       if (selisihMs > 0) {
         durasiDetik = Math.round(selisihMs / 1000); // konversi ms → detik
       }
