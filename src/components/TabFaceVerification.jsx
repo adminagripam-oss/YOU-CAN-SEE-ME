@@ -1026,7 +1026,8 @@ export default function TabFaceVerification({
     // ── 1-to-1 Match via Cosine Similarity ───────────────────────────────
     if (currentDescRef.current) {
       let rawPct = 0;
-      const threshold = 60.0;
+      const threshold = 70.0;
+
 
       // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
       // Buka DevTools Console → tab Console untuk membaca log ini.
