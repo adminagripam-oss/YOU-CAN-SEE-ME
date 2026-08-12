@@ -52,7 +52,7 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
                 <input
                   type="text"
                   id="login-username"
-                  placeholder="Masukkan username admin..."
+                  placeholder="Masukkan username..."
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={isLoading}
