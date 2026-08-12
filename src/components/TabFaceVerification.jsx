@@ -9,12 +9,16 @@ import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } fr
 
 const humanConfig = {
   modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
+  // ── Mobile Optimization ──────────────────────────────────────────────────
+  // iris dinonaktifkan: mengkonsumsi ~40% GPU mobile → menyebabkan model
+  // description (penghasil embedding/vektor wajah) gagal/skip di HP & tablet.
+  // Dampak: liveness tetap berjalan via EAR. Hanya fitur tracking pupil hilang.
   face: {
     enabled: true,
-    detector: { enabled: true, rotation: true },
+    detector: { enabled: true, rotation: true, maxDetected: 1 },
     mesh: { enabled: true },
-    iris: { enabled: true },
-    description: { enabled: true },
+    iris: { enabled: false },       // ← DINONAKTIFKAN untuk hemat GPU mobile
+    description: { enabled: true }, // ← Model embedding wajah — WAJIB aktif
   },
   body: { enabled: false },
   hand: { enabled: false },
@@ -957,6 +961,11 @@ export default function TabFaceVerification({
   // Throttle ref untuk diagnostic log (log max 1x per 3 detik, hindari spam)
   const diagLogThrottleRef = useRef(0);
 
+  // Frame throttle: jalankan AI inference setiap N frame.
+  // Nilai 3 → proses frame ke-1,4,7,... → hemat ~67% CPU/GPU di HP
+  const frameCounterRef = useRef(0);
+  const INFERENCE_EVERY_N_FRAMES = 3;
+
   /**
    * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
    * Menerima canvas 640×480 yang sudah ter-crop — bukan video mentah.
@@ -964,6 +973,13 @@ export default function TabFaceVerification({
    */
   const detectFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
+
+    // Frame throttle: skip N-1 dari setiap N frame untuk hemat GPU mobile
+    frameCounterRef.current += 1;
+    if (frameCounterRef.current % INFERENCE_EVERY_N_FRAMES !== 0) {
+      return null; // skip frame ini, tidak jalankan heavy inference
+    }
+
     // human.detect menerima HTMLCanvasElement / HTMLVideoElement / ImageData
     const result = await human.detect(croppedCanvas);
     // Kembalikan face[0] saja (single-face mode) atau null jika tidak ada
@@ -981,8 +997,16 @@ export default function TabFaceVerification({
     setLightingWarning(lightingStatus);
 
     // ── Simpan embedding ke ref (untuk submit) ────────────────────────────
-    if (detection.embedding) {
+    if (detection.embedding && detection.embedding.length > 0) {
       currentDescRef.current = Array.from(detection.embedding);
+    } else {
+      // Embedding null/undefined: terjadi saat model description gagal generate
+      // (biasanya di HP/tablet karena GPU throttle atau memori penuh)
+      // Ref dibiarkan nilai sebelumnya agar match rate tidak reset ke 0
+      const now = Date.now();
+      if (now - diagLogThrottleRef.current > 5000) {
+        console.warn('[EMBEDDING NULL] detection.embedding kosong di frame ini — GPU mungkin throttled. Ref sebelumnya dipertahankan.');
+      }
     }
 
     // ── EYE ASPECT RATIO (EAR) Blink Detection (Anti-Spoofing) ───────────
