@@ -1186,12 +1186,10 @@ export default function TabFaceVerification({
         matchStartTimeRef.current = performance.now();
       }
     } else {
-      // Embedding null/undefined: terjadi saat model description gagal generate
-      // (biasanya di HP/tablet karena GPU throttle atau memori penuh)
-      // Ref dibiarkan nilai sebelumnya agar match rate tidak reset ke 0
-      const now = Date.now();
-      if (now - diagLogThrottleRef.current > 5000) {
-        console.warn('[EMBEDDING NULL] detection.embedding kosong di frame ini — GPU mungkin throttled. Ref sebelumnya dipertahankan.');
+      // Embedding null/undefined: terjadi saat model description nonaktif
+      // dalam alur bertahap atau GPU throttle.
+      if (!isMatchedRef.current && !isStableRef.current) {
+        currentDescRef.current = null;
       }
     }
 
@@ -1231,6 +1229,34 @@ export default function TabFaceVerification({
         setLivenessStatusMsg('Liveness Terverifikasi!');
         const base64Str = captureVideoFrameBase64(videoRef.current);
         if (base64Str) setCapturedBase64Image(base64Str);
+      }
+    }
+
+    // ── Phase 2: Stabilization & Facing Forward Check ──────────────────────
+    if (livenessVerifiedRef.current) {
+      const pitch = detection.rotation?.angle?.pitch || 0;
+      const yaw = detection.rotation?.angle?.yaw || 0;
+      const roll = detection.rotation?.angle?.roll || 0;
+
+      // Syarat stabil: nilai rotasi harus mendekati 0 (antara -0.15 hingga 0.15)
+      const isFacingForward = Math.abs(pitch) <= 0.15 && Math.abs(yaw) <= 0.15 && Math.abs(roll) <= 0.15;
+
+      if (isFacingForward) {
+        if (!isStableRef.current) {
+          isStableRef.current = true;
+          setIsStable(true);
+          setLivenessStatusMsg('Mencocokkan Wajah...');
+        }
+      } else {
+        if (isStableRef.current) {
+          isStableRef.current = false;
+          setIsStable(false);
+          scoreHistoryRef.current = []; // Reset moving average history
+          setMatchRate(0);
+        }
+        if (!isMatchedRef.current) {
+          setLivenessStatusMsg('Tatap lurus ke kamera dan diam sejenak...');
+        }
       }
     }
 
@@ -1774,7 +1800,9 @@ export default function TabFaceVerification({
                       background: isLiveHuman && isMatched
                         ? 'rgba(16, 185, 129, 0.94)'
                         : isLiveHuman
-                          ? 'rgba(59, 130, 246, 0.92)'
+                          ? isStable
+                            ? 'rgba(59, 130, 246, 0.92)'
+                            : 'rgba(245, 158, 11, 0.92)' // Yellow/orange alert background when face needs to stabilize
                           : 'rgba(15, 23, 42, 0.88)',
                       color: '#ffffff',
                       fontSize: '0.8rem',
@@ -1791,7 +1819,11 @@ export default function TabFaceVerification({
                     {isLiveHuman && isMatched ? (
                       <>✓ SIAP ABSEN — {matchRate.toFixed(1)}% Match</>
                     ) : isLiveHuman ? (
-                      <>✓ Liveness Terverifikasi! · Mencocokkan...</>
+                      isStable ? (
+                        <>✓ Liveness Terverifikasi! · Mencocokkan...</>
+                      ) : (
+                        <>{livenessStatusMsg}</> // Will be "Tatap lurus ke kamera dan diam sejenak..."
+                      )
                     ) : (
                       <>{livenessStatusMsg}</>
                     )}
