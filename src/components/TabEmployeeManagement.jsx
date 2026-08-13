@@ -5,20 +5,9 @@ import { cacheUserMasterVector, cacheGeometricVector } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { Human } from '@vladmandic/human';
 
-const humanConfig = {
-  modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
-  face: {
-    enabled: true,
-    detector: { enabled: true, rotation: true },
-    mesh: { enabled: true },
-    iris: { enabled: true },
-    description: { enabled: true },
-  },
-  body: { enabled: false },
-  hand: { enabled: false },
-  object: { enabled: false },
-  gesture: { enabled: false },
-};
+import { getUnifiedHumanConfig } from '../aiConfig';
+
+const humanConfig = getUnifiedHumanConfig(true); // description hidup di awal untuk register
 const human = new Human(humanConfig);
 
 

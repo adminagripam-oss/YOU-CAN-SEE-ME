@@ -13,7 +13,12 @@ import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector } from '../db';
-import * as faceapi from '@vladmandic/face-api';
+import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
+import { Human } from '@vladmandic/human';
+import { getUnifiedHumanConfig } from '../aiConfig';
+
+const humanConfig = getUnifiedHumanConfig(true); // description hidup di awal
+const human = new Human(humanConfig);
 
 export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, openConfirmModal }) {
   const navigate = useNavigate();
@@ -38,23 +43,59 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const editStreamRef = useRef(null);
   const editFileInputRef = useRef(null);
 
-  // Stop Camera
-  const stopEditCamera = () => {
-    if (editStreamRef.current) {
-      editStreamRef.current.getTracks().forEach((t) => t.stop());
-      editStreamRef.current = null;
-    }
-  };
+  // Injected detection callback untuk human.js di mode Edit Kamera
+  const detectEditFacesCallback = React.useCallback(async (croppedCanvas) => {
+    if (!modelsLoaded) return null;
+    const result = await human.detect(croppedCanvas);
+    return result?.face?.[0] ?? null;
+  }, [modelsLoaded]);
 
-  useEffect(() => {
-    if (!editModalOpen) {
-      stopEditCamera();
+  // Callback saat wajah diproses
+  const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
+    if (detection.embedding) {
+      editCurrentDescriptorRef.current = Array.from(detection.embedding);
+      setEditCameraStatusText(`✓ Wajah Terdeteksi [1024-dim Human]`);
+      setEditCameraStatusColor('var(--accent-success)');
     }
-    return () => stopEditCamera();
-  }, [editModalOpen]);
+
+    ctx.clearRect(0, 0, 640, 480);
+    if (smoothedMesh && smoothedMesh.length > 0) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+      for (const pt of smoothedMesh) {
+        ctx.beginPath();
+        ctx.arc(pt[0], pt[1], 1.2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }, []);
+
+  // Callback saat tidak ada wajah
+  const onEditNoFace = React.useCallback(() => {
+    editCurrentDescriptorRef.current = null;
+    setEditCameraStatusText('Menunggu Wajah di Kamera...');
+    setEditCameraStatusColor('var(--accent-warning)');
+  }, []);
+
+  // Callback kamera error
+  const onEditCameraError = React.useCallback((err) => {
+    setEditCameraStatusText('Kamera Tidak Bisa Diakses');
+    setEditCameraStatusColor('var(--accent-danger)');
+  }, []);
+
+  useNormalizedFaceMesh({
+    videoRef: editVideoRef,
+    canvasRef: editCanvasRef,
+    active: editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded,
+    facingMode: 'user',
+    smoothAlpha: 0.35,
+    detectFaces: detectEditFacesCallback,
+    onFaceProcessed: onEditFaceProcessed,
+    onNoFace: onEditNoFace,
+    onCameraError: onEditCameraError,
+  });
 
   // Handle Edit Photo File
-  const handleEditPhotoFileUpload = async (e) => {
+  const handleEditPhotoFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -68,86 +109,27 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     setEditCameraStatusText('Menganalisis Wajah dari Foto...');
     setEditCameraStatusColor('var(--accent-warning)');
     
-    try {
-      const img = await faceapi.fetchImage(imgUrl);
-      const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (detection) {
-        editCurrentDescriptorRef.current = Array.from(detection.descriptor);
-        setEditCameraStatusText('1 Wajah Terdeteksi (Siap Disimpan)');
-        setEditCameraStatusColor('var(--accent-success)');
-      } else {
-        editCurrentDescriptorRef.current = null;
-        setEditCameraStatusText('Wajah Tidak Ditemukan! Coba foto lain.');
-        setEditCameraStatusColor('var(--accent-danger)');
-      }
-    } catch (err) {
-      setEditCameraStatusText('Error menganalisis foto.');
-      setEditCameraStatusColor('var(--accent-danger)');
-    }
-  };
-
-  // Start Edit Camera
-  useEffect(() => {
-    let animationFrameId;
-    if (editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded) {
-      startEditCamera();
-    }
-    
-    async function startEditCamera() {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = imgUrl;
+    img.onload = async () => {
       try {
-        editCurrentDescriptorRef.current = null;
-        setEditCameraStatusText('Mencari Wajah...');
-        setEditCameraStatusColor('var(--accent-warning)');
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
-        editStreamRef.current = stream;
-        
-        if (editVideoRef.current) {
-          editVideoRef.current.srcObject = stream;
-          editVideoRef.current.onloadedmetadata = () => {
-            editVideoRef.current.play();
-            if (editCanvasRef.current) {
-              editCanvasRef.current.width = editVideoRef.current.videoWidth;
-              editCanvasRef.current.height = editVideoRef.current.videoHeight;
-              detectEditFace();
-            }
-          };
-        }
-      } catch (err) {
-        setEditCameraStatusText('Kamera Tidak Bisa Diakses');
-        setEditCameraStatusColor('var(--accent-danger)');
-      }
-    }
-
-    const detectEditFace = async () => {
-      if (!editVideoRef.current || editVideoRef.current.paused || editVideoRef.current.ended) return;
-
-      const detection = await faceapi.detectSingleFace(editVideoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceLandmarks().withFaceDescriptor();
-      
-      if (editCanvasRef.current && editVideoRef.current) {
-        const ctx = editCanvasRef.current.getContext('2d');
-        ctx.clearRect(0, 0, editCanvasRef.current.width, editCanvasRef.current.height);
-        
-        if (detection) {
-          const dims = faceapi.matchDimensions(editCanvasRef.current, editVideoRef.current, true);
-          const resizedResult = faceapi.resizeResults(detection, dims);
-          faceapi.draw.drawDetections(editCanvasRef.current, resizedResult);
-          
-          editCurrentDescriptorRef.current = Array.from(detection.descriptor);
-          setEditCameraStatusText('1 Wajah Terdeteksi (Siap Disimpan)');
+        const result = await human.detect(img);
+        if (result.face && result.face.length > 0 && result.face[0].embedding) {
+          editCurrentDescriptorRef.current = Array.from(result.face[0].embedding);
+          setEditCameraStatusText('✓ Wajah Diekstrak dari Foto [1024-dim Human]');
           setEditCameraStatusColor('var(--accent-success)');
         } else {
-          setEditCameraStatusText('Mencari Wajah...');
-          setEditCameraStatusColor('var(--accent-warning)');
+          editCurrentDescriptorRef.current = null;
+          setEditCameraStatusText('Wajah Tidak Ditemukan! Coba foto lain.');
+          setEditCameraStatusColor('var(--accent-danger)');
         }
+      } catch (err) {
+        setEditCameraStatusText('Error menganalisis foto.');
+        setEditCameraStatusColor('var(--accent-danger)');
       }
-      animationFrameId = requestAnimationFrame(detectEditFace);
     };
-
-    return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    };
-  }, [editModalOpen, editUpdateBiometrics, editFormMode, modelsLoaded]);
+  };
 
   // Open Edit Modal
   const openEditModal = (emp) => {
