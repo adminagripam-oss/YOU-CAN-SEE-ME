@@ -83,25 +83,12 @@ function AppContent() {
     setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
   };
 
-  // Fetch Employees (3-Tier Fallback: Express API -> Direct Supabase -> IndexedDB Cache)
+  // Fetch Employees (2-Tier Fallback: Direct Supabase -> IndexedDB Cache)
   const fetchEmployees = useCallback(async () => {
     let empData = null;
-    let dataSource = 'api';
+    let dataSource = 'supabase';
 
-    // Tier 1: Express REST API Endpoint
-    try {
-      const res = await fetchWithTimeout(`${API_BASE_URL}/api/employees`, { timeout: 3000 });
-      const data = await res.json();
-
-      if (data.success && data.data) {
-        empData = data.data;
-      }
-    } catch (err) {
-      console.warn('[FETCH EMPLOYEES API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
-      dataSource = 'supabase';
-    }
-
-    // Tier 2: Direct Supabase Cloud Database Query (HTTPS)
+    // Tier 1: Direct Supabase Cloud Database Query (HTTPS)
     if (!empData) {
       try {
         const { data, error } = await supabase
@@ -155,23 +142,11 @@ function AppContent() {
     }
   }, []);
 
-  // Fetch Attendance Logs (3-Tier Fallback: Express API -> Direct Supabase)
+  // Fetch Attendance Logs (1-Tier: Direct Supabase)
   const fetchLogs = useCallback(async () => {
     let logData = null;
 
-    // Tier 1: Express REST API Endpoint
-    try {
-      const res = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/logs`, { timeout: 3000 });
-      const data = await res.json();
-
-      if (data.success && data.data) {
-        logData = data.data;
-      }
-    } catch (err) {
-      console.warn('[FETCH LOGS API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
-    }
-
-    // Tier 2: Direct Supabase Cloud Database Query with Employee Detail Enrichment
+    // Tier 1: Direct Supabase Cloud Database Query with Employee Detail Enrichment
     if (!logData) {
       try {
         const { data: rawLogs, error } = await supabase

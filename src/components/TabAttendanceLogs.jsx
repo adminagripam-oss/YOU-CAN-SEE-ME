@@ -144,90 +144,21 @@ export default function TabAttendanceLogs({
   }, [groupedLogs, searchQuery]);
 
 
-  // DELETE — Menghapus data via Express API (bukan direct Supabase)
-  // Alasan: Supabase anon key terkena RLS dan diam-diam menolak DELETE
-  // tanpa melempar error. Express API bisa di-konfig pakai service role key.
-  const handleDeleteGroup = (group) => {
-    openConfirmModal({
-      title: 'Hapus Riwayat Absensi?',
-      message: `Apakah Anda yakin ingin menghapus catatan absensi ${group.name} pada ${group.displayDate}? Data Check-In dan Check-Out (jika ada) akan dihapus secara permanen.`,
-      confirmText: 'Hapus Data',
-      onConfirm: async () => {
-        try {
-          // Kumpulkan ID yang akan dihapus
-          const idsToDelete = [];
-          if (group.inLog?.id)  idsToDelete.push(group.inLog.id);
-          if (group.outLog?.id) idsToDelete.push(group.outLog.id);
+          // Menghapus data langsung ke Supabase Cloud
+          try {
+            const { error: sbErr } = await supabase
+              .from('attendance_logs')
+              .delete()
+              .in('id', idsToDelete);
 
-          if (idsToDelete.length === 0) {
-            showToast('Tidak Ada Data', 'Tidak ada ID log yang valid untuk dihapus.', 'warning');
-            return;
-          }
-
-          console.log('[DELETE] Menghapus IDs:', idsToDelete);
-
-          // Hapus setiap log satu per satu via Express API endpoint
-          // (melewati RLS karena berjalan di server-side)
-          const deleteResults = await Promise.all(
-            idsToDelete.map(async (id) => {
-              try {
-                const res = await fetch(`${API_BASE_URL}/api/attendance/logs/${id}`, {
-                  method: 'DELETE',
-                });
-                
-                let result = {};
-                const text = await res.text();
-                try {
-                  result = text ? JSON.parse(text) : {};
-                } catch (jsonErr) {
-                  console.warn(`[DELETE WARN] Failed to parse JSON for ID ${id}:`, text);
-                  result = { message: text || 'Non-JSON response' };
-                }
-
-                console.log(`[DELETE] ID ${id} →`, res.status, result.message || result);
-                return { id, ok: res.ok, message: result.message };
-              } catch (fetchErr) {
-                console.error(`[DELETE ERROR] Fetch failed for ID ${id}:`, fetchErr);
-                return { id, ok: false, message: fetchErr.message };
-              }
-            })
-          );
-
-          let allSuccess = deleteResults.every((r) => r.ok);
-          let failedIds = deleteResults.filter((r) => !r.ok).map((r) => r.id);
-
-          // ── Fallback: Supabase Direct Delete ──────────────────────────────
-          // Jika penghapusan via API gagal/unreachable (misal di Vercel online
-          // dan server lokal mati), coba hapus langsung ke database Supabase Cloud.
-          // Berhasil karena RLS policy DELETE untuk anon role sudah dipasang.
-          if (!allSuccess) {
-            console.warn('[DELETE API WARN - FALLING BACK TO SUPABASE DIRECT]: Mencoba hapus langsung...');
-            try {
-              const { error: sbErr } = await supabase
-                .from('attendance_logs')
-                .delete()
-                .in('id', idsToDelete);
-
-              if (!sbErr) {
-                allSuccess = true;
-                console.log('[DELETE FALLBACK OK]: Berhasil menghapus via Supabase Cloud');
-              } else {
-                console.error('[DELETE FALLBACK ERROR]: Gagal via Supabase Cloud:', sbErr.message);
-              }
-            } catch (sbEx) {
-              console.error('[DELETE FALLBACK EXCEPTION]:', sbEx.message);
+            if (!sbErr) {
+              showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
+            } else {
+              throw sbErr;
             }
-          }
-
-          if (allSuccess) {
-            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
-          } else {
-            console.error('[DELETE] Semua jalur penghapusan gagal untuk IDs:', failedIds);
-            showToast(
-              'Gagal Menghapus',
-              'Penghapusan gagal di API lokal maupun database awan.',
-              'error'
-            );
+          } catch (sbEx) {
+            console.error('[DELETE EXCEPTION]:', sbEx.message);
+            showToast('Gagal Menghapus', 'Gagal menghapus data di Supabase Cloud: ' + sbEx.message, 'error');
           }
 
           // Refresh tabel setelah operasi (berhasil atau tidak)

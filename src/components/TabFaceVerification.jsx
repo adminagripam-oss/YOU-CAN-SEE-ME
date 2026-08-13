@@ -30,7 +30,7 @@ const humanConfig = {
     },
     mesh: { enabled: true },
     iris: { enabled: false },       // ← DINONAKTIFKAN untuk hemat GPU mobile
-    description: { enabled: true }, // ← Model embedding wajah — WAJIB aktif
+    description: { enabled: false }, // ← MATI DI AWAL (Phased Biometric Flow)
   },
   body: { enabled: false },
   hand: { enabled: false },
@@ -45,6 +45,25 @@ const humanConfig = {
   warmup: 'face',
 };
 const human = new Human(humanConfig);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GEOFENCING CONFIGURATION (Dipindahkan dari server.js)
+// ═══════════════════════════════════════════════════════════════════════════
+const OFFICE_LAT = -6.200000;      // ← GANTI dengan Lintang kantor/afdeling Anda
+const OFFICE_LON = 106.816600;     // ← GANTI dengan Bujur kantor/afdeling Anda
+const MAX_RADIUS_METERS = 100000;  // Radius maksimal dalam meter (100km)
+
+function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Radius bumi dalam meter
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Jarak dalam satuan meter
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GEOMETRIC FEATURE ENGINE  —  3D Facial Mesh + Coordinate Distance Matching
@@ -726,29 +745,7 @@ export default function TabFaceVerification({
         console.log('[LOAD MASTER T1-INDEXEDDB] Cache hit, employee:', empIdInt);
       }
 
-      // ── Tier 2: Express Backend API ───────────────────────────────────
-      if (!vec) {
-        try {
-          const res = await fetchWithTimeout(`${API_BASE_URL}/api/biometrics/master/${empIdInt}`, { timeout: 3000 });
-          if (res.ok) {
-
-            const text = await res.text();
-            try {
-              const data = JSON.parse(text);
-              if (data.success) {
-                vec = data.face_vector || data.descriptor_json;
-                if (vec) console.log('[LOAD MASTER T2-API] Vektor ditemukan via API');
-              }
-            } catch (jsonErr) { }
-          } else {
-            console.warn(`[LOAD MASTER T2-API] HTTP ${res.status} — fallback ke Supabase`);
-          }
-        } catch (e) {
-          console.warn('[LOAD MASTER T2-API WARN]:', e.message, '— fallback ke Supabase');
-        }
-      }
-
-      // ── Tier 3: Supabase Direct — tabel master_descriptors ───────────
+      // ── Tier 2: Supabase Direct — tabel master_descriptors ───────────
       // PENTING: gunakan empIdInt (integer) bukan empId (string)
       // Supabase strict-typed: STRING "34" ≠ INTEGER 34 → query return null
       if (!vec) {
@@ -756,20 +753,20 @@ export default function TabFaceVerification({
           const { data: masterData, error: masterErr } = await supabase
             .from('master_descriptors')
             .select('descriptor_json')
-            .eq('employee_id', empIdInt)   // ← integer, bukan string
+            .eq('employee_id', empIdInt)
             .maybeSingle();
 
           if (masterErr) {
-            console.warn('[LOAD MASTER T3-SUPABASE WARN]:', masterErr.message);
+            console.warn('[LOAD MASTER T2-SUPABASE WARN]:', masterErr.message);
           } else if (masterData?.descriptor_json) {
             vec = masterData.descriptor_json;
-            console.log('[LOAD MASTER T3-SUPABASE] Vektor ditemukan di master_descriptors');
+            console.log('[LOAD MASTER T2-SUPABASE] Vektor ditemukan di master_descriptors');
           } else {
-            console.warn('[LOAD MASTER T3-SUPABASE] Tidak ada data untuk employee_id:', empIdInt,
+            console.warn('[LOAD MASTER T2-SUPABASE] Tidak ada data untuk employee_id:', empIdInt,
               '— Karyawan mungkin belum didaftarkan biometriknya.');
           }
         } catch (e) {
-          console.warn('[LOAD MASTER T3-SUPABASE WARN]:', e.message);
+          console.warn('[LOAD MASTER T2-SUPABASE WARN]:', e.message);
         }
       }
 
@@ -842,21 +839,7 @@ export default function TabFaceVerification({
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
     let statusData = null;
 
-    // 1. Tier 1: Express REST API
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/attendance/status/${empId}`);
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          if (data?.success) statusData = data;
-        } catch (jsonErr) { }
-      }
-    } catch (err) {
-      console.warn('[FETCH ATTENDANCE STATUS API WARN - FALLBACK TO SUPABASE/DEXIE]:', err.message);
-    }
-
-    // 2. Tier 2: Direct Supabase Cloud Query Fallback
+    // 1. Tier 1: Direct Supabase Cloud Query
     if (!statusData) {
       try {
         const { data: logs, error } = await supabase
@@ -1112,7 +1095,14 @@ export default function TabFaceVerification({
       inferenceStartRef.current = performance.now();
     }
 
-    const result = await human.detect(inputCanvas);
+    // Phased Biometric Flow: Aktifkan ekstraksi embedding HANYA jika liveness sudah beres & wajah stabil
+    const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
+
+    const result = await human.detect(inputCanvas, {
+      face: {
+        description: { enabled: shouldExtractEmbedding }
+      }
+    });
 
     // [TASK 5] Dev-only: catat durasi inferensi
     if (import.meta.env.DEV) {
@@ -1466,7 +1456,22 @@ export default function TabFaceVerification({
           return;
         }
 
-        locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)}) [Akurasi: ${userAccuracy.toFixed(1)}m]`;
+        // ── Validasi Geofencing ──
+        const distanceToOffice = calculateHaversineDistance(userLat, userLng, OFFICE_LAT, OFFICE_LON);
+        console.log(`[FRONTEND GEOFENCE] Jarak ke Kantor: ${distanceToOffice.toFixed(2)}m (Batas: ${MAX_RADIUS_METERS}m)`);
+
+        if (distanceToOffice > MAX_RADIUS_METERS) {
+          showToast(
+            'Absensi Ditolak',
+            `Anda berada di luar area jangkauan kantor (Jarak: ${distanceToOffice.toFixed(1)}m, Batas: ${MAX_RADIUS_METERS}m).`,
+            'error'
+          );
+          setIsSubmitting(false);
+          setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+          return;
+        }
+
+        locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)}) [Jarak: ${distanceToOffice.toFixed(0)}m]`;
       } catch (gpsError) {
         console.error('[FRONTEND GPS ERROR]:', gpsError);
         showToast(
@@ -1501,66 +1506,31 @@ export default function TabFaceVerification({
 
     if (navigator.onLine) {
       try {
-        const payload = {
+        const logPayload = {
           employee_id: parseInt(selectedEmployeeId),
           nik: (targetEmp.nik || nikInput).trim() || null,
-          scan_descriptor: currentDescRef.current || [],
+          name: targetEmp.name || null,
+          department: targetEmp.department || null,
           location: `${locationStr} - GeoMesh Scanner`,
           attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
           status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+          euclidean_distance: euclideanDist,
+          timestamp: recordTimestamp,
           // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
           ...(durasiDetik !== null && { durasi: durasiDetik }),
           latitude: userLat,
           longitude: userLng,
         };
 
-        const res = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          timeout: 3000,
-        });
-
-
-        const data = await res.json();
-        if (res.ok && data.success) {
+        const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
+        if (!sbErr) {
           isSuccess = true;
-          successMsg = data.message || `Absensi ${typeLabel} berhasil dicatat!`;
-          recordTimestamp = data.timestamp || recordTimestamp;
+          successMsg = `Absensi ${typeLabel} berhasil dicatat di Supabase Cloud!`;
         } else {
-          throw new Error(data.message || `API Gagal mencatat ${typeLabel}`);
+          throw new Error(sbErr.message);
         }
-      } catch (apiErr) {
-        console.warn('[ONLINE API WARN – FALLBACK TO SUPABASE/DEXIE]:', apiErr.message);
-
-        // Fallback A: Direct Supabase Cloud Insert
-        try {
-          const logPayload = {
-            employee_id: parseInt(selectedEmployeeId),
-            nik: (targetEmp.nik || nikInput).trim() || null,
-            name: targetEmp.name || null,
-            department: targetEmp.department || null,
-            location: `${locationStr} - GeoMesh Scanner`,
-            attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
-            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
-            euclidean_distance: euclideanDist,
-            timestamp: recordTimestamp,
-            // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
-            ...(durasiDetik !== null && { durasi: durasiDetik }),
-            latitude: userLat,
-            longitude: userLng,
-          };
-
-          const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
-          if (!sbErr) {
-            isSuccess = true;
-            successMsg = `Absensi ${typeLabel} berhasil dicatat di Supabase Cloud!`;
-          } else {
-            throw new Error(sbErr.message);
-          }
-        } catch (sbEx) {
-          console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
-        }
+      } catch (sbEx) {
+        console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
       }
     }
 
