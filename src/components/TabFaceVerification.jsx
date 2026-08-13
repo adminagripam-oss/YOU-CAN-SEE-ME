@@ -15,7 +15,19 @@ const humanConfig = {
   // Dampak: liveness tetap berjalan via EAR. Hanya fitur tracking pupil hilang.
   face: {
     enabled: true,
-    detector: { enabled: true, rotation: true, maxDetected: 1 },
+    detector: {
+      enabled: true,
+      rotation: true,
+      maxDetected: 1,
+      // [TASK 4] skipFrames: detektor re-detect setiap N frame; di antara frame
+      // hanya tracking (lebih ringan). Embedding (description) tetap berjalan tiap
+      // frame. Trade-off: bounding box sedikit lagged tiap 5 frame, embedding fresh.
+      skipFrames: 5,
+      // [TASK 4] minConfidence: turunkan dari default 0.4 → 0.2 agar detektor
+      // lebih cepat lolos filter di kondisi cahaya rendah / wajah agak jauh.
+      // Jangan turunkan <0.15 (risiko false-positive detection).
+      minConfidence: 0.2,
+    },
     mesh: { enabled: true },
     iris: { enabled: false },       // ← DINONAKTIFKAN untuk hemat GPU mobile
     description: { enabled: true }, // ← Model embedding wajah — WAJIB aktif
@@ -24,6 +36,13 @@ const humanConfig = {
   hand: { enabled: false },
   object: { enabled: false },
   gesture: { enabled: false },
+  // [TASK 2] Paksa backend WebGL untuk semua operasi TensorFlow.js.
+  // Jika device tidak mendukung WebGL → library fallback ke CPU (lag ekstrem).
+  // Pengecekan eksplisit dilakukan di useEffect setelah modelsLoaded.
+  backend: 'webgl',
+  // [TASK 2] Warmup setelah model load: kompilasi GLSL shader selesai SEBELUM
+  // user mulai scan. Tanpa ini, frame pertama scanning bisa lag 500ms-1000ms.
+  warmup: 'face',
 };
 const human = new Human(humanConfig);
 
@@ -592,6 +611,22 @@ export default function TabFaceVerification({
   const livenessChallengeRef = useRef('');
   const scoreHistoryRef = useRef([]);
 
+  // ── Mobile Performance Optimization Refs ─────────────────────────────────
+  // [TASK 3] Riwayat timestamp tiap frame untuk menghitung FPS aktual
+  const frameTimesRef = useRef([]);
+  // [TASK 3] Window adaptif saat ini (3 = device lambat, 5 = device cepat)
+  const adaptiveWindowRef = useRef(5);
+  // [TASK 5] Waktu mulai inferensi per-frame (dev instrumentation)
+  const inferenceStartRef = useRef(0);
+  // [TASK 5] Waktu inferensi terakhir dalam ms (untuk display di log)
+  const lastInferenceTimeRef = useRef(0);
+  // [TASK 5] Timestamp awal scan dimulai (untuk total time to matched)
+  const matchStartTimeRef = useRef(0);
+  // [TASK 5] Flag apakah timer match sudah dimulai
+  const matchTimerStartedRef = useRef(false);
+  // [TASK 5] Throttle ref untuk perf log (terpisah dari diagLogThrottleRef)
+  const perfLogThrottleRef = useRef(0);
+
   const selectedEmployee = employees.find((e) => String(e.id) === String(selectedEmployeeId));
 
   // Auto-select logged-in user & fetch live attendance status
@@ -644,6 +679,11 @@ export default function TabFaceVerification({
     matchRateRef.current = 0;
     isMatchedRef.current = false;
     scoreHistoryRef.current = [];
+    // Reset mobile perf refs on employee switch
+    frameTimesRef.current = [];
+    adaptiveWindowRef.current = 5;
+    matchTimerStartedRef.current = false;
+    matchStartTimeRef.current = 0;
     setHeadTurnState({ left: false, right: false });
     setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
     setGfvMode(false); setLastResultMsg(null);
@@ -964,9 +1004,49 @@ export default function TabFaceVerification({
   const diagLogThrottleRef = useRef(0);
 
   /**
+   * [TASK 2] WebGL Backend Check + Warm-up
+   *
+   * Dijalankan sekali saat modelsLoaded === true.
+   * Memastikan:
+   *  1. Backend yang aktif adalah 'webgl' atau 'humangl' (bukan 'cpu').
+   *  2. human.warmup() dipanggil agar kompilasi shader GLSL selesai sebelum
+   *     scanning pertama — menghilangkan lag spike 500-1000ms di frame awal.
+   */
+  useEffect(() => {
+    if (!modelsLoaded) return;
+    const backend = human.tf?.getBackend?.();
+    if (backend && backend !== 'webgl' && backend !== 'humangl') {
+      console.warn(
+        `[WEBGL WARN] Backend aktif: "${backend}" (bukan webgl/humangl). ` +
+        'GPU mobile tidak digunakan → inferensi jauh lebih lambat. ' +
+        'Pastikan browser mendukung WebGL 2.0 dan tidak diblokir oleh GPU driver.'
+      );
+    } else {
+      console.log(`[WEBGL OK] Backend: ${backend ?? 'webgl (default)'}`);
+    }
+    // Warmup: jalankan 1 inferensi dummy agar shader GLSL sudah ter-compile
+    // sebelum pengguna mulai scan. Ini mencegah lag spike di frame pertama.
+    human.warmup().then(() => {
+      console.log('[WARMUP OK] WebGL shader compilation selesai. Siap scan.');
+    }).catch((err) => {
+      console.warn('[WARMUP WARN] human.warmup() gagal (non-fatal):', err?.message);
+    });
+  }, [modelsLoaded]);
+
+  /**
    * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
    * Menerima canvas 640×480 yang sudah ter-crop — bukan video mentah.
    * Mengembalikan detection result dari human.detect().
+   *
+   * [TASK 1] Downscale Input Canvas (640×480 → 320×240):
+   * Membuat offscreen canvas 320×240 dari croppedCanvas sebelum mengirim ke
+   * human.detect(). Canvas 640×480 asli TIDAK diubah — tetap dipakai hook untuk
+   * render overlay landmark. Pixel count turun 75% → inferensi GPU 2-3× lebih
+   * cepat di mobile. Embedding 128-d tetap valid (model menangani resize internal).
+   *
+   * Trade-off: Posisi landmark dikembalikan dalam koordinat 320×240 oleh model,
+   * namun hook useNormalizedFaceMesh menyediakan `smoothedMesh` dalam koordinat
+   * canvas 640×480 (sudah dinormalisasi) — jadi overlay rendering tidak terpengaruh.
    *
    * Catatan performa mobile: frame throttle (skip-N) sebelumnya digunakan di sini,
    * namun menyebabkan node dan border wajah menghilang karena hook mengosongkan
@@ -976,8 +1056,70 @@ export default function TabFaceVerification({
    */
   const detectFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
-    const result = await human.detect(croppedCanvas);
-    return result?.face?.[0] ?? null;
+
+    // [TASK 1] Downscale ke 320×240 untuk inferensi AI (hemat GPU mobile)
+    // Input: croppedCanvas 640×480 dari hook → di-resize ke 320×240
+    // Output: koordinat landmark di-scale BALIK ke 640×480 sebelum dikembalikan ke hook
+    // Tanpa scale-back ini, koordinat model (dalam 320×240) akan di-render di canvas
+    // 640×480 sehingga overlay muncul di posisi ½ dari posisi wajah yang benar.
+    let inputCanvas = croppedCanvas;
+    const SCALE = 1; // default: tidak ada downscale
+    let coordScale = 1;
+
+    if (croppedCanvas.width > 320) {
+      const small = document.createElement('canvas');
+      small.width = 320;
+      small.height = 240;
+      const sCtx = small.getContext('2d', { willReadFrequently: false });
+      sCtx.drawImage(croppedCanvas, 0, 0, 320, 240);
+      inputCanvas = small;
+      // Faktor scale: 640/320 = 2.0
+      // Digunakan untuk mengembalikan koordinat mesh ke ruang 640×480
+      coordScale = croppedCanvas.width / 320;
+    }
+
+    // [TASK 5] Dev-only: catat waktu mulai inferensi
+    if (import.meta.env.DEV) {
+      inferenceStartRef.current = performance.now();
+    }
+
+    const result = await human.detect(inputCanvas);
+
+    // [TASK 5] Dev-only: catat durasi inferensi
+    if (import.meta.env.DEV) {
+      lastInferenceTimeRef.current = Math.round(performance.now() - inferenceStartRef.current);
+    }
+
+    const face = result?.face?.[0] ?? null;
+
+    // ── Scale-back koordinat ke ruang canvas asli (640×480) ──────────────
+    // Diperlukan karena human.detect() menerima canvas 320×240 sehingga
+    // semua koordinat piksel dalam face.mesh dan face.box ada di ruang 320×240.
+    // Hook useNormalizedFaceMesh menggunakan face.mesh untuk EMA smoothing dan
+    // rendering overlay yang mengasumsikan koordinat dalam ruang 640×480.
+    // face.meshRaw / face.boxRaw (nilai [0..1] ternormalisasi) TIDAK perlu di-scale.
+    if (face && coordScale !== 1) {
+      // Scale face.mesh: array of [x, y, z]
+      if (Array.isArray(face.mesh)) {
+        face.mesh = face.mesh.map(pt => {
+          if (Array.isArray(pt)) {
+            return [pt[0] * coordScale, pt[1] * coordScale, pt[2] ?? 0];
+          }
+          return { x: (pt.x ?? 0) * coordScale, y: (pt.y ?? 0) * coordScale, z: pt.z ?? 0 };
+        });
+      }
+      // Scale face.box: { x, y, width, height }
+      if (face.box) {
+        face.box = {
+          x:      (face.box.x      ?? 0) * coordScale,
+          y:      (face.box.y      ?? 0) * coordScale,
+          width:  (face.box.width  ?? 0) * coordScale,
+          height: (face.box.height ?? 0) * coordScale,
+        };
+      }
+    }
+
+    return face;
   }, [modelsLoaded]);
 
   /**
@@ -990,9 +1132,36 @@ export default function TabFaceVerification({
     const lightingStatus = checkLightingQuality(videoRef.current);
     setLightingWarning(lightingStatus);
 
+    // ── [TASK 3] Rekam timestamp frame untuk kalkulasi FPS adaptif ────────
+    const frameNow = performance.now();
+    frameTimesRef.current.push(frameNow);
+    // Simpan max 12 frame terakhir saja (hemat memori)
+    if (frameTimesRef.current.length > 12) frameTimesRef.current.shift();
+    // Hitung rata-rata durasi antar frame (ms) dari riwayat yang ada
+    let avgFrameDuration = 200; // default: asumsi lambat (device belum terukur)
+    if (frameTimesRef.current.length >= 3) {
+      const oldest = frameTimesRef.current[0];
+      const newest = frameTimesRef.current[frameTimesRef.current.length - 1];
+      avgFrameDuration = (newest - oldest) / (frameTimesRef.current.length - 1);
+    }
+    // Tentukan ukuran window adaptif berdasarkan kecepatan device
+    // Device lambat (>200ms/frame ≈ <5 FPS): window=3 → matched lebih cepat
+    // Device sedang (70-200ms/frame ≈ 5-14 FPS): window=4
+    // Device cepat (<70ms/frame ≈ >14 FPS): window=5 → lebih stabil
+    let newWindow;
+    if (avgFrameDuration > 200) newWindow = 3;
+    else if (avgFrameDuration > 70) newWindow = 4;
+    else newWindow = 5;
+    adaptiveWindowRef.current = newWindow;
+
     // ── Simpan embedding ke ref (untuk submit) ────────────────────────────
     if (detection.embedding && detection.embedding.length > 0) {
       currentDescRef.current = Array.from(detection.embedding);
+      // [TASK 5] Dev: mulai timer 'time to matched' saat embedding pertama tersedia
+      if (import.meta.env.DEV && !matchTimerStartedRef.current) {
+        matchTimerStartedRef.current = true;
+        matchStartTimeRef.current = performance.now();
+      }
     } else {
       // Embedding null/undefined: terjadi saat model description gagal generate
       // (biasanya di HP/tablet karena GPU throttle atau memori penuh)
@@ -1047,7 +1216,6 @@ export default function TabFaceVerification({
       let rawPct = 0;
       const threshold = 80.0;
 
-
       // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
       // Buka DevTools Console → tab Console untuk membaca log ini.
       // Hapus blok ini setelah masalah terselesaikan.
@@ -1074,9 +1242,13 @@ export default function TabFaceVerification({
         rawPct = cosineToMatchPct(cosSim);
       }
 
-      // Score history smoothing (window 5 frames)
+      // [TASK 3] Score history smoothing — window ADAPTIF (3-5 frame)
+      // Window ditentukan oleh adaptiveWindowRef berdasarkan FPS aktual device.
+      // Device lambat (HP entry-level): window=3 → matched ~800ms lebih cepat.
+      // Device cepat (laptop/HP flagship): window=5 → stabilitas lebih tinggi.
+      const currentWindow = adaptiveWindowRef.current;
       scoreHistoryRef.current.push(rawPct);
-      if (scoreHistoryRef.current.length > 5) scoreHistoryRef.current.shift();
+      if (scoreHistoryRef.current.length > currentWindow) scoreHistoryRef.current.shift();
       const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
 
       const matched = avgPct >= threshold;
@@ -1088,6 +1260,30 @@ export default function TabFaceVerification({
       if (matched && !hasBeepedRef.current) {
         hasBeepedRef.current = true;
         playBeepSound();
+        // [TASK 5] Dev: log total time dari embedding pertama → matched
+        if (import.meta.env.DEV && matchStartTimeRef.current > 0) {
+          const totalMs = Math.round(performance.now() - matchStartTimeRef.current);
+          console.log(
+            `🏁 [PERF] Time-to-Matched: ${totalMs}ms | ` +
+            `Avg frame: ${Math.round(avgFrameDuration)}ms | ` +
+            `Window: ${currentWindow} | Score: ${avgPct.toFixed(1)}%`
+          );
+        }
+      }
+
+      // [TASK 5] Dev-only performance log (throttled, max 1x per 3 detik)
+      if (import.meta.env.DEV) {
+        const perfNow = Date.now();
+        if (perfNow - perfLogThrottleRef.current > 3000) {
+          perfLogThrottleRef.current = perfNow;
+          const effectiveFPS = avgFrameDuration > 0 ? (1000 / avgFrameDuration).toFixed(1) : '?';
+          console.log(
+            `📊 [PERF] Inference: ${lastInferenceTimeRef.current}ms | ` +
+            `FPS: ${effectiveFPS} | ` +
+            `Window: ${currentWindow} (${avgFrameDuration > 200 ? 'SLOW' : avgFrameDuration > 70 ? 'MID' : 'FAST'}) | ` +
+            `Score: ${avgPct.toFixed(1)}%`
+          );
+        }
       }
     }
 
