@@ -1111,9 +1111,9 @@ export default function TabFaceVerification({
       // Scale face.box: { x, y, width, height }
       if (face.box) {
         face.box = {
-          x:      (face.box.x      ?? 0) * coordScale,
-          y:      (face.box.y      ?? 0) * coordScale,
-          width:  (face.box.width  ?? 0) * coordScale,
+          x: (face.box.x ?? 0) * coordScale,
+          y: (face.box.y ?? 0) * coordScale,
+          width: (face.box.width ?? 0) * coordScale,
           height: (face.box.height ?? 0) * coordScale,
         };
       }
