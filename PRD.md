@@ -374,3 +374,21 @@ Pembaruan versi **v2.4.0** membawa optimalisasi masif pada integrasi jaringan mu
 * **Service Worker Asset Caching**: Mengonfigurasi `sw.js` untuk menyimpan berkas statis (HTML, JS, CSS) beserta bobot model AI dari CDN (`@vladmandic/human/models` seberat ~20MB) ke cache browser HP agar aplikasi dapat dibuka saat tidak ada koneksi sama sekali.
 * **IndexedDB Sync Buffer**: Mematangkan alur antrean Dexie.js agar absensi luring (offline) disimpan secara aman dalam antrean, serta otomatis memicu sinkronisasi massal *(background sync)* ke database Supabase Cloud begitu perangkat mendeteksi koneksi internet kembali aktif.
 
+---
+
+## 12. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.5.0)
+
+Pembaruan versi **v2.5.0** menandai penyelesaian migrasi arsitektur menjadi *Fully Serverless*, optimalisasi akurasi AI lintas perangkat secara matematis, serta penyempurnaan UI/UX:
+
+### 12.1 Migrasi Arsitektur Fully Serverless & PWA Offline Sync
+* **Penghapusan Server Lokal (Express.js)**: Aplikasi tidak lagi bergantung pada server backend lokal (`node server.js`). Seluruh komunikasi data (*read, write, delete*) dialihkan menggunakan *Supabase Client SDK* secara langsung dari frontend. Ini menjamin aplikasi dapat diakses 100% dari mana saja via internet tanpa memusingkan konfigurasi jaringan LAN.
+* **PWA Offline Syncing (`syncEngine.js`)**: Diintegrasikan sepenuhnya dengan Dexie.js (IndexedDB lokal). Ketika perangkat dalam kondisi offline, absensi disimpan di *buffer* lokal. Begitu koneksi internet kembali, mesin sinkronisasi secara otomatis mengirim data tertunda ke Supabase Cloud.
+
+### 12.2 Standarisasi Akurasi AI Lintas Perangkat (Tablet vs Laptop)
+* **Penyatuan Konfigurasi AI (`aiConfig.js`)**: Pembuatan konfigurasi terpusat untuk pustaka `@vladmandic/human`.
+* **FP16 WebGL Forcing**: Memaksa penggunaan presisi *16-bit floating point* (`WEBGL_FORCE_F16_TEXTURES: true`) di seluruh perangkat. Hal ini mengatasi bug "selisih persentase anjlok" yang sebelumnya terjadi saat wajah didaftarkan di laptop (presisi FP32) tetapi discan di tablet (presisi FP16). Vektor wajah 1024-dimensi kini memiliki standar nilai desimal yang identik secara universal.
+* **Pembersihan Beban Ganda AI**: Pustaka usang `@vladmandic/face-api` (model lama dengan 128-dimensi) yang sebelumnya digunakan di fitur "Edit Foto Karyawan" telah dibuang seluruhnya. Ini mencegah tabrakan 2 AI raksasa di memori, yang sebelumnya menyebabkan *Memory Leak* (OOM) dan *lagging* kamera parah pada tablet berspesifikasi menengah ke bawah.
+
+### 12.3 Phased Biometric Flow & UI Refinements
+* **Alur Ekstraksi Biometrik Bertahap (Phased Flow)**: Model *Description* (penghasil vektor wajah) kini dimatikan secara *default* saat kamera menyala untuk menghemat *resource* GPU tablet secara drastis. Model pendeteksi ini baru dinyalakan secara dinamis (*on-the-fly*) hanya ketika fase uji keamanan Liveness (Kedip/Toleh) berhasil dilalui dan subjek stabil.
+* **Perbaikan UI Halaman Login**: Mengganti logo aplikasi dengan AGRIFACE versi resmi dan merapikan tata letaknya (menghapus kompensasi margin negatif `marginBottom: '-60px'`) agar logo tidak lagi saling tumpang tindih (*overlap*) dengan teks "Welcome Admin!".
