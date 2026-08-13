@@ -684,6 +684,8 @@ export default function TabFaceVerification({
     adaptiveWindowRef.current = 5;
     matchTimerStartedRef.current = false;
     matchStartTimeRef.current = 0;
+    lastDetectTimeRef.current = 0;
+    lastDetectResultRef.current = null;
     setHeadTurnState({ left: false, right: false });
     setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
     setGfvMode(false); setLastResultMsg(null);
@@ -1003,6 +1005,25 @@ export default function TabFaceVerification({
   // Throttle ref untuk diagnostic log (log max 1x per 3 detik, hindari spam)
   const diagLogThrottleRef = useRef(0);
 
+  // ── Time-based Frame Throttling (mobile GPU optimization) ─────────────────
+  // lastDetectTimeRef  : timestamp (ms) terakhir human.detect() benar-benar dijalankan
+  // lastDetectResultRef: hasil deteksi wajah terakhir, dipakai sebagai "cache"
+  //                       selama window throttle belum lewat, sehingga overlay
+  //                       (node/border wajah) tidak pernah menerima null →
+  //                       tidak ada kedipan/hilang, hanya update yang lebih jarang.
+  const lastDetectTimeRef = useRef(0);
+  const lastDetectResultRef = useRef(null);
+  const DETECT_INTERVAL_MS = 150; // ~6-7 FPS, cukup untuk liveness & matching di HP/tablet
+
+  // ── [TASK 1] Reusable downscale canvas ─────────────────────────────────────
+  // Dibuat SEKALI (bukan tiap frame) lalu dipakai ulang via drawImage + clearRect.
+  // document.createElement('canvas') per-frame sangat mahal (alokasi DOM + GPU
+  // backing store tiap panggilan) dan jadi sumber GC pressure di HP/tablet.
+  const downscaleCanvasRef = useRef(null);
+  const downscaleCtxRef = useRef(null);
+  const DOWNSCALE_WIDTH = 320;
+  const DOWNSCALE_HEIGHT = 240;
+
   /**
    * [TASK 2] WebGL Backend Check + Warm-up
    *
@@ -1039,43 +1060,47 @@ export default function TabFaceVerification({
    * Mengembalikan detection result dari human.detect().
    *
    * [TASK 1] Downscale Input Canvas (640×480 → 320×240):
-   * Membuat offscreen canvas 320×240 dari croppedCanvas sebelum mengirim ke
-   * human.detect(). Canvas 640×480 asli TIDAK diubah — tetap dipakai hook untuk
-   * render overlay landmark. Pixel count turun 75% → inferensi GPU 2-3× lebih
-   * cepat di mobile. Embedding 128-d tetap valid (model menangani resize internal).
+   * Canvas offscreen dibuat SEKALI via downscaleCanvasRef (lazy-init) dan
+   * dipakai ulang tiap frame — menghindari document.createElement per-frame
+   * yang menyebabkan GC pressure di HP/tablet.
+   * Koordinat landmark di-scale balik ke 640×480 sebelum dikembalikan ke hook.
    *
-   * Trade-off: Posisi landmark dikembalikan dalam koordinat 320×240 oleh model,
-   * namun hook useNormalizedFaceMesh menyediakan `smoothedMesh` dalam koordinat
-   * canvas 640×480 (sudah dinormalisasi) — jadi overlay rendering tidak terpengaruh.
-   *
-   * Catatan performa mobile: frame throttle (skip-N) sebelumnya digunakan di sini,
-   * namun menyebabkan node dan border wajah menghilang karena hook mengosongkan
-   * canvas saat detection bernilai null. Solusi yang lebih aman adalah menonaktifkan
-   * iris (iris: false di humanConfig) yang menghemat ~40% GPU mobile tanpa
-   * merusak pipeline rendering.
+   * Time-based Frame Throttling (150ms):
+   * human.detect() hanya dijalankan maksimal setiap DETECT_INTERVAL_MS.
+   * Di luar window itu, callback TIDAK mengembalikan null, melainkan
+   * lastDetectResultRef.current — overlay tetap stabil, tidak berkedip.
    */
   const detectFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
 
-    // [TASK 1] Downscale ke 320×240 untuk inferensi AI (hemat GPU mobile)
-    // Input: croppedCanvas 640×480 dari hook → di-resize ke 320×240
-    // Output: koordinat landmark di-scale BALIK ke 640×480 sebelum dikembalikan ke hook
-    // Tanpa scale-back ini, koordinat model (dalam 320×240) akan di-render di canvas
-    // 640×480 sehingga overlay muncul di posisi ½ dari posisi wajah yang benar.
+    const now = performance.now();
+    const elapsed = now - lastDetectTimeRef.current;
+
+    // Belum mencapai interval throttle → skip inference, kembalikan hasil
+    // terakhir agar overlay tidak kosong/berkedip.
+    if (elapsed < DETECT_INTERVAL_MS) {
+      return lastDetectResultRef.current;
+    }
+    lastDetectTimeRef.current = now;
+
+    // [TASK 1] Downscale ke 320×240 — canvas dibuat SEKALI (lazy-init via ref)
+    // lalu dipakai ulang tiap frame via drawImage. Jauh lebih hemat memori
+    // dibanding document.createElement('canvas') per-panggilan.
     let inputCanvas = croppedCanvas;
-    const SCALE = 1; // default: tidak ada downscale
     let coordScale = 1;
 
-    if (croppedCanvas.width > 320) {
-      const small = document.createElement('canvas');
-      small.width = 320;
-      small.height = 240;
-      const sCtx = small.getContext('2d', { willReadFrequently: false });
-      sCtx.drawImage(croppedCanvas, 0, 0, 320, 240);
-      inputCanvas = small;
+    if (croppedCanvas.width > DOWNSCALE_WIDTH) {
+      // Lazy-init: buat canvas downscale hanya jika belum ada
+      if (!downscaleCanvasRef.current) {
+        downscaleCanvasRef.current = document.createElement('canvas');
+        downscaleCanvasRef.current.width = DOWNSCALE_WIDTH;
+        downscaleCanvasRef.current.height = DOWNSCALE_HEIGHT;
+        downscaleCtxRef.current = downscaleCanvasRef.current.getContext('2d', { willReadFrequently: false });
+      }
+      downscaleCtxRef.current.drawImage(croppedCanvas, 0, 0, DOWNSCALE_WIDTH, DOWNSCALE_HEIGHT);
+      inputCanvas = downscaleCanvasRef.current;
       // Faktor scale: 640/320 = 2.0
-      // Digunakan untuk mengembalikan koordinat mesh ke ruang 640×480
-      coordScale = croppedCanvas.width / 320;
+      coordScale = croppedCanvas.width / DOWNSCALE_WIDTH;
     }
 
     // [TASK 5] Dev-only: catat waktu mulai inferensi
@@ -1093,13 +1118,10 @@ export default function TabFaceVerification({
     const face = result?.face?.[0] ?? null;
 
     // ── Scale-back koordinat ke ruang canvas asli (640×480) ──────────────
-    // Diperlukan karena human.detect() menerima canvas 320×240 sehingga
-    // semua koordinat piksel dalam face.mesh dan face.box ada di ruang 320×240.
-    // Hook useNormalizedFaceMesh menggunakan face.mesh untuk EMA smoothing dan
-    // rendering overlay yang mengasumsikan koordinat dalam ruang 640×480.
-    // face.meshRaw / face.boxRaw (nilai [0..1] ternormalisasi) TIDAK perlu di-scale.
+    // face.mesh dan face.box ada di ruang 320×240 (input ke model).
+    // Hook mengasumsikan 640×480 → harus di-scale 2× sebelum dikembalikan.
+    // face.meshRaw / face.boxRaw (nilai [0..1] ternormalisasi) TIDAK di-scale.
     if (face && coordScale !== 1) {
-      // Scale face.mesh: array of [x, y, z]
       if (Array.isArray(face.mesh)) {
         face.mesh = face.mesh.map(pt => {
           if (Array.isArray(pt)) {
@@ -1108,7 +1130,6 @@ export default function TabFaceVerification({
           return { x: (pt.x ?? 0) * coordScale, y: (pt.y ?? 0) * coordScale, z: pt.z ?? 0 };
         });
       }
-      // Scale face.box: { x, y, width, height }
       if (face.box) {
         face.box = {
           x: (face.box.x ?? 0) * coordScale,
@@ -1119,6 +1140,8 @@ export default function TabFaceVerification({
       }
     }
 
+    // Simpan ke cache untuk dipakai saat frame di-throttle
+    lastDetectResultRef.current = face;
     return face;
   }, [modelsLoaded]);
 
