@@ -605,6 +605,8 @@ export default function TabFaceVerification({
   const masterVectorRef = useRef(null);
   const matchRateRef = useRef(0);
   const isMatchedRef = useRef(false);
+  const [isStable, setIsStable] = useState(false);
+  const isStableRef = useRef(false);
   const timerRef = useRef(null);
   const hasBeepedRef = useRef(false);
   const selectedEmployeeIdRef = useRef('');
@@ -686,6 +688,8 @@ export default function TabFaceVerification({
     matchStartTimeRef.current = 0;
     lastDetectTimeRef.current = 0;
     lastDetectResultRef.current = null;
+    isStableRef.current = false;
+    setIsStable(false);
     setHeadTurnState({ left: false, right: false });
     setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
     setGfvMode(false); setLastResultMsg(null);
