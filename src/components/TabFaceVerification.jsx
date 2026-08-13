@@ -7,43 +7,9 @@ import { supabase } from '../supabaseClient';
 import { Human } from '@vladmandic/human';
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
 
-const humanConfig = {
-  modelBasePath: 'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
-  // ── Mobile Optimization ──────────────────────────────────────────────────
-  // iris dinonaktifkan: mengkonsumsi ~40% GPU mobile → menyebabkan model
-  // description (penghasil embedding/vektor wajah) gagal/skip di HP & tablet.
-  // Dampak: liveness tetap berjalan via EAR. Hanya fitur tracking pupil hilang.
-  face: {
-    enabled: true,
-    detector: {
-      enabled: true,
-      rotation: true,
-      maxDetected: 1,
-      // [TASK 4] skipFrames: detektor re-detect setiap N frame; di antara frame
-      // hanya tracking (lebih ringan). Embedding (description) tetap berjalan tiap
-      // frame. Trade-off: bounding box sedikit lagged tiap 5 frame, embedding fresh.
-      skipFrames: 5,
-      // [TASK 4] minConfidence: turunkan dari default 0.4 → 0.2 agar detektor
-      // lebih cepat lolos filter di kondisi cahaya rendah / wajah agak jauh.
-      // Jangan turunkan <0.15 (risiko false-positive detection).
-      minConfidence: 0.2,
-    },
-    mesh: { enabled: true },
-    iris: { enabled: false },       // ← DINONAKTIFKAN untuk hemat GPU mobile
-    description: { enabled: false }, // ← MATI DI AWAL (Phased Biometric Flow)
-  },
-  body: { enabled: false },
-  hand: { enabled: false },
-  object: { enabled: false },
-  gesture: { enabled: false },
-  // [TASK 2] Paksa backend WebGL untuk semua operasi TensorFlow.js.
-  // Jika device tidak mendukung WebGL → library fallback ke CPU (lag ekstrem).
-  // Pengecekan eksplisit dilakukan di useEffect setelah modelsLoaded.
-  backend: 'webgl',
-  // [TASK 2] Warmup setelah model load: kompilasi GLSL shader selesai SEBELUM
-  // user mulai scan. Tanpa ini, frame pertama scanning bisa lag 500ms-1000ms.
-  warmup: 'face',
-};
+import { getUnifiedHumanConfig } from '../aiConfig';
+
+const humanConfig = getUnifiedHumanConfig(false); // description mati di awal (Phased Flow)
 const human = new Human(humanConfig);
 
 // ═══════════════════════════════════════════════════════════════════════════

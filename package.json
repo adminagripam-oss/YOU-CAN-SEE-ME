@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",
-    "@vladmandic/face-api": "^1.7.15",
     "@vladmandic/human": "^3.3.6",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
