@@ -173,97 +173,44 @@ export default function TabEmployeeManagement({
     setIsSubmitting(true);
 
     try {
-      let createdEmp = null;
-
-      try {
-        const resEmp = await fetchWithTimeout(`${API_BASE_URL}/api/employees`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      const { data: createdEmp, error } = await supabase
+        .from('employees')
+        .insert([
+          {
             nik: empNik.trim(),
             name: empName.trim(),
+            department: empJabatan.trim(),
             afdeling: empAfdeling.trim(),
             nama_kebun: empNamaKebun.trim(),
             status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
             jabatan: empJabatan.trim(),
             status_perkawinan: empStatusPerkawinan,
-          }),
-          timeout: 3000,
-        });
-        const dataEmp = await resEmp.json();
+          },
+        ])
+        .select()
+        .single();
 
-        if (dataEmp.success && dataEmp.data) {
-          createdEmp = dataEmp.data;
-        }
-      } catch (err) {
-        console.warn('[ADD EMP API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
-      }
-
-      if (!createdEmp) {
-        const { data, error } = await supabase
-          .from('employees')
-          .insert([
-            {
-              nik: empNik.trim(),
-              name: empName.trim(),
-              department: empJabatan.trim(),
-              afdeling: empAfdeling.trim(),
-              nama_kebun: empNamaKebun.trim(),
-              status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
-              jabatan: empJabatan.trim(),
-              status_perkawinan: empStatusPerkawinan,
-            },
-          ])
-          .select()
-          .single();
-
-        if (error) {
-          showToast('Gagal Menambah Karyawan', error.message, 'error');
-          setIsSubmitting(false);
-          return;
-        }
-        createdEmp = data;
+      if (error) {
+        showToast('Gagal Menambah Karyawan', error.message, 'error');
+        setIsSubmitting(false);
+        return;
       }
 
       const createdEmpId = createdEmp.id;
 
       if (currentEmpDescriptorRef.current) {
-        let bioSaved = false;
-        try {
-          const resBio = await fetchWithTimeout(`${API_BASE_URL}/api/biometrics/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              employee_id: createdEmpId,
-              descriptor: currentEmpDescriptorRef.current,
-            }),
-            timeout: 3000,
-          });
-          const textBio = await resBio.text();
+        const descJson = JSON.stringify(currentEmpDescriptorRef.current);
+        const { error: bioErr } = await supabase
+          .from('master_descriptors')
+          .upsert({
+            employee_id: createdEmpId,
+            descriptor_json: descJson,
+          }, { onConflict: 'employee_id' });
 
-          try {
-            const dataBio = JSON.parse(textBio);
-            if (dataBio.success) bioSaved = true;
-          } catch(e){}
-        } catch (err) {
-          console.warn('[REGISTER BIO API WARN - FALLING BACK TO SUPABASE DIRECT]:', err.message);
-        }
-
-        if (!bioSaved) {
-          const descJson = JSON.stringify(currentEmpDescriptorRef.current);
-          const { error: bioErr } = await supabase
-            .from('master_descriptors')
-            .upsert({
-              employee_id: createdEmpId,
-              descriptor_json: descJson,
-            }, { onConflict: 'employee_id' });
-
-          if (bioErr) {
-            console.error('[SUPABASE DIRECT REGISTER BIO ERROR]:', bioErr);
-          } else {
-            bioSaved = true;
-            await supabase.from('employees').update({ has_master_biometric: true }).eq('id', createdEmpId);
-          }
+        if (bioErr) {
+          console.error('[SUPABASE DIRECT REGISTER BIO ERROR]:', bioErr);
+        } else {
+          await supabase.from('employees').update({ has_master_biometric: true }).eq('id', createdEmpId);
         }
 
         await cacheUserMasterVector({

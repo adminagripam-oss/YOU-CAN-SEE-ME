@@ -198,36 +198,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     }
 
     try {
-      let success = false;
-      let errorMsg = '';
-      
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/employees/${editingEmp.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) success = true;
-        else {
-          const text = await res.text();
-          let data = {};
-          if (text) try { data = JSON.parse(text); } catch(e){}
-          if (data.success) success = true;
-          else errorMsg = data.message || `HTTP ${res.status}`;
-        }
-      } catch (err) {
-        errorMsg = err.message;
-      }
+      const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
+      if (empErr) throw empErr;
 
-      if (!success) {
-        // Fallback Supabase Direct
-        const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
-        if (empErr) throw empErr;
-
-        if (payload.descriptor_json) {
-          await supabase.from('master_descriptors').upsert({ employee_id: editingEmp.id, descriptor_json: payload.descriptor_json });
-          await cacheUserMasterVector(editingEmp.id, { descriptor_json: payload.descriptor_json });
-        }
+      if (payload.descriptor_json) {
+        await supabase.from('master_descriptors').upsert({ employee_id: editingEmp.id, descriptor_json: payload.descriptor_json });
+        await cacheUserMasterVector(editingEmp.id, { descriptor_json: payload.descriptor_json });
       }
 
       showToast('Berhasil', 'Data karyawan berhasil diperbarui.', 'success');
@@ -245,32 +221,11 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       confirmText: 'Ya, Hapus Data',
       onConfirm: async () => {
         try {
-          let success = false;
-          let errorMessage = '';
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/employees/${emp.id}`, { method: 'DELETE' });
-            if (res.ok) success = true;
-            else {
-              const text = await res.text();
-              let data = {};
-              if (text) try { data = JSON.parse(text); } catch (e) {}
-              if (data.success) success = true;
-              else errorMessage = data.message || `Error HTTP ${res.status}`;
-            }
-          } catch (err) { errorMessage = err.message; }
-
-          if (!success) {
-            const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
-            if (delErr) throw delErr;
-            success = true;
-          }
+          const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
+          if (delErr) throw delErr;
           
-          if (success) {
-            showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah dihapus.`, 'success');
-            refreshEmployees();
-          } else {
-            showToast('Gagal Menghapus', errorMessage, 'error');
-          }
+          showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah dihapus.`, 'success');
+          refreshEmployees();
         } catch (err) {
           showToast('Error Sistem', err.message, 'error');
         }

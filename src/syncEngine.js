@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './config';
+import { supabase } from './supabaseClient';
 import { getUnsyncedLogs, removeSyncedLogs, db } from './db';
 
 let isSyncing = false;
@@ -18,33 +18,36 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     isSyncing = true;
     console.log(`[Auto-Sync] Attempting to sync ${pendingLogs.length} pending offline attendance logs to server...`);
 
-    const response = await fetch(`${API_BASE_URL}/api/attendance/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: pendingLogs }),
+    const logsToInsert = pendingLogs.map(log => {
+      const { id, is_synced, created_at, ...rest } = log;
+      return rest;
     });
 
-    const data = await response.json();
+    const { error } = await supabase
+      .from('attendance_logs')
+      .insert(logsToInsert);
 
-    if (data.success && data.synced_ids && data.synced_ids.length > 0) {
-      // Remove synced records from IndexedDB
-      await removeSyncedLogs(data.synced_ids);
-      console.log(`[Auto-Sync Success] Successfully synced ${data.synced_ids.length} records!`);
+    if (error) throw error;
 
-      if (showToast) {
-        showToast(
-          'Auto-Sync Berhasil',
-          `${data.synced_ids.length} log absensi offline berhasil terkirim ke server!`,
-          'success'
-        );
-      }
+    const syncedIds = pendingLogs.map(log => log.id);
 
-      if (onSyncComplete) {
-        onSyncComplete();
-      }
+    // Remove synced records from IndexedDB
+    await removeSyncedLogs(syncedIds);
+    console.log(`[Auto-Sync Success] Successfully synced ${syncedIds.length} records!`);
 
-      return { count: data.synced_ids.length };
+    if (showToast) {
+      showToast(
+        'Auto-Sync Berhasil',
+        `${syncedIds.length} log absensi offline berhasil terkirim ke server!`,
+        'success'
+      );
     }
+
+    if (onSyncComplete) {
+      onSyncComplete();
+    }
+
+    return { count: syncedIds.length };
   } catch (err) {
     console.error('[Auto-Sync Error]:', err);
   } finally {
