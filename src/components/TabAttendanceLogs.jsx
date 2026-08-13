@@ -144,6 +144,25 @@ export default function TabAttendanceLogs({
   }, [groupedLogs, searchQuery]);
 
 
+  const handleDeleteGroup = (group) => {
+    openConfirmModal({
+      title: 'Hapus Riwayat Absensi?',
+      message: `Apakah Anda yakin ingin menghapus catatan absensi ${group.name} pada ${group.displayDate}? Data Check-In dan Check-Out (jika ada) akan dihapus secara permanen.`,
+      confirmText: 'Hapus Data',
+      onConfirm: async () => {
+        try {
+          // Kumpulkan ID yang akan dihapus
+          const idsToDelete = [];
+          if (group.inLog?.id)  idsToDelete.push(group.inLog.id);
+          if (group.outLog?.id) idsToDelete.push(group.outLog.id);
+
+          if (idsToDelete.length === 0) {
+            showToast('Tidak Ada Data', 'Tidak ada ID log yang valid untuk dihapus.', 'warning');
+            return;
+          }
+
+          console.log('[DELETE] Menghapus IDs:', idsToDelete);
+
           // Menghapus data langsung ke Supabase Cloud
           try {
             const { error: sbErr } = await supabase
