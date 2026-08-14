@@ -136,11 +136,7 @@ Sistem secara cerdas membedakan status absensi hari ini:
    - Mandor melakukan verifikasi absensi biometrik wajah pemanen pada jam masuk (Check-In) dan jam keluar (Check-Out).
    - Sistem secara otomatis menghitung durasi jam kerja dan mencatat nilai **Hari Kerja (HK)** (misal: $1.0\text{ HK}$ untuk jam kerja penuh atau $0.5\text{ HK}$ untuk setengah hari).
 
-2. **Pencatatan Output Panen Pemanen (Harvest Output Metrics)**:
-   - **Output Kg / Hari Kerja (Kg/HK)**: Mandor mencatat total berat hasil panen (Kilogram / Tandan Buah Segar) yang dihasilkan oleh setiap pemanen pada hari tersebut:
-     $$\text{Produktivitas Tonase (Kg/HK)} = \frac{\text{Total Hasil Panen (Kg)}}{\text{Total Hari Kerja (HK)}}$$
-   - **Output Hektare / Hari Kerja (Ha/HK)**: Mandor mencatat luas areal Blok/Afdeling yang berhasil dipanen oleh pemanen:
-     $$\text{Produktivitas Luas (Ha/HK)} = \frac{\text{Total Luas Area Panen (Hektare)}}{\text{Total Hari Kerja (HK)}}$$
+
 
 3. **Kalkulasi Persentase Kehadiran Afdeling (% Attendance Rate)**:
    - Sistem menghitung persentase tingkat kehadiran pemanen secara *real-time* per Afdeling dan per Kebun dari total kuota pekerja:
