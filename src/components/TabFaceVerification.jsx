@@ -614,6 +614,24 @@ export default function TabFaceVerification({
   // [TASK 5] Throttle ref untuk perf log (terpisah dari diagLogThrottleRef)
   const perfLogThrottleRef = useRef(0);
 
+  // Auto-submit and stale closure prevention refs
+  const hasAutoSubmittedRef = useRef(false);
+  const selectedStatusRef = useRef(selectedStatus);
+  const attendanceStatusRef = useRef(attendanceStatus);
+  const handleVerifySubmitRef = useRef(null);
+
+  useEffect(() => {
+    selectedStatusRef.current = selectedStatus;
+  }, [selectedStatus]);
+
+  useEffect(() => {
+    attendanceStatusRef.current = attendanceStatus;
+  }, [attendanceStatus]);
+
+  useEffect(() => {
+    handleVerifySubmitRef.current = handleVerifySubmit;
+  }); // runs on every render to capture latest handler closure
+
   const selectedEmployee = employees.find((e) => String(e.id) === String(selectedEmployeeId));
 
   // Auto-select logged-in user & fetch live attendance status
@@ -661,6 +679,7 @@ export default function TabFaceVerification({
     eyeClosedRef.current = false;
     livenessVerifiedRef.current = false;
     hasBeepedRef.current = false; // Reset beep state
+    hasAutoSubmittedRef.current = false; // Reset auto-submit state
     masterGFVRef.current = null;
     masterVectorRef.current = null;
     matchRateRef.current = 0;
@@ -1221,7 +1240,8 @@ export default function TabFaceVerification({
     }
 
     // ── 1-to-1 Match via Cosine Similarity ───────────────────────────────
-    if (currentDescRef.current) {
+    // Skip calculations if already matched to avoid duplicate checks and fluctuations
+    if (currentDescRef.current && !isMatchedRef.current) {
       let rawPct = 0;
       const threshold = 80.0;
 
@@ -1266,17 +1286,30 @@ export default function TabFaceVerification({
       setMatchRate(avgPct);
       setIsMatched(matched);
 
-      if (matched && !hasBeepedRef.current) {
-        hasBeepedRef.current = true;
-        playBeepSound();
-        // [TASK 5] Dev: log total time dari embedding pertama → matched
-        if (import.meta.env.DEV && matchStartTimeRef.current > 0) {
-          const totalMs = Math.round(performance.now() - matchStartTimeRef.current);
-          console.log(
-            `🏁 [PERF] Time-to-Matched: ${totalMs}ms | ` +
-            `Avg frame: ${Math.round(avgFrameDuration)}ms | ` +
-            `Window: ${currentWindow} | Score: ${avgPct.toFixed(1)}%`
-          );
+      if (matched) {
+        if (!hasBeepedRef.current) {
+          hasBeepedRef.current = true;
+          playBeepSound();
+          // [TASK 5] Dev: log total time dari embedding pertama → matched
+          if (import.meta.env.DEV && matchStartTimeRef.current > 0) {
+            const totalMs = Math.round(performance.now() - matchStartTimeRef.current);
+            console.log(
+              `🏁 [PERF] Time-to-Matched: ${totalMs}ms | ` +
+              `Avg frame: ${Math.round(avgFrameDuration)}ms | ` +
+              `Window: ${currentWindow} | Score: ${avgPct.toFixed(1)}%`
+            );
+          }
+        }
+
+        // Auto-submit once to prevent duplicate check-in/out calls
+        if (selectedStatusRef.current === 'Hadir' && !hasAutoSubmittedRef.current) {
+          hasAutoSubmittedRef.current = true;
+          const currentStatus = attendanceStatusRef.current;
+          const attendanceType = (currentStatus.checkedIn || currentStatus.checkInTime) ? 'CHECK_OUT' : 'CHECK_IN';
+          
+          if (handleVerifySubmitRef.current) {
+            handleVerifySubmitRef.current(attendanceType);
+          }
         }
       }
 
@@ -1472,31 +1505,71 @@ export default function TabFaceVerification({
 
     if (navigator.onLine) {
       try {
-        const logPayload = {
+        const apiPayload = {
           employee_id: parseInt(selectedEmployeeId),
           nik: (targetEmp.nik || nikInput).trim() || null,
           name: targetEmp.name || null,
           department: targetEmp.department || null,
+          scan_descriptor: currentDescRef.current, // Send face embedding to the server
           location: `${locationStr} - GeoMesh Scanner`,
-          attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
-          status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
-          euclidean_distance: euclideanDist,
-          timestamp: recordTimestamp,
-          // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
+          attendance_type: attendanceTypeDash,
+          status: selectedStatus,
           ...(durasiDetik !== null && { durasi: durasiDetik }),
           latitude: userLat,
           longitude: userLng,
         };
 
-        const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
-        if (!sbErr) {
+        // Call the serverless / Express API first (Tier 1)
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/verify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(apiPayload),
+          timeout: 4000 // 4 seconds timeout for API
+        });
+
+        const resData = await response.json();
+
+        if (response.ok && resData.success) {
           isSuccess = true;
-          successMsg = `Absensi ${typeLabel} berhasil dicatat di Supabase Cloud!`;
+          successMsg = resData.message || `Absensi ${typeLabel} berhasil dicatat di Server!`;
+          if (resData.timestamp) {
+            recordTimestamp = resData.timestamp;
+          }
         } else {
-          throw new Error(sbErr.message);
+          throw new Error(resData.message || 'API verification failed');
         }
-      } catch (sbEx) {
-        console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
+      } catch (apiErr) {
+        console.warn('[SERVER API WARN – FALLBACK TO DIRECT SUPABASE]:', apiErr.message);
+        
+        // Tier 2: Direct Supabase Cloud insert fallback
+        try {
+          const logPayload = {
+            employee_id: parseInt(selectedEmployeeId),
+            nik: (targetEmp.nik || nikInput).trim() || null,
+            name: targetEmp.name || null,
+            department: targetEmp.department || null,
+            location: `${locationStr} - GeoMesh Scanner (Direct Fallback)`,
+            attendance_type: attendanceTypeDash,
+            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+            euclidean_distance: euclideanDist,
+            timestamp: recordTimestamp,
+            ...(durasiDetik !== null && { durasi: durasiDetik }),
+            latitude: userLat,
+            longitude: userLng,
+          };
+
+          const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
+          if (!sbErr) {
+            isSuccess = true;
+            successMsg = `Absensi ${typeLabel} berhasil dicatat langsung ke Supabase Cloud (Fallback)!`;
+          } else {
+            throw new Error(sbErr.message);
+          }
+        } catch (sbEx) {
+          console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
+        }
       }
     }
 
@@ -1546,12 +1619,14 @@ export default function TabFaceVerification({
         setSelectedEmployeeId('');
         setNikInput('');
         setAttendanceStatus({ checkedIn: false, checkInTime: null, checkOutTime: null, loaded: false });
+        hasAutoSubmittedRef.current = false;
       }, 2500);
 
       if (onVerificationSuccess) onVerificationSuccess();
     } else {
       // Jika Catch Error: Tampilkan Toast Gagal & Biarkan Mode Tombol Tetap (State Tidak Berubah)
       showToast('Absensi Gagal', `Gagal memproses absensi ${typeLabel}. Silakan coba lagi.`, 'error');
+      hasAutoSubmittedRef.current = false;
     }
 
     setIsSubmitting(false);
