@@ -1,17 +1,25 @@
 /**
  * API Base URL Configuration
- * Automatically resolves to 'http://localhost:8080' when running on GitHub Pages
- * or file:// protocol, allowing the static GitHub Pages UI to talk to the backend server.
+ *
+ * Di Hostinger (agriface.agri-pam.id): Express server melayani React build
+ * sekaligus sebagai API — satu proses, satu domain → gunakan relative path ''.
+ *
+ * Di localhost dev: Vite proxy meneruskan /api → Express port 8080.
  */
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (
-  typeof window !== 'undefined'
-    ? (window.location.hostname.includes('github.io') || window.location.hostname.includes('vercel.app')
-        ? '' // Kosongkan agar request menjadi relative path (/api/...) yang akan cepat mengembalikan 404/fallback di Vercel/GitHub Pages
-        : (window.location.protocol === 'file:' 
-            ? 'http://localhost:8080' 
-            : `${window.location.protocol}//${window.location.hostname}:8080`))
-    : 'http://localhost:8080'
-);
+
+const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (() => {
+  // Hostinger / production domain → relative path (Express serve sekaligus)
+  if (hostname.includes('agri-pam.id') || hostname.includes('agriface')) return '';
+  // Vercel (deploy preview) → relative path
+  if (hostname.includes('vercel.app')) return '';
+  // GitHub Pages / file protocol → arahkan ke server lokal
+  if (hostname.includes('github.io') || window.location.protocol === 'file:') return 'http://localhost:8080';
+  // Development lokal (localhost) → relative path karena Vite proxy sudah handle
+  return '';
+})();
+
 
 /**
  * Custom fetch wrapper with a configurable timeout.

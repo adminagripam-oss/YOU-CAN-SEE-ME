@@ -4,9 +4,11 @@
   "description": "AgriFace - Sistem Absensi Biometrik Wajah Perkebunan berbasis Metode 1-to-1 Verification & Offline-First PWA",
   "main": "server.js",
   "scripts": {
-    "start": "vite",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "build:prod": "vite build",
+    "start": "node server.js",
+    "server": "node server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",

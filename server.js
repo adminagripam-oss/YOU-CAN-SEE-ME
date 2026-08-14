@@ -36,6 +36,22 @@ if (fs.existsSync(distPath)) {
 }
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── SPA Catch-All Route ────────────────────────────────────────────────────
+// Wajib untuk React Router: setiap route non-API yang tidak ditemukan sebagai
+// file statis akan dikembalikan ke index.html agar React Router handle routing.
+// Tanpa ini, refresh di halaman /dashboard atau /absensi akan 404 di Hostinger.
+app.get('*', (req, res, next) => {
+  // Jangan intercept API routes
+  if (req.path.startsWith('/api/')) return next();
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Build belum tersedia. Jalankan: npm run build');
+  }
+});
+
+
 // Supabase Database Connection
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
