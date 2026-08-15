@@ -90,7 +90,7 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
           </p>
         </div>
 
-        <div className="glass-card ui-card" style={{ maxWidth: '400px', margin: '0 auto' }}>
+        <div className="glass-card ui-card" style={{ maxWidth: '400px', margin: '0 auto', height: 'auto' }}>
           <div className="ui-card-content">
             <form onSubmit={handleLogin} className="space-y-4">
 
@@ -178,23 +178,6 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
                   ) : (
                     <><i className="fa-solid fa-right-to-bracket"></i> Masuk Dashboard</>
                   )}
-                </button>
-
-                <button
-                  type="button"
-                  className="btn-action edit"
-                  onClick={() => navigate('/absensi')}
-                  style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.9rem' }}
-                >
-                  <i className="fa-solid fa-camera"></i> Buka Layar Absensi Karyawan
-                </button>
-
-                <button
-                  type="button"
-                  onClick={toggleTheme}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', marginTop: '10px', fontSize: '0.8rem' }}
-                >
-                  <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i> Ganti Tema
                 </button>
               </div>
             </form>
