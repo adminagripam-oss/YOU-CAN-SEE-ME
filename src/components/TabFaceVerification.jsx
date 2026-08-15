@@ -2050,7 +2050,7 @@ export default function TabFaceVerification({
                 }}
               >
                 <span style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                  📋 Log Absensi Hari Ini
+                  Log Absensi Hari Ini
                 </span>
                 <span
                   style={{
