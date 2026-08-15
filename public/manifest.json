@@ -1,6 +1,6 @@
 {
-  "short_name": "AbsenBiometrik",
-  "name": "Aplikasi Absensi Mobile Biometrik Wajah",
+  "short_name": "AgriFace",
+  "name": "AgriFace Biometric Attendance",
   "description": "Aplikasi Absensi Biometrik Wajah Offline-First & Auto-Sync",
   "icons": [
     {
