@@ -219,7 +219,7 @@ export default function TabEmployeeManagement({
 
       showToast(
         'Karyawan Berhasil Disimpan',
-        `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database Supabase Cloud!`,
+        `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database!`,
         'success'
       );
 

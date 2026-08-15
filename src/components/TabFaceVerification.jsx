@@ -1563,7 +1563,7 @@ export default function TabFaceVerification({
           const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
           if (!sbErr) {
             isSuccess = true;
-            successMsg = `Absensi ${typeLabel} berhasil dicatat langsung ke Supabase Cloud (Fallback)!`;
+            successMsg = `Absensi ${typeLabel} berhasil dicatat langsung (Fallback)!`;
           } else {
             throw new Error(sbErr.message);
           }
