@@ -4,7 +4,7 @@
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
 - **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA & Auto-Sync Engine
 - **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
-- **Versi Dokumen**: 2.3.0 (Security, Kiosk Mode & UI Enhancement Release)
+- **Versi Dokumen**: 2.6.0 (Server-First Hybrid API, Deduplication & Minimalist UI Release)
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage & pgcrypto) & Dexie.js v2 (IndexedDB Local Storage)
 - **Biometric Engine**: `@vladmandic/face-api` v1.7.15 (ResNet-34, 128-d Vector) + MediaPipe Face Mesh & EAR Liveness Engine (68-Point 3D Landmarks & 40-d GFV Cosine Similarity Engine)
 - **Status System**: Live Production Specifications & Enterprise-Ready PWA
@@ -388,3 +388,29 @@ Pembaruan versi **v2.5.0** menandai penyelesaian migrasi arsitektur menjadi *Ful
 ### 12.3 Phased Biometric Flow & UI Refinements
 * **Alur Ekstraksi Biometrik Bertahap (Phased Flow)**: Model *Description* (penghasil vektor wajah) kini dimatikan secara *default* saat kamera menyala untuk menghemat *resource* GPU tablet secara drastis. Model pendeteksi ini baru dinyalakan secara dinamis (*on-the-fly*) hanya ketika fase uji keamanan Liveness (Kedip/Toleh) berhasil dilalui dan subjek stabil.
 * **Perbaikan UI Halaman Login**: Mengganti logo aplikasi dengan AGRIFACE versi resmi dan merapikan tata letaknya (menghapus kompensasi margin negatif `marginBottom: '-60px'`) agar logo tidak lagi saling tumpang tindih (*overlap*) dengan teks "Welcome Admin!".
+
+---
+
+## 13. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.6.0)
+
+Pemberitahuan pembaruan versi **v2.6.0** menandai peluncuran arsitektur *Hybrid API-First* yang tangguh, sistem pencegah verifikasi ganda, serta perapian antarmuka (UI) agar lebih bersih dan profesional:
+
+### 13.1 Arsitektur Absensi Hybrid Server-First (3-Tier Submission Flow)
+Untuk memenuhi aspek keamanan produksi, seluruh transaksi pencatatan absensi yang awalnya diproses dan ditulis langsung dari sisi klien didelegasikan ulang melalui server backend tepercaya:
+* **Tier 1 (Server-Authoritative)**: Mengirimkan data absensi, koordinat GPS, dan descriptor wajah (`scan_descriptor`) melalui POST ke endpoint `/api/attendance/verify` untuk divalidasi dan dicatat oleh server.
+* **Tier 2 (Direct Supabase Fallback)**: Jika server backend sibuk atau mengalami timeout (menggunakan batas *timeout* 3 detik), sistem klien secara otomatis memotong jalur untuk melakukan penulisan langsung ke Supabase Cloud.
+* **Tier 3 (Local Dexie.js Offline Buffer)**: Jika perangkat dalam kondisi luring (offline) tanpa jaringan seluler sama sekali, data absensi akan langsung disimpan ke antrean IndexedDB lokal untuk disinkronisasikan nanti.
+
+### 13.2 Auto-Submit Sekali & Deduplikasi Verifikasi
+* **Deduplikasi Real-time**: Mengintegrasikan state pelacak `hasAutoSubmittedRef` pada kamera absensi. Ketika persentase kemiripan wajah mencapai **>= 80%** dan status liveness sukses, sistem akan langsung mengirim data absensi tepat satu kali.
+* **Bypass Komputasi Lanjutan**: Proses perhitungan kesamaan wajah (Cosine Similarity) dan efek bunyi bip peringatan segera dikunci/diabaikan pada frame-frame kamera berikutnya untuk menghindari penulisan log ganda (*double attendance logs*) di database dan kebisingan suara peringatan berulang.
+
+### 13.3 Penyederhanaan Antarmuka Kamera (Minimalist UI)
+* **Pembersihan Telemetri Teknis**: Menghilangkan panel penampil persentase kecocokan wajah (*Match Rate Chip*), status pelacakan kedipan mata (*Anti-Spoofing & EAR Status Chips*), dan kartu pratinjau thumbnail wajah (*Base64 Image Preview Card*) dari bagian bawah kamera.
+* **Evaluasi Latar Belakang Tetap Aktif**: Meskipun tidak lagi terlihat di layar (agar tampilan terlihat bersih, modern, dan minimalis), proses evaluasi keaktifan wajah dan ekstraksi Base64 tetap dijalankan di latar belakang demi menjaga aspek keamanan sistem absensi.
+
+### 13.4 Penyempurnaan Teks Notifikasi (Brand-Generic Messaging)
+* **Penghapusan Terminologi Teknis Internal**: Mengubah pesan notifikasi toast untuk menyembunyikan detail database internal agar tidak membingungkan pengguna umum:
+  * Menghapus kata *"Supabase Cloud"* dan mengubahnya menjadi kata umum *"database"*.
+  * Menghapus rincian backend seperti *"secara CASCADE (menghapus log & biometrik)"* pada notifikasi penghapusan karyawan.
+
