@@ -206,7 +206,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
           if (delErr) throw delErr;
           
-          showToast('Penghapusan Berhasil', `Karyawan "${emp.name}" telah dihapus.`, 'success');
+          showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan.', 'success');
           refreshEmployees();
         } catch (err) {
           showToast('Error Sistem', err.message, 'error');

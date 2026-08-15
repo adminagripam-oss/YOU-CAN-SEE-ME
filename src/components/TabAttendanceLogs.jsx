@@ -177,7 +177,7 @@ export default function TabAttendanceLogs({
             }
           } catch (sbEx) {
             console.error('[DELETE EXCEPTION]:', sbEx.message);
-            showToast('Gagal Menghapus', 'Gagal menghapus data di Supabase Cloud: ' + sbEx.message, 'error');
+            showToast('Gagal Menghapus', 'Gagal menghapus data.', 'error');
           }
 
           // Refresh tabel setelah operasi (berhasil atau tidak)

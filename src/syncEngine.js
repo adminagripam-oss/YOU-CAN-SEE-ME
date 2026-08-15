@@ -38,7 +38,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     if (showToast) {
       showToast(
         'Auto-Sync Berhasil',
-        `${syncedIds.length} log absensi offline berhasil terkirim ke server!`,
+        `Berhasil mengunggah ${syncedIds.length} data absensi offline!`,
         'success'
       );
     }
