@@ -4,9 +4,10 @@
   "description": "Aplikasi Absensi Biometrik Wajah Offline-First & Auto-Sync",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "/logo-pwa.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
   "start_url": "./",
