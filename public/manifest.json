@@ -4,9 +4,9 @@
   "description": "Aplikasi Absensi Biometrik Wajah Offline-First & Auto-Sync",
   "icons": [
     {
-      "src": "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/svgs/solid/face-smile.svg",
-      "type": "image/svg+xml",
-      "sizes": "192x192 512x512"
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
     }
   ],
   "start_url": "./",
