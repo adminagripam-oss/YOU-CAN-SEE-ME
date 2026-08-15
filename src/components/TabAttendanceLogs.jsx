@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { API_BASE_URL } from '../config';
 import {
@@ -71,13 +71,22 @@ export default function TabAttendanceLogs({
   const [searchQuery, setSearchQuery] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editData, setEditData] = useState(null);
+  const [deletedLogIds, setDeletedLogIds] = useState([]);
+
+  // Reset local deleted buffer when logs change from parent
+  useEffect(() => {
+    setDeletedLogIds([]);
+  }, [logs]);
 
   // GROUP LOGS BY NIK + DATE
   const groupedLogs = useMemo(() => {
     if (!logs) return [];
     const groups = {};
 
-    logs.forEach(log => {
+    // Optimistic filter: instantly exclude deleted items
+    const activeLogs = logs.filter(log => !deletedLogIds.includes(log.id));
+
+    activeLogs.forEach(log => {
       const tsDate = new Date(log.timestamp);
       const dateKey = tsDate.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'); // YYYY-MM-DD format for internal grouping
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -130,7 +139,7 @@ export default function TabAttendanceLogs({
     });
 
     return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
-  }, [logs]);
+  }, [logs, deletedLogIds]);
 
   // FILTER
   const filteredLogs = useMemo(() => {
@@ -165,6 +174,9 @@ export default function TabAttendanceLogs({
 
           // Menghapus data langsung ke Supabase Cloud
           try {
+            // Optimistic update: instantly remove from local state
+            setDeletedLogIds(prev => [...prev, ...idsToDelete]);
+
             const { error: sbErr } = await supabase
               .from('attendance_logs')
               .delete()
@@ -177,6 +189,8 @@ export default function TabAttendanceLogs({
             }
           } catch (sbEx) {
             console.error('[DELETE EXCEPTION]:', sbEx.message);
+            // Revert optimistic update on failure
+            setDeletedLogIds(prev => prev.filter(id => !idsToDelete.includes(id)));
             showToast('Gagal Menghapus', 'Gagal menghapus data.', 'error');
           }
 
