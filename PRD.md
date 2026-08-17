@@ -414,3 +414,35 @@ Untuk memenuhi aspek keamanan produksi, seluruh transaksi pencatatan absensi yan
   * Menghapus kata *"Supabase Cloud"* dan mengubahnya menjadi kata umum *"database"*.
   * Menghapus rincian backend seperti *"secara CASCADE (menghapus log & biometrik)"* pada notifikasi penghapusan karyawan.
 
+---
+
+## 14. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.7.0)
+
+Pemberitahuan pembaruan versi **v2.7.0** menandai peluncuran pemrosesan Face Mesh yang *Device-Independent*, implementasi peredam getaran (One Euro Filter), penataan tipe data TypeScript (TS/TSX) yang ketat, dan integrasi tipe data editor:
+
+### 14.1 Konversi Penuh ke TypeScript & Tipe Data Ketat (Strictly Typed)
+* **Migrasi Hook Inti**: Mengonversi `useNormalizedFaceMesh` ke file TypeScript murni ([useNormalizedFaceMesh.ts](file:///d:/FACE%20VERIFICATION/src/hooks/useNormalizedFaceMesh.ts)) dengan interface yang jelas untuk:
+  - `Point3D`: Model koordinat 3D.
+  - `BoundingBox`: Kalkulasi geometri area wajah.
+  - `NormalizedLandmark`: Koordinat lokal hasil normalisasi.
+  - `FaceMeshOutput`: Kontrak keluaran data frame wajah.
+* **Komponen Demo Pemindai**: Membuat komponen [FaceMeshScanner.tsx](file:///d:/FACE%20VERIFICATION/src/components/FaceMeshScanner.tsx) berbasis TSX untuk menyajikan interaksi langsung dengan hook pemrosesan wajah.
+
+### 14.2 Normalisasi Koordinat Lokal Bebas Perangkat (Device-Independent)
+* **Transformasi Geometri**: Mengubah koordinat piksel mentah (piksel canvas) menjadi koordinat relatif berbasis Bounding Box wajah dengan rentang $[-0.5 \text{ s/d } 0.5]$.
+* **Origin di Pusat Wajah**: Menempatkan pusat bounding box sebagai titik koordinat origin $(0,0)$.
+* **Skalabilitas Depth ($Z$)**: Menghitung nilai $Z$ secara proporsional terhadap lebar wajah, menjamin integritas data mesh wajah tetap konsisten meskipun wajah mendekat/menjauh dari lensa atau resolusi kamera berbeda.
+
+### 14.3 Standardisasi Potongan Gambar (Center Crop 4:3)
+* **Stabilisasi Aspek Rasio**: Mengintegrasikan perhitungan `computeCenterCrop` untuk memotong wilayah tengah video secara dinamis agar pas pada rasio 4:3 sebelum diproses, menghindari distorsi wajah melonjong/gepeng lintas perangkat.
+* **Canvas Offscreen Standar**: Frame video terpotong digambar ke offscreen canvas berukuran tetap $640 \times 480$ sebelum dideteksi AI, menyamakan koordinat masukan lintas hardware.
+
+### 14.4 Filter Adaptif Peredam Jitter (One Euro Filter & EMA)
+* **One Euro Filter**: Menerapkan filter adaptif low-pass yang menyesuaikan frekuensi cutoff berdasarkan kecepatan gerak. Ini menghilangkan getaran getas (jitter) saat wajah statis tanpa menimbulkan efek lag (latency) ketika wajah berputar cepat.
+* **EMA Filter & Fallback**: Menyediakan opsi filter EMA konvensional dan mode tanpa filter bagi pengguna yang menginginkan pemrosesan raw koordinat mentah.
+
+### 14.5 Konfigurasi Tipe Data & Build System
+* **tsconfig.json**: Menambahkan berkas konfigurasi [tsconfig.json](file:///d:/FACE%20VERIFICATION/tsconfig.json) dengan opsi `"jsx": "react-jsx"` dan `"allowJs": true` agar editor mengenali sintaks JSX/React dan file JS/TS secara hibrida.
+* **Vite DevDependencies**: Mendaftarkan tipe data `@types/react` dan `@types/react-dom` di `package.json` untuk menghilangkan seluruh peringatan error deklarasi tipe di tingkat IDE.
+
+
