@@ -253,15 +253,15 @@ function AppContent() {
 
     async function loadHumanModels() {
       try {
-        setModelStatusText('Memuat Model AI Biometrik Wajah (Human/MediaPipe)...');
+        setModelStatusText('Mendeteksi GPU & Memuat Model AI Biometrik Wajah...');
         await loadHumanWithFallback();
         setModelsLoaded(true);
         setModelStatusText('Model AI Siap!');
+        console.log('[App] Model AI berhasil dimuat, backend:', window.__humanBackend || 'webgl');
       } catch (err) {
         console.error('[MODEL LOAD ERROR]:', err);
-        setModelStatusText('Catatan AI: ' + err.message);
-        // Tetap izinkan kamera menyala agar stream video dapat dibuka di HP
-        setModelsLoaded(true);
+        setModelStatusText('❌ Gagal memuat model AI: ' + err.message);
+        // Jangan set modelsLoaded = true — model benar-benar belum siap
       }
     }
 

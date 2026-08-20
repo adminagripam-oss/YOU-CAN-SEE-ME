@@ -3,19 +3,14 @@
  *
  * Singleton instance of @vladmandic/human untuk seluruh aplikasi AgriFace.
  * WAJIB hanya ada SATU instance Human yang aktif di waktu bersamaan.
- * Beberapa instance bersamaan menyebabkan konflik backend WebGL TensorFlow.js
- * yang menghasilkan error: "Cannot read properties of undefined (reading 'inputs')".
+ * Deteksi backend otomatis: WebGL (GPU) → WASM (CPU) fallback untuk kompatibilitas Android.
  */
 
 import { Human } from '@vladmandic/human';
 
 const humanConfig = {
-  // Jalur model absolut berbasis origin domain saat ini (https://localhost di APK)
+  // Jalur model absolut berbasis origin domain saat ini
   modelBasePath: window.location.origin + '/models',
-
-  env: {
-    // Biarkan Human AI mendeteksi presisi WebGL GPU secara otomatis per-device
-  },
 
   face: {
     enabled: true,
@@ -23,12 +18,12 @@ const humanConfig = {
       enabled: true,
       rotation: true,
       maxDetected: 1,
-      skipFrames: 0,
-      minConfidence: 0.15,
+      skipFrames: 0,        // Tidak lewatkan satupun frame
+      minConfidence: 0.15,  // Threshold rendah agar deteksi lebih sensitif
     },
     mesh: { enabled: true },
-    iris: { enabled: false },      // Dinonaktifkan: membebani GPU & mengubah bounding box
-    description: { enabled: true }, // Diaktifkan default, bisa di-override saat runtime
+    iris: { enabled: false },
+    description: { enabled: true },
   },
 
   body: { enabled: false },
@@ -36,20 +31,48 @@ const humanConfig = {
   object: { enabled: false },
   gesture: { enabled: false },
 
-  backend: 'webgl',   // Paksa GPU WebGL (WASM terlalu lambat)
-  warmup: 'face',     // Warmup sebelum render agar frame pertama tidak lag
+  // Backend akan di-set secara otomatis oleh loadHumanWithFallback
+  backend: 'webgl',
+  warmup: 'none', // Warmup dilakukan manual setelah backend terverifikasi
 };
 
 // SATU-SATUNYA instance Human di seluruh aplikasi
 export const human = new Human(humanConfig);
 
 /**
- * Pemuatan model tangguh (3-Tier Fallback):
- * 1. Coba dari Domain Origin Asli (https://localhost/models)
- * 2. Coba dari Jalur Relatif (./models)
- * 3. Coba dari Cloud CDN JSDelivr (Online Fallback)
+ * Deteksi backend GPU terbaik yang didukung oleh device:
+ * 1. WebGL  (GPU hardware acceleration)
+ * 2. WASM   (CPU SIMD — kompatibel semua Android)
+ */
+async function detectBestBackend() {
+  // Tes apakah WebGL benar-benar dapat menjalankan shader TF.js
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    if (!gl) throw new Error('WebGL not available');
+    // Tes kemampuan float texture — wajib untuk TF.js inference
+    const floatExt = gl.getExtension('OES_texture_float') || gl.getExtension('EXT_color_buffer_float');
+    if (!floatExt) throw new Error('WebGL float texture not supported');
+    console.log('[Human Backend] WebGL OK — menggunakan GPU acceleration');
+    return 'webgl';
+  } catch (e) {
+    console.warn('[Human Backend] WebGL gagal, fallback ke WASM CPU:', e.message);
+    return 'wasm';
+  }
+}
+
+/**
+ * Pemuatan model tangguh (Backend Auto-Detection + 3-Tier Path Fallback):
+ * 1. Deteksi backend terbaik (WebGL atau WASM)
+ * 2. Coba path: Origin Domain → Relatif → Cloud CDN
+ * 3. Warmup deteksi wajah pertama kali
  */
 export async function loadHumanWithFallback() {
+  // Step 1: Pilih backend terbaik untuk device ini
+  const bestBackend = await detectBestBackend();
+  human.config.backend = bestBackend;
+  console.log('[Human Singleton] Backend ditetapkan:', bestBackend);
+
   const pathsToTry = [
     window.location.origin + '/models',
     './models',
@@ -57,19 +80,45 @@ export async function loadHumanWithFallback() {
   ];
 
   let lastErr = null;
+  let loadedPath = null;
+
+  // Step 2: Load model dari path yang berhasil
   for (const basePath of pathsToTry) {
     try {
-      console.log('[Human Singleton] Attempting model load from:', basePath);
+      console.log('[Human Singleton] Mencoba load model dari:', basePath);
       human.config.modelBasePath = basePath;
       await human.load();
-      console.log('[Human Singleton] Models successfully loaded from:', basePath);
-      return true;
+      loadedPath = basePath;
+      console.log('[Human Singleton] Model berhasil dimuat dari:', basePath);
+      break;
     } catch (err) {
-      console.warn('[Human Singleton] Model load failed from:', basePath, err?.message || err);
+      console.warn('[Human Singleton] Gagal dari:', basePath, err?.message || err);
       lastErr = err;
     }
   }
 
-  console.error('[Human Singleton] All model load attempts failed. Last error:', lastErr);
-  throw lastErr || new Error('Gagal mengunduh berkas model AI dari seluruh lokasi');
+  if (!loadedPath) {
+    console.error('[Human Singleton] Semua path gagal. Error terakhir:', lastErr);
+    throw lastErr || new Error('Gagal mengunduh model AI dari seluruh lokasi');
+  }
+
+  // Step 3: Warmup — jalankan deteksi pada frame kosong agar GPU shader ter-compile
+  try {
+    console.log('[Human Singleton] Memulai warmup deteksi wajah...');
+    // Buat canvas 64x64 piksel untuk warmup ringan
+    const warmupCanvas = document.createElement('canvas');
+    warmupCanvas.width = 64;
+    warmupCanvas.height = 64;
+    const warmupCtx = warmupCanvas.getContext('2d');
+    if (warmupCtx) {
+      warmupCtx.fillStyle = '#888888';
+      warmupCtx.fillRect(0, 0, 64, 64);
+    }
+    await human.detect(warmupCanvas);
+    console.log('[Human Singleton] Warmup berhasil — model siap mendeteksi wajah!');
+  } catch (warnErr) {
+    console.warn('[Human Singleton] Warmup error (non-fatal):', warnErr?.message);
+  }
+
+  return true;
 }
