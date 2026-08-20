@@ -475,3 +475,9 @@ Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching p
 * **Wrapper Table-Container**: Membungkus tabel data master karyawan pada [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) ke dalam kelas kontainer `.table-container` (seragam dengan tabel riwayat log absensi).
 * **Pencegahan Penyusutan Kolom (Squeeze-Free)**: Menambahkan aturan CSS global untuk mengunci lebar tabel minimal ke `850px` dan menonaktifkan pemenggalan baris teks (`white-space: nowrap`) pada kolom sel data.
 * **Scroll Horizontal Mandiri**: Mengizinkan pengguna HP untuk menggeser (*swipe*) tabel absensi dan tabel data master karyawan secara horizontal untuk kenyamanan membaca seluruh detail data, tanpa mengacaukan keselarasan responsif halaman utama.
+
+### 15.7 Integrasi CapacitorJS untuk Kompilasi Native Android APK
+* **Penyediaan Native Shell**: Menambahkan dependency `@capacitor/core` dan `@capacitor/cli` untuk membangun cangkang native mobile di sekitar aplikasi web React.
+* **Konfigurasi Aset Web**: Membuat berkas konfigurasi [capacitor.config.ts](file:///d:/FACE%20VERIFICATION/capacitor.config.ts) yang mengarahkan pembungkus native ke folder keluaran Vite `dist/`.
+* **Proyek Android Studio**: Menambahkan platform `@capacitor/android` ke folder `android/` agar dapat di-compile langsung di Android Studio menjadi file `.apk`.
+* **Registrasi Izin Hardware & Storage**: Memperbarui file [AndroidManifest.xml](file:///d:/FACE%20VERIFICATION/android/app/src/main/AndroidManifest.xml) untuk mendaftarkan izin Kamera (`CAMERA`), Geolokasi GPS Akurat (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`), dan Penyimpanan File Internal (`WRITE_EXTERNAL_STORAGE`, `READ_EXTERNAL_STORAGE`).
