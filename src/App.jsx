@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Human } from '@vladmandic/human';
+import { human } from './humanSingleton';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
@@ -254,18 +254,8 @@ function AppContent() {
     async function loadHumanModels() {
       try {
         setModelStatusText('Memuat Model AI Biometrik Wajah (Human/MediaPipe)...');
-        
-        const humanConfig = {
-          modelBasePath: window.location.origin + '/models',
-          face: { enabled: true, mesh: true, iris: true, description: true },
-          body: { enabled: false },
-          hand: { enabled: false },
-          object: { enabled: false },
-          gesture: { enabled: false },
-        };
-        const human = new Human(humanConfig);
+        // Gunakan singleton - SATU instance Human untuk seluruh aplikasi
         await human.load();
-
         setModelsLoaded(true);
         setModelStatusText('Model AI Siap!');
       } catch (err) {

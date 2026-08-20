@@ -4,13 +4,9 @@ import { API_BASE_URL, fetchWithTimeout } from '../config';
 
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
 import { supabase } from '../supabaseClient';
-import { Human } from '@vladmandic/human';
+import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
 
-import { getUnifiedHumanConfig } from '../aiConfig';
-
-const humanConfig = getUnifiedHumanConfig(false); // description mati di awal (Phased Flow)
-const human = new Human(humanConfig);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GEOFENCING CONFIGURATION (Dipindahkan dari server.js)

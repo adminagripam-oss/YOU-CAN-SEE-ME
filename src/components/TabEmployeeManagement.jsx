@@ -3,12 +3,7 @@ import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, cacheGeometricVector } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
-import { Human } from '@vladmandic/human';
-
-import { getUnifiedHumanConfig } from '../aiConfig';
-
-const humanConfig = getUnifiedHumanConfig(true); // description hidup di awal untuk register
-const human = new Human(humanConfig);
+import { human } from '../humanSingleton';
 
 
 
