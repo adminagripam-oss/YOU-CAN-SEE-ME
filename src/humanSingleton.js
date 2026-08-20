@@ -2,15 +2,22 @@
  * humanSingleton.js
  *
  * Singleton instance of @vladmandic/human untuk seluruh aplikasi AgriFace.
- * WAJIB hanya ada SATU instance Human yang aktif di waktu bersamaan.
  *
- * ROOT FIX untuk error "Cannot read properties of undefined (reading 'inputs')":
- * TF.js backend harus diinisialisasi SEPENUHNYA (tf.setBackend + tf.ready)
- * sebelum human.load() dipanggil. Jika tidak, WebGL di Android WebView belum
- * siap saat TF.js membangun graph model → tensor undefined → crash 'inputs'.
+ * ROOT FIX — "Cannot read properties of undefined (reading 'inputs')":
+ * Vite/Rollup saat production build merusak internal TF.js kernel registry
+ * di dalam bundle @vladmandic/human. Solusinya: library dimuat LANGSUNG
+ * dari /public/human.esm.js via <script type="module"> di index.html,
+ * tanpa disentuh Vite. humanSingleton.js hanya membaca hasilnya dari window.
  */
 
-import { Human } from '@vladmandic/human';
+// Human class diambil dari window.HumanLib yang dimuat via index.html
+// (bukan dari npm bundle yang di-transformasi Vite/Rollup)
+function getHumanClass() {
+  if (window.HumanLib?.Human) return window.HumanLib.Human;
+  // Fallback: import langsung jika window.HumanLib belum tersedia
+  // (hanya terjadi di dev mode — Vite dev server tidak bundle, jadi aman)
+  throw new Error('[humanSingleton] window.HumanLib belum tersedia. Pastikan index.html memuat /human.esm.js.');
+}
 
 const humanConfig = {
   modelBasePath: window.location.origin + '/models',
@@ -34,33 +41,45 @@ const humanConfig = {
   object: { enabled: false },
   gesture: { enabled: false },
 
-  // Backend di-set secara dinamis oleh loadHumanWithFallback()
   backend: 'webgl',
   warmup: 'none',
 };
 
-// SATU-SATUNYA instance Human di seluruh aplikasi
-export const human = new Human(humanConfig);
+// Inisialisasi singleton — Human class dari window (tidak di-bundle Vite)
+let _human = null;
+
+function getHuman() {
+  if (!_human) {
+    const HumanClass = getHumanClass();
+    _human = new HumanClass(humanConfig);
+  }
+  return _human;
+}
+
+// Export lazy proxy agar import { human } di file lain tetap bisa dipakai
+export const human = new Proxy({}, {
+  get(_, prop) {
+    return getHuman()[prop];
+  },
+  set(_, prop, value) {
+    getHuman()[prop] = value;
+    return true;
+  }
+});
 
 /**
- * Step 1: Inisialisasi TF.js backend secara eksplisit SEBELUM load model.
- * Ini adalah FIX UTAMA untuk error "inputs" di Android WebView.
- *
- * Tanpa ini: human.load() memulai inisialisasi WebGL secara ASYNC bersamaan
- * dengan pengunduhan model → race condition → tensor undefined → crash.
- *
- * Dengan ini: kita memastikan WebGL (atau CPU jika WebGL gagal) SUDAH SIAP
- * 100% sebelum satu baris model loading dijalankan.
+ * Inisialisasi TF.js backend secara eksplisit SEBELUM load model.
+ * Memastikan GPU/CPU benar-benar siap sebelum graph model dibangun.
  */
-async function initBackend() {
+async function initBackend(humanInstance) {
   const candidates = ['webgl', 'cpu'];
 
   for (const backend of candidates) {
     try {
       console.log('[TF.js Backend] Mencoba inisialisasi:', backend);
-      await human.tf.setBackend(backend);
-      await human.tf.ready();           // Blokir hingga GPU/CPU benar-benar siap
-      human.config.backend = backend;   // Sync ke human config
+      await humanInstance.tf.setBackend(backend);
+      await humanInstance.tf.ready();
+      humanInstance.config.backend = backend;
       console.log('[TF.js Backend] ✅ Siap menggunakan:', backend);
       return backend;
     } catch (e) {
@@ -73,14 +92,27 @@ async function initBackend() {
 
 /**
  * Pemuatan model tangguh:
- * 1. Inisialisasi backend TF.js terlebih dahulu (webgl → cpu fallback)
- * 2. Lalu load model dari: Origin Domain → Relatif → CDN
+ * 1. Tunggu window.HumanLib tersedia (loaded dari /human.esm.js)
+ * 2. Inisialisasi backend TF.js (webgl → cpu fallback)
+ * 3. Load model dari: Origin Domain → Relatif → CDN
  */
 export async function loadHumanWithFallback() {
-  // ── Step 1: Pastikan TF.js backend SIAP sebelum apapun ──────────────────
-  await initBackend();
+  // Tunggu window.HumanLib siap (maks 10 detik)
+  for (let i = 0; i < 100; i++) {
+    if (window.HumanLib?.Human) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
-  // ── Step 2: Load model dari path yang berhasil ───────────────────────────
+  if (!window.HumanLib?.Human) {
+    throw new Error('Library human.esm.js gagal dimuat dari /human.esm.js. Periksa file public/human.esm.js.');
+  }
+
+  const humanInstance = getHuman();
+
+  // ── Step 1: Pastikan TF.js backend SIAP sebelum apapun ──
+  await initBackend(humanInstance);
+
+  // ── Step 2: Load model ──
   const pathsToTry = [
     window.location.origin + '/models',
     './models',
@@ -92,8 +124,8 @@ export async function loadHumanWithFallback() {
   for (const basePath of pathsToTry) {
     try {
       console.log('[Human Singleton] Mencoba load model dari:', basePath);
-      human.config.modelBasePath = basePath;
-      await human.load();
+      humanInstance.config.modelBasePath = basePath;
+      await humanInstance.load();
       console.log('[Human Singleton] ✅ Model berhasil dimuat dari:', basePath);
       return true;
     } catch (err) {
@@ -104,4 +136,3 @@ export async function loadHumanWithFallback() {
 
   throw lastErr || new Error('Gagal memuat model AI dari semua lokasi yang tersedia.');
 }
-

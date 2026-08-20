@@ -38,6 +38,18 @@
   <!-- MediaPipe Camera Utils & Face Mesh CDN (468/478 3D Landmarks & Iris Tracking) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+  <!-- @vladmandic/human: dimuat LANGSUNG dari file statis (bukan di-bundle Vite)
+       KRITIS: Vite/Rollup merusak internal TF.js kernel registry saat bundle.
+       Dengan memuat sebagai script eksternal, library bekerja as-is tanpa transformasi. -->
+  <script type="module">
+    import(/* @vite-ignore */ '/human.esm.js')
+      .then((mod) => {
+        window.HumanLib = { Human: mod.Human };
+        console.log('[HTML] window.HumanLib berhasil dimuat dari /human.esm.js');
+      })
+      .catch((err) => console.error('[HTML] Gagal memuat /human.esm.js:', err));
+  </script>
 </head>
 
 <body>
