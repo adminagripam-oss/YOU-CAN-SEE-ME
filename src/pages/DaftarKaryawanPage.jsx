@@ -42,6 +42,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   // Injected detection callback untuk human.js di mode Edit Kamera
   const detectEditFacesCallback = React.useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
+    if (human.config?.face?.description) {
+      human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat edit
+    }
     const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
@@ -110,9 +113,11 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.src = imgUrl;
     img.onload = async () => {
       try {
+        if (human.config?.face?.description) {
+          human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding diekstrak dari upload foto saat edit
+        }
         const result = await human.detect(img);
         if (result.face && result.face.length > 0 && result.face[0].embedding) {
           editCurrentDescriptorRef.current = Array.from(result.face[0].embedding);
@@ -128,6 +133,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         setEditCameraStatusColor('var(--accent-danger)');
       }
     };
+    img.src = imgUrl;
   };
 
   // Open Edit Modal
@@ -184,7 +190,13 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
 
       if (payload.descriptor_json) {
         await supabase.from('master_descriptors').upsert({ employee_id: editingEmp.id, descriptor_json: payload.descriptor_json });
-        await cacheUserMasterVector(editingEmp.id, { descriptor_json: payload.descriptor_json });
+        await cacheUserMasterVector({
+          employee_id: editingEmp.id,
+          nik: editingEmp.nik || '',
+          name: editingEmp.name || '',
+          department: editingEmp.department || editingEmp.jabatan || '',
+          descriptor_json: editCurrentDescriptorRef.current,
+        });
       }
 
       showToast('Berhasil', 'Data karyawan berhasil diperbarui.', 'success');
