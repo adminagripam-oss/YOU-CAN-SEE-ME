@@ -11,6 +11,8 @@
     "server": "node server.js"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@supabase/supabase-js": "^2.111.0",
     "@vladmandic/human": "^3.3.6",
     "cookie-parser": "^1.4.7",
@@ -26,6 +28,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^6.0.4",
