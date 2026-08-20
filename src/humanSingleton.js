@@ -59,7 +59,14 @@ function getHuman() {
 // Export lazy proxy agar import { human } di file lain tetap bisa dipakai
 export const human = new Proxy({}, {
   get(_, prop) {
-    return getHuman()[prop];
+    const target = getHuman();
+    const value = target[prop];
+    // PENTING: Bind 'this' ke instance asli (target) jika properti adalah fungsi.
+    // Menghindari error "Cannot read from private field" karena konteks 'this' berubah menjadi Proxy.
+    if (typeof value === 'function') {
+      return value.bind(target);
+    }
+    return value;
   },
   set(_, prop, value) {
     getHuman()[prop] = value;
