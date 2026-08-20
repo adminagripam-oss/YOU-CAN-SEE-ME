@@ -518,14 +518,23 @@ export function useNormalizedFaceMesh({
 
     async function initCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: STD_WIDTH },
-            height: { ideal: STD_HEIGHT },
-            facingMode: facingMode,
-          },
-          audio: false,
-        });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: STD_WIDTH },
+              height: { ideal: STD_HEIGHT },
+              facingMode: facingMode,
+            },
+            audio: false,
+          });
+        } catch (constraintErr) {
+          console.warn('[useNormalizedFaceMesh] Ideal constraints failed, falling back to basic video: true', constraintErr);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
 
         if (cancelled) {
           stream.getTracks().forEach((track: MediaStreamTrack) => track.stop());

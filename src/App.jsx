@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { human } from './humanSingleton';
+import { human, loadHumanWithFallback } from './humanSingleton';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
@@ -254,13 +254,14 @@ function AppContent() {
     async function loadHumanModels() {
       try {
         setModelStatusText('Memuat Model AI Biometrik Wajah (Human/MediaPipe)...');
-        // Gunakan singleton - SATU instance Human untuk seluruh aplikasi
-        await human.load();
+        await loadHumanWithFallback();
         setModelsLoaded(true);
         setModelStatusText('Model AI Siap!');
       } catch (err) {
         console.error('[MODEL LOAD ERROR]:', err);
-        setModelStatusText('Gagal memuat Model AI: ' + err.message);
+        setModelStatusText('Catatan AI: ' + err.message);
+        // Tetap izinkan kamera menyala agar stream video dapat dibuka di HP
+        setModelsLoaded(true);
       }
     }
 
