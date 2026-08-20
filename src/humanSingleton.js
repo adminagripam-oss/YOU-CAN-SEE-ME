@@ -23,8 +23,8 @@ const humanConfig = {
       enabled: true,
       rotation: true,
       maxDetected: 1,
-      skipFrames: 5,
-      minConfidence: 0.2,
+      skipFrames: 0,
+      minConfidence: 0.15,
     },
     mesh: { enabled: true },
     iris: { enabled: false },      // Dinonaktifkan: membebani GPU & mengubah bounding box
