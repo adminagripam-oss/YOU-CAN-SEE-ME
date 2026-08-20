@@ -35,6 +35,26 @@ export async function cacheUserMasterVector(user) {
     const empId = user.employee_id || user.id;
     if (!empId) return;
 
+    let vector = user.descriptor_json || user.descriptor || user.face_vector || null;
+    if (vector) {
+      let parsed = vector;
+      while (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch (e) {
+          break;
+        }
+      }
+      if (Array.isArray(parsed)) {
+        if (parsed.length !== 1024) {
+          console.warn(`[db.js] cacheUserMasterVector: Mencegah caching vector dengan panjang ${parsed.length} (harus 1024) untuk employee ${empId}`);
+          vector = null;
+        }
+      } else {
+        vector = null;
+      }
+    }
+
     const allMasters = await db.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(empId));
 
@@ -47,8 +67,8 @@ export async function cacheUserMasterVector(user) {
       status_tk: user.status_tk || null,
       jabatan: user.jabatan || null,
       status_perkawinan: user.status_perkawinan || null,
-      descriptor_json: user.descriptor_json || user.descriptor || user.face_vector || null,
-      face_vector: user.face_vector || user.descriptor_json || user.descriptor || null,
+      descriptor_json: vector,
+      face_vector: vector,
       geometric_descriptor_json: user.geometric_descriptor_json || null,
       updated_at: new Date().toISOString(),
     };

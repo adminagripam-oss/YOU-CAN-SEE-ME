@@ -41,6 +41,9 @@ export default function TabEmployeeManagement({
   // Injected detection callback untuk human.js di register mode
   const detectRegFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
+    if (human.config?.face?.description) {
+      human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat daftar
+    }
     const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
@@ -123,6 +126,9 @@ export default function TabEmployeeManagement({
         }
 
         try {
+          if (human.config?.face?.description) {
+            human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat upload foto
+          }
           const result = await human.detect(img);
           
           if (result.face && result.face.length > 0 && result.face[0].embedding) {
