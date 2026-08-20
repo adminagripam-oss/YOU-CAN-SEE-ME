@@ -14,11 +14,7 @@ import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
-import { Human } from '@vladmandic/human';
-import { getUnifiedHumanConfig } from '../aiConfig';
-
-const humanConfig = getUnifiedHumanConfig(true); // description hidup di awal
-const human = new Human(humanConfig);
+import { human } from '../humanSingleton';
 
 export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
