@@ -410,7 +410,7 @@ export function useNormalizedFaceMesh({
         offscreen.height = STD_HEIGHT;
       }
 
-      const offCtx = offscreen.getContext('2d');
+      const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
       if (!offCtx) return;
 
       // Calculate crops for standard 4:3
@@ -436,14 +436,16 @@ export function useNormalizedFaceMesh({
 
       const ctx = canvas.getContext('2d');
 
-      if (!detection || !detection.mesh || detection.mesh.length === 0) {
+      const meshData: Point3D[] | null = detection?.mesh || detection?.meshRaw || (Array.isArray(detection) ? detection : null);
+
+      if (!detection || !meshData || meshData.length === 0) {
         // Clear screen and reset filters if face is lost
         if (ctx) ctx.clearRect(0, 0, STD_WIDTH, STD_HEIGHT);
         smoothedMeshRef.current = null;
         oneEuroFiltersRef.current = [];
         callbacksRef.current.onNoFace?.();
       } else {
-        const rawMesh: Point3D[] = detection.mesh;
+        const rawMesh: Point3D[] = meshData;
         let smoothedMesh: Point3D[];
 
         // 4. Apply selected smoothing filter
