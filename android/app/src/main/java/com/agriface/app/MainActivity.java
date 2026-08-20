@@ -21,20 +21,11 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Request permissions on startup if not already granted
-        if (!allPermissionsGranted()) {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
-        }
-    }
-
-    @Override
-    public void onStart() {
-        super.onStart();
-
-        // ── CRITICAL FIX: Allow media autoplay in WebView ──────────────────
-        // Without this, Android silently blocks ALL video.play() calls regardless
-        // of 'muted', 'autoplay', or 'playsinline' HTML attributes.
-        // This is required for getUserMedia camera streams to auto-start.
+        // ── CRITICAL: Apply WebView settings IMMEDIATELY after super.onCreate() ──
+        // Capacitor creates the WebView synchronously inside super.onCreate().
+        // This is the ONLY safe window to override settings before the page loads.
+        // setMediaPlaybackRequiresUserGesture(false) is REQUIRED for camera autoplay;
+        // without it, Android silently blocks all video.play() regardless of HTML attrs.
         WebView webView = this.getBridge().getWebView();
         if (webView != null) {
             WebSettings settings = webView.getSettings();
@@ -44,6 +35,11 @@ public class MainActivity extends BridgeActivity {
             settings.setDatabaseEnabled(true);
             settings.setAllowFileAccess(true);
             settings.setAllowContentAccess(true);
+        }
+
+        // Request permissions on startup if not already granted
+        if (!allPermissionsGranted()) {
+            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
         }
     }
 

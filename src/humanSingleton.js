@@ -32,7 +32,7 @@ const humanConfig = {
   gesture: { enabled: false },
 
   backend: 'webgl',
-  warmup: 'face', // Menggunakan warmup bawaan dari Human
+  warmup: 'none', // JANGAN 'face': warmup saat load crash di Android WebGL karena context belum siap
 };
 
 // SATU-SATUNYA instance Human di seluruh aplikasi
