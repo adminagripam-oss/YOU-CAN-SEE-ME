@@ -66,27 +66,31 @@ export default function Sidebar({ isOpen, onClose }) {
                 <i className="fa-solid fa-clock-rotate-left"></i>
                 <span>Log Absensi</span>
               </NavLink>
+
+              <button
+                type="button"
+                className="sidebar-link sidebar-logout-btn"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  width: '100%',
+                  textAlign: 'left',
+                  marginTop: '0.75rem',
+                  color: 'var(--accent-red, #ef4444)',
+                }}
+                onClick={async () => {
+                  await logout();
+                  navigate('/login');
+                }}
+                title="Keluar dari Sesi Login"
+              >
+                <i className="fa-solid fa-right-from-bracket" style={{ color: 'var(--accent-red, #ef4444)' }}></i>
+                <span>Logout</span>
+              </button>
             </>
           )}
         </nav>
-
-        {/* Sidebar Footer */}
-        <div className="sidebar-footer">
-          {isAuthenticated && (
-            <button
-              type="button"
-              className="sidebar-logout-btn"
-              onClick={async () => {
-                await logout();
-                navigate('/login');
-              }}
-              title="Keluar dari Sesi Login"
-            >
-              <i className="fa-solid fa-right-from-bracket"></i>
-              <span>Logout</span>
-            </button>
-          )}
-        </div>
       </aside>
     </>
   );
