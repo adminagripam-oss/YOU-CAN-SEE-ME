@@ -38,7 +38,11 @@
   <!-- MediaPipe Camera Utils & Face Mesh CDN (468/478 3D Landmarks & Iris Tracking) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script type="module" crossorigin src="/assets/index-KfBDMmph.js"></script>
+
+  <!-- @vladmandic/human: dimuat LANGSUNG dari file statis (bukan di-bundle Vite)
+       KRITIS: Vite/Rollup merusak internal TF.js kernel registry saat bundle.
+       Dengan memuat sebagai script eksternal, library bekerja as-is tanpa transformasi. -->
+  <script type="module" crossorigin src="/assets/index-B5Cjgstb.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-Dx_nunSB.css">
 </head>
 
