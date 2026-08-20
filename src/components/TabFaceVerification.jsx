@@ -1001,35 +1001,7 @@ export default function TabFaceVerification({
   const DOWNSCALE_WIDTH = 320;
   const DOWNSCALE_HEIGHT = 240;
 
-  /**
-   * [TASK 2] WebGL Backend Check + Warm-up
-   *
-   * Dijalankan sekali saat modelsLoaded === true.
-   * Memastikan:
-   *  1. Backend yang aktif adalah 'webgl' atau 'humangl' (bukan 'cpu').
-   *  2. human.warmup() dipanggil agar kompilasi shader GLSL selesai sebelum
-   *     scanning pertama — menghilangkan lag spike 500-1000ms di frame awal.
-   */
-  useEffect(() => {
-    if (!modelsLoaded) return;
-    const backend = human.tf?.getBackend?.();
-    if (backend && backend !== 'webgl' && backend !== 'humangl') {
-      console.warn(
-        `[WEBGL WARN] Backend aktif: "${backend}" (bukan webgl/humangl). ` +
-        'GPU mobile tidak digunakan → inferensi jauh lebih lambat. ' +
-        'Pastikan browser mendukung WebGL 2.0 dan tidak diblokir oleh GPU driver.'
-      );
-    } else {
-      console.log(`[WEBGL OK] Backend: ${backend ?? 'webgl (default)'}`);
-    }
-    // Warmup: jalankan 1 inferensi dummy agar shader GLSL sudah ter-compile
-    // sebelum pengguna mulai scan. Ini mencegah lag spike di frame pertama.
-    human.warmup().then(() => {
-      console.log('[WARMUP OK] WebGL shader compilation selesai. Siap scan.');
-    }).catch((err) => {
-      console.warn('[WARMUP WARN] human.warmup() gagal (non-fatal):', err?.message);
-    });
-  }, [modelsLoaded]);
+
 
   /**
    * Injected ke hook sebagai interface ke model AI (@vladmandic/human).
@@ -1063,11 +1035,8 @@ export default function TabFaceVerification({
       human.config.face.description.enabled = shouldExtractEmbedding;
     }
 
-    // Direct GPU texture binding: prioritaskan videoRef.current jika aktif, atau fallback ke croppedCanvas
-    const videoEl = videoRef.current;
-    const inputTarget = (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) ? videoEl : croppedCanvas;
-
-    const result = await human.detect(inputTarget);
+    // Gunakan croppedCanvas untuk kompatibilitas stabil di WebView Android (menghindari WebGL context loss)
+    const result = await human.detect(croppedCanvas);
     const face = result?.face?.[0] ?? null;
 
     lastDetectResultRef.current = face;
@@ -1309,7 +1278,7 @@ export default function TabFaceVerification({
 
   /** Callback jika kamera gagal dibuka */
   const onCameraError = useCallback((err) => {
-    setHasCameraError(true);
+    setLivenessStatusMsg('❌ Gagal membuka kamera. Pastikan izin kamera diaktifkan.');
     console.error('[Kamera Error]:', err);
   }, []);
 

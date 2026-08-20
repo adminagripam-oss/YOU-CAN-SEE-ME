@@ -42,9 +42,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   // Injected detection callback untuk human.js di mode Edit Kamera
   const detectEditFacesCallback = React.useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
-    const videoEl = editVideoRef.current;
-    const inputTarget = (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) ? videoEl : croppedCanvas;
-    const result = await human.detect(inputTarget);
+    const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
 
