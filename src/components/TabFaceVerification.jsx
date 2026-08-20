@@ -1053,77 +1053,23 @@ export default function TabFaceVerification({
     const now = performance.now();
     const elapsed = now - lastDetectTimeRef.current;
 
-    // Belum mencapai interval throttle → skip inference, kembalikan hasil
-    // terakhir agar overlay tidak kosong/berkedip.
     if (elapsed < DETECT_INTERVAL_MS) {
       return lastDetectResultRef.current;
     }
     lastDetectTimeRef.current = now;
 
-    // [TASK 1] Downscale ke 320×240 — canvas dibuat SEKALI (lazy-init via ref)
-    // lalu dipakai ulang tiap frame via drawImage. Jauh lebih hemat memori
-    // dibanding document.createElement('canvas') per-panggilan.
-    let inputCanvas = croppedCanvas;
-    let coordScale = 1;
-
-    if (croppedCanvas.width > DOWNSCALE_WIDTH) {
-      // Lazy-init: buat canvas downscale hanya jika belum ada
-      if (!downscaleCanvasRef.current) {
-        downscaleCanvasRef.current = document.createElement('canvas');
-        downscaleCanvasRef.current.width = DOWNSCALE_WIDTH;
-        downscaleCanvasRef.current.height = DOWNSCALE_HEIGHT;
-        downscaleCtxRef.current = downscaleCanvasRef.current.getContext('2d', { willReadFrequently: false });
-      }
-      downscaleCtxRef.current.drawImage(croppedCanvas, 0, 0, DOWNSCALE_WIDTH, DOWNSCALE_HEIGHT);
-      inputCanvas = downscaleCanvasRef.current;
-      // Faktor scale: 640/320 = 2.0
-      coordScale = croppedCanvas.width / DOWNSCALE_WIDTH;
-    }
-
-    // [TASK 5] Dev-only: catat waktu mulai inferensi
-    if (import.meta.env.DEV) {
-      inferenceStartRef.current = performance.now();
-    }
-
-    // Phased Biometric Flow: Aktifkan ekstraksi embedding HANYA jika liveness sudah beres & wajah stabil
     const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
     if (human.config?.face?.description) {
       human.config.face.description.enabled = shouldExtractEmbedding;
     }
 
-    const result = await human.detect(inputCanvas);
+    // Direct GPU texture binding: prioritaskan videoRef.current jika aktif, atau fallback ke croppedCanvas
+    const videoEl = videoRef.current;
+    const inputTarget = (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) ? videoEl : croppedCanvas;
 
-    // [TASK 5] Dev-only: catat durasi inferensi
-    if (import.meta.env.DEV) {
-      lastInferenceTimeRef.current = Math.round(performance.now() - inferenceStartRef.current);
-    }
-
+    const result = await human.detect(inputTarget);
     const face = result?.face?.[0] ?? null;
 
-    // ── Scale-back koordinat ke ruang canvas asli (640×480) ──────────────
-    // face.mesh dan face.box ada di ruang 320×240 (input ke model).
-    // Hook mengasumsikan 640×480 → harus di-scale 2× sebelum dikembalikan.
-    // face.meshRaw / face.boxRaw (nilai [0..1] ternormalisasi) TIDAK di-scale.
-    if (face && coordScale !== 1) {
-      if (Array.isArray(face.mesh)) {
-        face.mesh = face.mesh.map(pt => {
-          if (Array.isArray(pt)) {
-            return [pt[0] * coordScale, pt[1] * coordScale, pt[2] ?? 0];
-          }
-          return { x: (pt.x ?? 0) * coordScale, y: (pt.y ?? 0) * coordScale, z: pt.z ?? 0 };
-        });
-      }
-      if (face.box) {
-        face.box = {
-          x: (face.box.x ?? 0) * coordScale,
-          y: (face.box.y ?? 0) * coordScale,
-          width: (face.box.width ?? 0) * coordScale,
-          height: (face.box.height ?? 0) * coordScale,
-        };
-      }
-    }
-
-    // Simpan ke cache untuk dipakai saat frame di-throttle
     lastDetectResultRef.current = face;
     return face;
   }, [modelsLoaded]);
