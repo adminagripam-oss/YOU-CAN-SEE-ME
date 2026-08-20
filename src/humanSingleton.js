@@ -3,13 +3,16 @@
  *
  * Singleton instance of @vladmandic/human untuk seluruh aplikasi AgriFace.
  * WAJIB hanya ada SATU instance Human yang aktif di waktu bersamaan.
- * Deteksi backend otomatis: WebGL (GPU) → WASM (CPU) fallback untuk kompatibilitas Android.
+ *
+ * ROOT FIX untuk error "Cannot read properties of undefined (reading 'inputs')":
+ * TF.js backend harus diinisialisasi SEPENUHNYA (tf.setBackend + tf.ready)
+ * sebelum human.load() dipanggil. Jika tidak, WebGL di Android WebView belum
+ * siap saat TF.js membangun graph model → tensor undefined → crash 'inputs'.
  */
 
 import { Human } from '@vladmandic/human';
 
 const humanConfig = {
-  // Jalur model absolut berbasis origin domain saat ini
   modelBasePath: window.location.origin + '/models',
 
   face: {
@@ -18,8 +21,8 @@ const humanConfig = {
       enabled: true,
       rotation: true,
       maxDetected: 1,
-      skipFrames: 0,        // Tidak lewatkan satupun frame
-      minConfidence: 0.15,  // Threshold rendah agar deteksi lebih sensitif
+      skipFrames: 0,
+      minConfidence: 0.15,
     },
     mesh: { enabled: true },
     iris: { enabled: false },
@@ -31,46 +34,74 @@ const humanConfig = {
   object: { enabled: false },
   gesture: { enabled: false },
 
+  // Backend di-set secara dinamis oleh loadHumanWithFallback()
   backend: 'webgl',
-  warmup: 'none', // JANGAN 'face': warmup saat load crash di Android WebGL karena context belum siap
+  warmup: 'none',
 };
 
 // SATU-SATUNYA instance Human di seluruh aplikasi
 export const human = new Human(humanConfig);
 
 /**
- * Pemuatan model tangguh (3-Tier Path Fallback):
- * 1. Coba path: Origin Domain → Relatif → Cloud CDN
+ * Step 1: Inisialisasi TF.js backend secara eksplisit SEBELUM load model.
+ * Ini adalah FIX UTAMA untuk error "inputs" di Android WebView.
+ *
+ * Tanpa ini: human.load() memulai inisialisasi WebGL secara ASYNC bersamaan
+ * dengan pengunduhan model → race condition → tensor undefined → crash.
+ *
+ * Dengan ini: kita memastikan WebGL (atau CPU jika WebGL gagal) SUDAH SIAP
+ * 100% sebelum satu baris model loading dijalankan.
+ */
+async function initBackend() {
+  const candidates = ['webgl', 'cpu'];
+
+  for (const backend of candidates) {
+    try {
+      console.log('[TF.js Backend] Mencoba inisialisasi:', backend);
+      await human.tf.setBackend(backend);
+      await human.tf.ready();           // Blokir hingga GPU/CPU benar-benar siap
+      human.config.backend = backend;   // Sync ke human config
+      console.log('[TF.js Backend] ✅ Siap menggunakan:', backend);
+      return backend;
+    } catch (e) {
+      console.warn('[TF.js Backend] ❌ Gagal:', backend, '-', e?.message);
+    }
+  }
+
+  throw new Error('Tidak ada backend TF.js (webgl/cpu) yang berhasil diinisialisasi.');
+}
+
+/**
+ * Pemuatan model tangguh:
+ * 1. Inisialisasi backend TF.js terlebih dahulu (webgl → cpu fallback)
+ * 2. Lalu load model dari: Origin Domain → Relatif → CDN
  */
 export async function loadHumanWithFallback() {
+  // ── Step 1: Pastikan TF.js backend SIAP sebelum apapun ──────────────────
+  await initBackend();
+
+  // ── Step 2: Load model dari path yang berhasil ───────────────────────────
   const pathsToTry = [
     window.location.origin + '/models',
     './models',
-    'https://cdn.jsdelivr.net/npm/@vladmandic/human/models'
+    'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
   ];
 
   let lastErr = null;
-  let loadedPath = null;
 
-  // Load model dari path yang berhasil
   for (const basePath of pathsToTry) {
     try {
       console.log('[Human Singleton] Mencoba load model dari:', basePath);
       human.config.modelBasePath = basePath;
       await human.load();
-      loadedPath = basePath;
-      console.log('[Human Singleton] Model berhasil dimuat dari:', basePath);
-      break;
+      console.log('[Human Singleton] ✅ Model berhasil dimuat dari:', basePath);
+      return true;
     } catch (err) {
-      console.warn('[Human Singleton] Gagal dari:', basePath, err?.message || err);
+      console.warn('[Human Singleton] ❌ Gagal dari:', basePath, '-', err?.message || err);
       lastErr = err;
     }
   }
 
-  if (!loadedPath) {
-    console.error('[Human Singleton] Semua path gagal. Error terakhir:', lastErr);
-    throw lastErr || new Error('Gagal mengunduh model AI dari seluruh lokasi');
-  }
-
-  return true;
+  throw lastErr || new Error('Gagal memuat model AI dari semua lokasi yang tersedia.');
 }
+
