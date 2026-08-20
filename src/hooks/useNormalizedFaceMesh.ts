@@ -548,8 +548,12 @@ export function useNormalizedFaceMesh({
         const video = videoRef.current;
         if (video) {
           video.srcObject = stream;
+          // Fix for Android WebView: Explicitly set muted and playsinline on the DOM node
+          video.muted = true;
+          video.setAttribute('playsinline', 'true');
+          
           // Play stream safely
-          await video.play().catch(() => {});
+          await video.play().catch((e) => console.warn('[useNormalizedFaceMesh] AutoPlay failed:', e));
         }
 
         // Initialize frame loop

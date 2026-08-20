@@ -50,9 +50,9 @@ async function detectBestBackend() {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
     if (!gl) throw new Error('WebGL not available');
-    // Tes kemampuan float texture — wajib untuk TF.js inference
-    const floatExt = gl.getExtension('OES_texture_float') || gl.getExtension('EXT_color_buffer_float');
-    if (!floatExt) throw new Error('WebGL float texture not supported');
+    
+    // WebGL2 mendukung float textures secara bawaan (core), 
+    // jadi cek ekstensi OES_texture_float seringkali menghasilkan null di WebGL2 Android.
     console.log('[Human Backend] WebGL OK — menggunakan GPU acceleration');
     return 'webgl';
   } catch (e) {
