@@ -385,6 +385,7 @@ function AppContent() {
                   modelsLoaded={modelsLoaded}
                   showToast={showToast}
                   refreshEmployees={fetchEmployees}
+                  refreshLogs={fetchLogs}
                   openConfirmModal={openConfirmModal}
                 />
               }

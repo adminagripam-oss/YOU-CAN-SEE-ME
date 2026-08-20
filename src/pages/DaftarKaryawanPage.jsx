@@ -20,7 +20,7 @@ import { getUnifiedHumanConfig } from '../aiConfig';
 const humanConfig = getUnifiedHumanConfig(true); // description hidup di awal
 const human = new Human(humanConfig);
 
-export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, openConfirmModal }) {
+export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
 
   // Filters State
@@ -208,6 +208,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           
           showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan.', 'success');
           refreshEmployees();
+          if (refreshLogs) refreshLogs();
         } catch (err) {
           showToast('Error Sistem', err.message, 'error');
         }
