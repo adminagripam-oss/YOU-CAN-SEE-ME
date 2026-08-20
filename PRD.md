@@ -470,3 +470,8 @@ Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching p
 ### 15.5 Persistensi Status Sidebar melalui LocalStorage
 * **Pencegahan Reset State**: Membaca dan menulis status lipatan sidebar (`sidebarOpen`) ke `localStorage` pada file [DashboardLayout.jsx](file:///d:/FACE%20VERIFICATION/src/layouts/DashboardLayout.jsx).
 * **Router Remount Immunity**: Menjamin sidebar tetap mempertahankan bentuk terakhirnya (lebar penuh `240px` atau ramping `72px`) saat pengguna berpindah menu navigasi dari/ke halaman absensi umum yang memicu penggantian (*remounting*) komponen layout dari React Router.
+
+### 15.6 Responsive Horizontal Scrollable Tables pada Tampilan Mobile
+* **Wrapper Table-Container**: Membungkus tabel data master karyawan pada [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) ke dalam kelas kontainer `.table-container` (seragam dengan tabel riwayat log absensi).
+* **Pencegahan Penyusutan Kolom (Squeeze-Free)**: Menambahkan aturan CSS global untuk mengunci lebar tabel minimal ke `850px` dan menonaktifkan pemenggalan baris teks (`white-space: nowrap`) pada kolom sel data.
+* **Scroll Horizontal Mandiri**: Mengizinkan pengguna HP untuk menggeser (*swipe*) tabel absensi dan tabel data master karyawan secara horizontal untuk kenyamanan membaca seluruh detail data, tanpa mengacaukan keselarasan responsif halaman utama.
