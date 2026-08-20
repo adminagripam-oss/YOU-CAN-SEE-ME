@@ -21,6 +21,11 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Enable Chrome DevTools remote debugging for debug builds
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
         // ── CRITICAL: Apply WebView settings IMMEDIATELY after super.onCreate() ──
         // Capacitor creates the WebView synchronously inside super.onCreate().
         // This is the ONLY safe window to override settings before the page loads.
