@@ -391,10 +391,14 @@ function drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, matched) {
  * @param {number}  detectionScore
  */
 function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
-  // Iris dinonaktifkan → mesh punya 468 poin (bukan 478). Guard disesuaikan.
-  if (!pts || pts.length < 468) return;
+  // Guard: pastikan poin tersedia
+  if (!pts || pts.length < 50) return;
 
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const getX = (p) => (Array.isArray(p) ? (p[0] ?? 0) : (p?.x ?? 0));
+  const getY = (p) => (Array.isArray(p) ? (p[1] ?? 0) : (p?.y ?? 0));
+
+  const xs = pts.map(p => getX(p));
+  const ys = pts.map(p => getY(p));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
 
@@ -407,15 +411,19 @@ function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
     [R, G, B] = [255, 50, 50];
   }
 
-  drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
+  if (!isNaN(minX) && !isNaN(minY) && !isNaN(maxX) && !isNaN(maxY)) {
+    drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
+  }
 
   // Perbesar ukuran titik (radius dari 1.2 menjadi 2.5) dan buat lebih tegas (opacity 0.85)
   ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.85)`;
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
     if (!p) continue;
+    const px = getX(p);
+    const py = getY(p);
     ctx.beginPath();
-    ctx.arc(p[0], p[1], 2.5, 0, 2 * Math.PI);
+    ctx.arc(px, py, 2.5, 0, 2 * Math.PI);
     ctx.fill();
   }
 }

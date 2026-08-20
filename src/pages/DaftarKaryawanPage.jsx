@@ -56,10 +56,13 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
 
     ctx.clearRect(0, 0, 640, 480);
     if (smoothedMesh && smoothedMesh.length > 0) {
-      ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.85)';
       for (const pt of smoothedMesh) {
+        if (!pt) continue;
+        const px = Array.isArray(pt) ? (pt[0] ?? 0) : (pt.x ?? 0);
+        const py = Array.isArray(pt) ? (pt[1] ?? 0) : (pt.y ?? 0);
         ctx.beginPath();
-        ctx.arc(pt[0], pt[1], 1.2, 0, 2 * Math.PI);
+        ctx.arc(px, py, 2.5, 0, 2 * Math.PI);
         ctx.fill();
       }
     }
