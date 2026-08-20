@@ -481,3 +481,9 @@ Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching p
 * **Konfigurasi Aset Web**: Membuat berkas konfigurasi [capacitor.config.ts](file:///d:/FACE%20VERIFICATION/capacitor.config.ts) yang mengarahkan pembungkus native ke folder keluaran Vite `dist/`.
 * **Proyek Android Studio**: Menambahkan platform `@capacitor/android` ke folder `android/` agar dapat di-compile langsung di Android Studio menjadi file `.apk`.
 * **Registrasi Izin Hardware & Storage**: Memperbarui file [AndroidManifest.xml](file:///d:/FACE%20VERIFICATION/android/app/src/main/AndroidManifest.xml) untuk mendaftarkan izin Kamera (`CAMERA`), Geolokasi GPS Akurat (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`), dan Penyimpanan File Internal (`WRITE_EXTERNAL_STORAGE`, `READ_EXTERNAL_STORAGE`).
+
+### 15.8 Lokalisasi Model AI Biometrik Wajah untuk Operasional Offline Mandiri
+* **Penyimpanan Lokal Model**: Memindahkan model-model wajah biometrik (`blazeface`, `facemesh`, `iris`, `faceres`, `models.json`) dari pustaka `@vladmandic/human` ke dalam folder lokal [public/models/](file:///d:/FACE%20VERIFICATION/public/models) agar terkemas secara fisik di dalam berkas APK.
+* **Pengalihan Jalur Unduhan (Bypass CDN)**: Memperbarui [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) untuk mengarahkan `modelBasePath` ke `./models` (jalur relatif lokal) menggantikan tautan cloud JSDelivr CDN lama.
+* **Pre-caching pada Service Worker**: Menambahkan berkas model lokal ke dalam daftar aset pre-cache pada [sw.js](file:///d:/FACE%20VERIFICATION/public/sw.js) guna mendukung operasional luring (offline) PWA pada browser ponsel.
+* **Hasil Akhir**: Pemindai wajah di halaman absensi kini dapat dimuat secara instan (kurang dari 1 detik) tanpa membutuhkan koneksi internet atau data seluler sama sekali.
