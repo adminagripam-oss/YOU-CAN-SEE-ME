@@ -10,7 +10,16 @@ const PRECACHE_ASSETS = [
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
   'https://cdn.jsdelivr.net/npm/@vladmandic/human/dist/human.js',
   'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js',
-  'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js'
+  'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js',
+  './models/models.json',
+  './models/blazeface.json',
+  './models/blazeface.bin',
+  './models/facemesh.json',
+  './models/facemesh.bin',
+  './models/iris.json',
+  './models/iris.bin',
+  './models/faceres.json',
+  './models/faceres.bin'
 ];
 
 // Service Worker Install Event (Pre-caching)
