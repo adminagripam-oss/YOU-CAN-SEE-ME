@@ -2,7 +2,7 @@
 // Tujuannya agar hasil perhitungan matematika di Laptop (FP32) dan Tablet (FP16) 100% konsisten.
 
 export const getUnifiedHumanConfig = (enableDescriptionAtStart = false) => ({
-  modelBasePath: './models',
+  modelBasePath: window.location.origin + '/models',
 
   // Environment flags untuk TensorFlow.js
   env: {

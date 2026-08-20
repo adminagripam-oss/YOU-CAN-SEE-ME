@@ -256,7 +256,7 @@ function AppContent() {
         setModelStatusText('Memuat Model AI Biometrik Wajah (Human/MediaPipe)...');
         
         const humanConfig = {
-          modelBasePath: './models',
+          modelBasePath: window.location.origin + '/models',
           face: { enabled: true, mesh: true, iris: true, description: true },
           body: { enabled: false },
           hand: { enabled: false },
