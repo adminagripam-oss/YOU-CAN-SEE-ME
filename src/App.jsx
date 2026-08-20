@@ -211,14 +211,9 @@ function AppContent() {
     setIsSyncing(false);
   };
 
-  // Service Worker Registration for PWA & Network Listener Setup
+  // Network Listener Setup
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('./sw.js')
-        .then((reg) => console.log('[PWA SW Registered]', reg.scope))
-        .catch((err) => console.warn('[PWA SW Register Error]', err));
-    }
+
 
     const updateOnlineStatus = () => {
       setIsOnline(navigator.onLine);
