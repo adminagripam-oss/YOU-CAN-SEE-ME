@@ -445,4 +445,31 @@ Pemberitahuan pembaruan versi **v2.7.0** menandai peluncuran pemrosesan Face Mes
 * **tsconfig.json**: Menambahkan berkas konfigurasi [tsconfig.json](file:///d:/FACE%20VERIFICATION/tsconfig.json) dengan opsi `"jsx": "react-jsx"` dan `"allowJs": true` agar editor mengenali sintaks JSX/React dan file JS/TS secara hibrida.
 * **Vite DevDependencies**: Mendaftarkan tipe data `@types/react` dan `@types/react-dom` di `package.json` untuk menghilangkan seluruh peringatan error deklarasi tipe di tingkat IDE.
 
+---
+
+## 15. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.8.0)
+
+Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching pada PWA Service Worker, sinkronisasi state relasi log pasca-penghapusan karyawan, navigasi tanggal langkah demi langkah pada dashboard utama, dan pembuatan sidebar mini-ikon responsif (desktop & mobile) yang persisten:
+
+### 15.1 Bypass Caching Service Worker untuk Endpoint Database Supabase
+* **Pencegahan Stale Data**: Menambahkan aturan bypass cache pada file [sw.js](file:///d:/FACE%20VERIFICATION/public/sw.js) untuk semua permintaan dengan hostname `*.supabase.co`.
+* **Penyelesaian Bug "2 Kali Klik"**: Menghilangkan efek tertundanya pembaruan frontend yang disebabkan oleh strategi caching *Stale-While-Revalidate* milik Service Worker. Data karyawan dan log absensi yang telah dihapus atau diperbarui kini langsung direfleksikan seketika pada pemanggilan pertama.
+
+### 15.2 Sinkronisasi Log Absensi pada Penghapusan Karyawan
+* **Sinkronisasi cascading frontend**: Meneruskan fungsi `refreshLogs()` dari [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) ke [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx).
+* **Real-time State Update**: Secara otomatis memicu penyegaran state logs absensi sesaat setelah penghapusan karyawan berhasil dilakukan di Supabase, memastikan data log terkait (yang terpengaruh aturan `ON DELETE CASCADE` di database cloud) langsung hilang dari UI absensi tanpa perlu melakukan reload halaman browser.
+
+### 15.3 Navigasi Tanggal Langkah Demi Langkah (Date Stepping) pada Dashboard
+* **Tombol Navigasi Cepat**: Menambahkan tombol panah navigasi `<` (Hari Sebelumnya) dan `>` (Hari Berikutnya) yang mendampingi pemilih tanggal custom pada file [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx).
+* **Pembaruan Metrik Real-time**: Mengatur pemutakhiran state tanggal secara berurutan hari demi hari yang langsung memengaruhi filter log absensi, KPI kepegawaian harian, diagram lingkaran komposisi, dan tabel riwayat transaksi secara real-time.
+
+### 15.4 Collapsible Mini-Icon Sidebar untuk Desktop & Mobile
+* **Mode Ramping 72px**: Mengubah visualisasi sidebar saat ditutup agar menyusut menjadi lebar `72px` (hanya menampilkan ikon menu utama dan logo fingerprint) secara konsisten di desktop maupun mobile, alih-alih bersembunyi sepenuhnya dari layar.
+* **Layout Adaptif Mobile**: Menggeser area utama workspace (`.dashboard-main-area`) sebesar `padding-left: 72px` pada lebar layar handphone ($\le 768$px) untuk mencegah sidebar mengambang yang menutupi konten aplikasi.
+* **Z-Index Penimpaan**: Menetapkan `z-index: 100` pada sidebar mobile agar ketika dibuka/diperluas, sidebar meluncur lancar di atas area header dan topbar.
+
+### 15.5 Persistensi Status Sidebar melalui LocalStorage
+* **Pencegahan Reset State**: Membaca dan menulis status lipatan sidebar (`sidebarOpen`) ke `localStorage` pada file [DashboardLayout.jsx](file:///d:/FACE%20VERIFICATION/src/layouts/DashboardLayout.jsx).
+* **Router Remount Immunity**: Menjamin sidebar tetap mempertahankan bentuk terakhirnya (lebar penuh `240px` atau ramping `72px`) saat pengguna berpindah menu navigasi dari/ke halaman absensi umum yang memicu penggantian (*remounting*) komponen layout dari React Router.
+
 
