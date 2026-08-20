@@ -349,57 +349,59 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           </div>
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>NIK</TableHead>
-              <TableHead>Nama</TableHead>
-              <TableHead>Afdeling</TableHead>
-              <TableHead>Nama Kebun</TableHead>
-              <TableHead>Jabatan</TableHead>
-              <TableHead>Status TK</TableHead>
-              <TableHead>Status Pernikahan</TableHead>
-              <TableHead>Biometrik</TableHead>
-              <TableHead className="no-print">Aksi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredEmployees.length === 0 ? (
+        <div className="table-container" style={{ marginTop: 0 }}>
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={9} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
+                <TableHead>NIK</TableHead>
+                <TableHead>Nama</TableHead>
+                <TableHead>Afdeling</TableHead>
+                <TableHead>Nama Kebun</TableHead>
+                <TableHead>Jabatan</TableHead>
+                <TableHead>Status TK</TableHead>
+                <TableHead>Status Pernikahan</TableHead>
+                <TableHead>Biometrik</TableHead>
+                <TableHead className="no-print">Aksi</TableHead>
               </TableRow>
-            ) : (
-              filteredEmployees.map((emp) => (
-                <TableRow key={emp.id}>
-                  <TableCell className="font-medium">{emp.nik}</TableCell>
-                  <TableCell>{emp.name}</TableCell>
-                  <TableCell>{emp.afdeling || '-'}</TableCell>
-                  <TableCell>{emp.nama_kebun || '-'}</TableCell>
-                  <TableCell>{emp.jabatan || emp.department || '-'}</TableCell>
-                  <TableCell>{emp.status_tk || '-'}</TableCell>
-                  <TableCell>{emp.status_perkawinan || '-'}</TableCell>
-                  <TableCell>
-                    {emp.has_master_biometric ? (
-                      <span className="status-badge success">Siap</span>
-                    ) : (
-                      <span className="status-badge fail">Belum</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="no-print">
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit">
-                        <Edit2 size={18} color="var(--accent-cyan)" />
-                      </button>
-                      <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Hapus">
-                        <Trash2 size={18} color="var(--accent-error)" />
-                      </button>
-                    </div>
-                  </TableCell>
+            </TableHeader>
+            <TableBody>
+              {filteredEmployees.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                filteredEmployees.map((emp) => (
+                  <TableRow key={emp.id}>
+                    <TableCell className="font-medium">{emp.nik}</TableCell>
+                    <TableCell>{emp.name}</TableCell>
+                    <TableCell>{emp.afdeling || '-'}</TableCell>
+                    <TableCell>{emp.nama_kebun || '-'}</TableCell>
+                    <TableCell>{emp.jabatan || emp.department || '-'}</TableCell>
+                    <TableCell>{emp.status_tk || '-'}</TableCell>
+                    <TableCell>{emp.status_perkawinan || '-'}</TableCell>
+                    <TableCell>
+                      {emp.has_master_biometric ? (
+                        <span className="status-badge success">Siap</span>
+                      ) : (
+                        <span className="status-badge fail">Belum</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="no-print">
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit">
+                          <Edit2 size={18} color="var(--accent-cyan)" />
+                        </button>
+                        <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Hapus">
+                          <Trash2 size={18} color="var(--accent-error)" />
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {/* Modal Edit Data Karyawan (Sama seperti sebelumnya) */}

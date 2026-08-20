@@ -1601,5 +1601,21 @@ footer {
   opacity: 0.6;
   cursor: not-allowed;
 }
+/* Responsive Table container to allow horizontal scrolling on small screens */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 1rem;
+}
 
+.table-container table {
+  width: 100%;
+  min-width: 850px; /* Forces table to maintain full desktop columns on narrow viewports */
+  border-collapse: collapse;
+}
 
+.table-container th,
+.table-container td {
+  white-space: nowrap; /* Prevents text wrapping in cells, keeping columns readable */
+}
