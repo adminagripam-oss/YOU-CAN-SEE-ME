@@ -482,8 +482,17 @@ Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching p
 * **Proyek Android Studio**: Menambahkan platform `@capacitor/android` ke folder `android/` agar dapat di-compile langsung di Android Studio menjadi file `.apk`.
 * **Registrasi Izin Hardware & Storage**: Memperbarui file [AndroidManifest.xml](file:///d:/FACE%20VERIFICATION/android/app/src/main/AndroidManifest.xml) untuk mendaftarkan izin Kamera (`CAMERA`), Geolokasi GPS Akurat (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`), dan Penyimpanan File Internal (`WRITE_EXTERNAL_STORAGE`, `READ_EXTERNAL_STORAGE`).
 
-### 15.8 Lokalisasi Model AI Biometrik Wajah untuk Operasional Offline Mandiri
+### 15.8 Lokalisasi Model AI Biometrik Wajah & Arsitektur Human Singleton
 * **Penyimpanan Lokal Model**: Memindahkan model-model wajah biometrik (`blazeface`, `facemesh`, `iris`, `faceres`, `models.json`) dari pustaka `@vladmandic/human` ke dalam folder lokal [public/models/](file:///d:/FACE%20VERIFICATION/public/models) agar terkemas secara fisik di dalam berkas APK.
-* **Pengalihan Jalur Unduhan (Bypass CDN)**: Memperbarui [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) untuk mengarahkan `modelBasePath` ke `./models` (jalur relatif lokal) menggantikan tautan cloud JSDelivr CDN lama.
-* **Pre-caching pada Service Worker**: Menambahkan berkas model lokal ke dalam daftar aset pre-cache pada [sw.js](file:///d:/FACE%20VERIFICATION/public/sw.js) guna mendukung operasional luring (offline) PWA pada browser ponsel.
-* **Hasil Akhir**: Pemindai wajah di halaman absensi kini dapat dimuat secara instan (kurang dari 1 detik) tanpa membutuhkan koneksi internet atau data seluler sama sekali.
+* **Arsitektur Human Singleton**: Membuat berkas [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) untuk mengelola satu instansiasi `Human` tunggal di seluruh aplikasi guna mencegah konflik memori GPU WebGL TensorFlow.js.
+* **Strategi Pemuatan 3-Tier Fallback**: Mengimplementasikan `loadHumanWithFallback()` yang memuat model secara hierarkis: Origin Domain Lokal (`window.location.origin + '/models'`) -> Jalur Relatif (`./models`) -> Cloud CDN JSDelivr (`https://cdn.jsdelivr.net/...`).
+* **Konfigurasi HTTPS WebView**: Mengatur `server.androidScheme: 'https'` pada [capacitor.config.ts](file:///d:/FACE%20VERIFICATION/capacitor.config.ts) untuk menjamin konteks aman (*Secure Context*) sehingga API kamera `navigator.mediaDevices.getUserMedia` diizinkan aktif di Android WebView.
+
+### 15.9 Permintaan Izin Hardware OS Native pada Startup Aplikasi
+* **Registrasi OS Native Runtime Permission**: Meng-override metode `onCreate` pada [MainActivity.java](file:///d:/FACE%20VERIFICATION/android/app/src/main/java/com/agriface/app/MainActivity.java) untuk meminta izin Kamera (`CAMERA`) dan Geolokasi GPS (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`) secara langsung ke sistem operasi Android saat pertama kali aplikasi dibuka.
+* **Pencegahan Pemblokiran Kamera WebView**: Menjamin browser internal Android WebView mendapatkan wewenang native dari OS sebelum halaman absensi memanggil `getUserMedia()`, sehingga pemindai wajah terbuka lancar tanpa terhambat status *Permission Denied*.
+
+### 15.10 Pembekuan Layout Sidebar (*Sticky*) & Relokasi Tombol Logout
+* **Pembekuan Kolom Navigasi (Sticky Sidebar)**: Menambahkan aturan CSS `position: sticky; top: 0; height: 100vh; overflow-y: auto;` pada [index.css](file:///d:/FACE%20VERIFICATION/src/index.css) untuk `.app-sidebar`. Kolom ikon navigasi kini tetap diam (*freeze*) melayang di layar saat konten utama di-scroll ke bawah.
+* **Relokasi Tombol Logout**: Memindahkan tombol **Logout** pada [Sidebar.jsx](file:///d:/FACE%20VERIFICATION/src/components/Sidebar.jsx) dari bagian footer ke dalam kelompok navigasi utama tepat di bawah menu *Log Absensi*.
+* **Penanganan Logout & Proteksi Rute Kunci**: Mengintegrasikan `logout()` di [AuthContext.jsx](file:///d:/FACE%20VERIFICATION/src/context/AuthContext.jsx) dengan [ProtectedRoute.jsx](file:///d:/FACE%20VERIFICATION/src/components/ProtectedRoute.jsx) untuk menjamin pembersihan sesi penuh (`localStorage.removeItem('logged_in_admin')`) dan pengarahan paksa instan dari halaman mana pun ke [LoginPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LoginPage.jsx).
