@@ -9,8 +9,9 @@ export default function Sidebar({ isOpen, onClose }) {
   return (
     <>
       <aside className={`app-sidebar ${isOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
-        <div className="sidebar-brand">
-          <div className="brand-text">
+        <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <i className="fa-solid fa-fingerprint" style={{ fontSize: '1.5rem', color: 'var(--accent-cyan)', flexShrink: 0 }}></i>
+          <div className="brand-text" style={{ transition: 'opacity 0.2s ease' }}>
             <h2>AgriFace</h2>
             <p>1-to-1 Biometric Engine</p>
           </div>

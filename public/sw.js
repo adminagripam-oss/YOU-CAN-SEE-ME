@@ -56,6 +56,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Bypass cache completely for Supabase requests (Direct DB queries)
+  if (url.hostname.includes('supabase.co')) {
+    return;
+  }
+
   // Strategy 1: Human Models & MediaPipe CDN Cache (Cache-First)
   if (
     url.href.includes('vladmandic/human') ||

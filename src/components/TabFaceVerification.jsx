@@ -1306,7 +1306,7 @@ export default function TabFaceVerification({
           hasAutoSubmittedRef.current = true;
           const currentStatus = attendanceStatusRef.current;
           const attendanceType = (currentStatus.checkedIn || currentStatus.checkInTime) ? 'CHECK_OUT' : 'CHECK_IN';
-          
+
           if (handleVerifySubmitRef.current) {
             handleVerifySubmitRef.current(attendanceType);
           }
@@ -1542,7 +1542,7 @@ export default function TabFaceVerification({
         }
       } catch (apiErr) {
         console.warn('[SERVER API WARN – FALLBACK TO DIRECT SUPABASE]:', apiErr.message);
-        
+
         // Tier 2: Direct Supabase Cloud insert fallback
         try {
           const logPayload = {

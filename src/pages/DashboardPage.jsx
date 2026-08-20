@@ -7,6 +7,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   
   // Date Filter State (default to today YYYY-MM-DD)
   const todayStr = new Date().toISOString().split('T')[0];
+  const yesterdayStr = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  })();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedSegment, setSelectedSegment] = useState(null);
 
@@ -73,6 +78,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     setSelectedDate(d.toISOString().split('T')[0]);
   };
 
+  // Adjust Date by Days (+1 or -1)
+  const adjustDate = (days) => {
+    const current = new Date(selectedDate);
+    if (isNaN(current.getTime())) return;
+    current.setDate(current.getDate() + days);
+    setSelectedDate(current.toISOString().split('T')[0]);
+  };
+
   return (
     <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
       {/* DATE FILTER HEADER BAR - DYNAMIC REAL-TIME BINDING */}
@@ -80,28 +93,12 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <i className="fa-solid fa-calendar-days" style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}></i>
           <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-            Filter Tanggal:
+            Navigasi Tanggal Absensi:
           </span>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-primary)',
-              color: 'var(--text-main)',
-              fontSize: '0.85rem',
-              fontWeight: 700,
-              outline: 'none',
-              cursor: 'pointer'
-            }}
-          />
         </div>
 
-        {/* Quick Presets */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        {/* Unified Tab Navigation Group */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={handleSetToday}
@@ -112,9 +109,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
               fontWeight: 700,
               background: selectedDate === todayStr ? 'var(--accent-primary)' : 'var(--bg-primary)',
               color: selectedDate === todayStr ? '#ffffff' : 'var(--text-muted)',
-              border: '1px solid var(--border-color)',
+              border: selectedDate === todayStr ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
               cursor: 'pointer',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              boxShadow: selectedDate === todayStr ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none'
             }}
           >
             Hari Ini
@@ -127,15 +125,80 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
               borderRadius: '8px',
               fontSize: '0.8rem',
               fontWeight: 700,
-              background: 'var(--bg-primary)',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border-color)',
+              background: selectedDate === yesterdayStr ? 'var(--accent-primary)' : 'var(--bg-primary)',
+              color: selectedDate === yesterdayStr ? '#ffffff' : 'var(--text-muted)',
+              border: selectedDate === yesterdayStr ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
               cursor: 'pointer',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              boxShadow: selectedDate === yesterdayStr ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none'
             }}
           >
             Kemarin
           </button>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>Custom:</span>
+            
+            {/* Previous Day Arrow Button */}
+            <button
+              type="button"
+              onClick={() => adjustDate(-1)}
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                color: 'var(--text-muted)',
+                padding: '6px 10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              title="Hari Sebelumnya"
+            >
+              <i className="fa-solid fa-chevron-left" style={{ fontSize: '0.8rem' }}></i>
+            </button>
+
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                background: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-primary)',
+                color: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? 'var(--text-main)' : 'var(--text-muted)',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                outline: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            />
+
+            {/* Next Day Arrow Button */}
+            <button
+              type="button"
+              onClick={() => adjustDate(1)}
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                color: 'var(--text-muted)',
+                padding: '6px 10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              title="Hari Berikutnya"
+            >
+              <i className="fa-solid fa-chevron-right" style={{ fontSize: '0.8rem' }}></i>
+            </button>
+          </div>
         </div>
       </div>
 
