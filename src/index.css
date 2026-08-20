@@ -1038,6 +1038,11 @@ footer {
   padding: 1.25rem 1rem;
   flex-shrink: 0;
   transition: all 0.3s ease;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 95;
+  overflow-y: auto;
 }
 
 .sidebar-brand {
