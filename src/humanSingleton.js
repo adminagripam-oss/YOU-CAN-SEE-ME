@@ -34,12 +34,21 @@ const humanConfig = {
     mesh: { enabled: true },
     iris: { enabled: false },
     description: { enabled: true },
+    
+    // EXPLICIT FIXED: Nonaktifkan semua sub-model yang tidak dipakai 
+    // agar human.load() tidak mencari file model (.json/.bin) yang tidak ada di server/APK
+    emotion: { enabled: false },
+    liveness: { enabled: false },
+    antispoof: { enabled: false },
+    age: { enabled: false },
+    gender: { enabled: false },
   },
 
   body: { enabled: false },
   hand: { enabled: false },
   object: { enabled: false },
   gesture: { enabled: false },
+  segmentation: { enabled: false },
 
   backend: 'webgl',
   warmup: 'none',
