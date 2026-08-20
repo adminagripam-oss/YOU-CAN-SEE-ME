@@ -601,6 +601,7 @@ export default function TabFaceVerification({
   const selectedEmployeeIdRef = useRef('');
   const livenessChallengeRef = useRef('');
   const scoreHistoryRef = useRef([]);
+  const [debugAiInfo, setDebugAiInfo] = useState({ backend: 'webgl', faces: 0, nodes: 0 });
 
   // ── Mobile Performance Optimization Refs ─────────────────────────────────
   // [TASK 3] Riwayat timestamp tiap frame untuk menghitung FPS aktual
@@ -1133,6 +1134,11 @@ export default function TabFaceVerification({
    * tidak ada perubahan pada flow submit & state management.
    */
   const onFaceProcessed = useCallback(({ detection, smoothedMesh, normalizedMesh, boundingBox, ctx }) => {
+    setDebugAiInfo({
+      backend: human.tf?.getBackend?.() || 'webgl',
+      faces: 1,
+      nodes: smoothedMesh?.length || 0,
+    });
     // ── Lighting Check ────────────────────────────────────────────────────
     const lightingStatus = checkLightingQuality(videoRef.current);
     setLightingWarning(lightingStatus);
@@ -1348,6 +1354,11 @@ export default function TabFaceVerification({
   const onNoFace = useCallback(() => {
     currentDescRef.current = null;
     setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+    setDebugAiInfo({
+      backend: human.tf?.getBackend?.() || 'webgl',
+      faces: 0,
+      nodes: 0,
+    });
   }, []);
 
   /** Callback jika kamera gagal dibuka */
@@ -1775,6 +1786,36 @@ export default function TabFaceVerification({
                   className="overlay-canvas"
                   style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
                 ></canvas>
+
+                {/* ── Real-Time On-Screen AI Diagnostic Badge ──────────── */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '10px',
+                    left: '10px',
+                    zIndex: 20,
+                    background: 'rgba(15, 23, 42, 0.88)',
+                    backdropFilter: 'blur(4px)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '8px',
+                    padding: '4px 10px',
+                    color: '#fff',
+                    fontSize: '0.72rem',
+                    fontFamily: 'monospace',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: debugAiInfo.faces > 0 ? '#10b981' : '#f59e0b' }}></span>
+                  <span>AI: {debugAiInfo.backend}</span>
+                  <span>|</span>
+                  <span>Wajah: {debugAiInfo.faces}</span>
+                  <span>|</span>
+                  <span>Mesh: {debugAiInfo.nodes} pts</span>
+                </div>
 
                 {/* ── GPS Granted Badge (koordinat live di bawah kamera) ───── */}
                 {gpsPermission === 'granted' && liveCoords && (

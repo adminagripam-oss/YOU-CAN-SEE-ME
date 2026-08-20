@@ -14,8 +14,7 @@ const humanConfig = {
   modelBasePath: window.location.origin + '/models',
 
   env: {
-    // Paksa FP16 di semua perangkat untuk konsistensi vektor biometrik
-    WEBGL_FORCE_F16_TEXTURES: true,
+    // Biarkan Human AI mendeteksi presisi WebGL GPU secara otomatis per-device
   },
 
   face: {
