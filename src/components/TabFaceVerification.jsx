@@ -1078,12 +1078,11 @@ export default function TabFaceVerification({
 
     // Phased Biometric Flow: Aktifkan ekstraksi embedding HANYA jika liveness sudah beres & wajah stabil
     const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
+    if (human.config?.face?.description) {
+      human.config.face.description.enabled = shouldExtractEmbedding;
+    }
 
-    const result = await human.detect(inputCanvas, {
-      face: {
-        description: { enabled: shouldExtractEmbedding }
-      }
-    });
+    const result = await human.detect(inputCanvas);
 
     // [TASK 5] Dev-only: catat durasi inferensi
     if (import.meta.env.DEV) {
