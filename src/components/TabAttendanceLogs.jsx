@@ -365,7 +365,7 @@ export default function TabAttendanceLogs({
         .freeze-table-header td,
         .freeze-table-header th *,
         .freeze-table-header td * {
-          font-family: 'Consolas', Courier, monospace !important;
+          font-family: Arial, Helvetica, sans-serif !important;
           font-size: 12px !important;
           text-align: center !important;
           vertical-align: middle !important;
