@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgriFace - Sistem Absensi Biometrik Wajah Perkebunan (1-to-1 Engine)</title>
+
+    <!-- Script untuk membersihkan PWA Service Worker otomatis -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let registration of registrations) {
+                    registration.unregister();
+                    console.log('ServiceWorker unregistered automatically to clear cache.');
+                }
+            });
+        }
+    </script>
+
+    <!-- PWA Setup -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="apple-touch-icon" href="/logo.png">
+    <meta name="apple-mobile-web-app-title" content="AgriFace">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="AgriFace">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome Icons -->
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+
+
+    <!-- @vladmandic/human: dimuat LANGSUNG dari file statis (bukan di-bundle Vite)
+       KRITIS: Vite/Rollup merusak internal TF.js kernel registry saat bundle.
+       Dengan memuat sebagai script eksternal, library bekerja as-is tanpa transformasi. -->
+    <script type="module">
+        import(/* @vite-ignore */ '/human.esm.js')
+            .then((mod) => {
+                window.HumanLib = { Human: mod.Human };
+                console.log('[HTML] window.HumanLib berhasil dimuat dari /human.esm.js');
+            })
+            .catch((err) => console.error('[HTML] Gagal memuat /human.esm.js:', err));
+    </script>
+
+    <!-- Developer Console Virtual (Eruda) untuk debugging langsung di layar HP/Tablet -->
+    <script src="/eruda.js"></script>
+    <script>eruda.init();</script>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+</body>
+
+</html>

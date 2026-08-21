@@ -100,6 +100,7 @@ export default function TabAttendanceLogs({
           nik: log.nik,
           name: log.name,
           department: log.department,
+          afdeling: log.afdeling || '-',
           checkIn: '-',
           checkOut: '-',
           durasi: null,
@@ -272,7 +273,7 @@ export default function TabAttendanceLogs({
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
     let csvContent = "data:text/csv;charset=utf-8,Tanggal,NIK,Nama Karyawan,Afdeling,Check In,Check Out,Durasi,Keterangan,Lokasi\n";
     filteredLogs.forEach(row => {
-      csvContent += `${row.displayDate},${row.nik},${row.name},${row.department},${row.checkIn},${row.checkOut},${row.durasi ? formatDurasi(row.durasi) : '-'},${row.keterangan},"${row.lokasi}"\n`;
+      csvContent += `${row.displayDate},${row.nik},${row.name},${row.afdeling},${row.checkIn},${row.checkOut},${row.durasi ? formatDurasi(row.durasi) : '-'},${row.keterangan},"${row.lokasi}"\n`;
     });
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -366,7 +367,7 @@ export default function TabAttendanceLogs({
                   <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                   <TableCell className="nik-cell">{log.nik}</TableCell>
                   <TableCell>{log.name}</TableCell>
-                  <TableCell style={{ color: 'var(--text-muted)' }}>{log.department}</TableCell>
+                  <TableCell style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
                   <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
                   <TableCell>
                     {log.durasi ? (

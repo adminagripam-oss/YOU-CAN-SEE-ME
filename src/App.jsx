@@ -160,7 +160,7 @@ function AppContent() {
           if (empIds.length > 0) {
             const { data: empData } = await supabase
               .from('employees')
-              .select('id, nik, name, department')
+              .select('id, nik, name, department, afdeling')
               .in('id', empIds);
             if (empData) {
               empMap = new Map(empData.map((e) => [e.id, e]));
@@ -177,7 +177,8 @@ function AppContent() {
               attendance_type: typeLabel,
               nik: emp.nik || log.nik || '-',
               name: emp.name || log.name || `Karyawan #${log.employee_id}`,
-              department: emp.department || log.department || '-'
+              department: emp.department || log.department || '-',
+              afdeling: emp.afdeling || log.afdeling || '-'
             };
           });
         }
