@@ -267,14 +267,14 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     const tableHtml = `
       <table border="1">
         <thead>
-          <tr style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; height: 30px;">
-            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; text-align: left; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
+          <tr style="height: 30px;">
+            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
           ${rows.map(row => `
-            <tr style="font-family: 'Consolas'; font-size: 12px; height: 24px;">
-              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 12px; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
+            <tr style="height: 24px;">
+              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 12px; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
             </tr>
           `).join('')}
         </tbody>
@@ -328,13 +328,18 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     <div style={{ width: '100%', padding: '1rem', boxSizing: 'border-box' }} className="print-container">
       {/* Table & Print Styles */}
       <style>{`
+        .freeze-table-header th, .freeze-table-header td {
+          font-family: 'Consolas', Courier, monospace !important;
+          font-size: 12px !important;
+          text-align: center !important;
+          vertical-align: middle !important;
+        }
+
         .freeze-table-header th {
           position: sticky !important;
           top: 0 !important;
           background-color: #46bdc6 !important;
           color: #ffffff !important;
-          font-family: 'Consolas', Courier, monospace !important;
-          font-size: 12px !important;
           font-weight: bold !important;
           z-index: 5 !important;
           text-transform: uppercase !important;
@@ -363,6 +368,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             color: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          .freeze-table-header th, .freeze-table-header td {
+            font-family: 'Consolas', Courier, monospace !important;
+            font-size: 12px !important;
+            text-align: center !important;
+            vertical-align: middle !important;
           }
         }
       `}</style>
