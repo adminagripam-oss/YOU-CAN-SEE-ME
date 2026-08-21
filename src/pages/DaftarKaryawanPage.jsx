@@ -10,6 +10,8 @@ import {
 } from "../components/ui/table";
 import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector } from '../db';
@@ -247,10 +249,6 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   // Export Logic (Formatted Excel & PDF Printout)
   // ---------------------------------
   const exportToCSV = () => {
-    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
-      showToast('Fitur Dibatasi', 'Ekspor Excel tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mengunduh.', 'warning');
-      return;
-    }
     if (filteredEmployees.length === 0) {
       showToast('Data Kosong', 'Tidak ada data untuk diekspor.', 'warning');
       return;
@@ -316,21 +314,155 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       </html>
     `;
 
+    const fileName = `Data_Karyawan_${new Date().toISOString().split('T')[0]}.xls`;
+
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      try {
+        const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            const base64Data = reader.result.split(',')[1];
+            const fileResult = await Filesystem.writeFile({
+              path: fileName,
+              data: base64Data,
+              directory: Directory.Cache
+            });
+            await Share.share({
+              title: 'Bagikan File Excel',
+              text: `File Excel Karyawan: ${fileName}`,
+              url: fileResult.uri,
+              dialogTitle: 'Kirim / Simpan Excel'
+            });
+          } catch (err) {
+            showToast('Gagal Simpan', `Error: ${err.message}`, 'error');
+          }
+        };
+      } catch (err) {
+        showToast('Gagal Ekspor', `Error: ${err.message}`, 'error');
+      }
+      return;
+    }
+
     const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Data_Karyawan_${new Date().toISOString().split('T')[0]}.xls`);
+    link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   const exportToPDF = () => {
+    const headers = ['NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan'];
+    const rows = filteredEmployees.map(emp => [
+      emp.nik || '',
+      emp.name || '',
+      emp.afdeling || '',
+      emp.nama_kebun || '',
+      emp.jabatan || emp.department || '',
+      emp.status_tk || '',
+      emp.status_perkawinan || ''
+    ]);
+
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Cetak Data Karyawan</title>
+          <style>
+            @page {
+              size: landscape;
+              margin: 10mm;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              font-family: 'Consolas', Courier, monospace;
+              font-size: 14px;
+            }
+            h3 {
+              text-align: center;
+              margin-bottom: 20px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 8px;
+              text-align: center;
+              vertical-align: middle;
+            }
+            th {
+              background-color: #46bdc6 !important;
+              color: white !important;
+              font-weight: bold;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          </style>
+        </head>
+        <body>
+          <h3>Data Master Karyawan</h3>
+          <table>
+            <thead>
+              <tr>
+                ${headers.map(h => `<th>${h}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => `
+                <tr>
+                  ${row.map(cell => `<td>${cell}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() {
+              window.print();
+            }
+          </script>
+        </body>
+      </html>
+    `;
+
+    const fileName = `Cetak_Data_Karyawan_${new Date().toISOString().split('T')[0]}.html`;
+
     if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
-      showToast('Fitur Dibatasi', 'Cetak PDF tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mencetak PDF.', 'warning');
+      try {
+        const blob = new Blob([printHtml], { type: 'text/html' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            const base64Data = reader.result.split(',')[1];
+            const fileResult = await Filesystem.writeFile({
+              path: fileName,
+              data: base64Data,
+              directory: Directory.Cache
+            });
+            await Share.share({
+              title: 'Cetak Laporan PDF',
+              text: `Buka file ini di Chrome HP untuk mencetak ke PDF`,
+              url: fileResult.uri,
+              dialogTitle: 'Kirim / Buka File Cetak'
+            });
+          } catch (err) {
+            showToast('Gagal Cetak', `Error: ${err.message}`, 'error');
+          }
+        };
+      } catch (err) {
+        showToast('Gagal Cetak', `Error: ${err.message}`, 'error');
+      }
       return;
     }
+
     window.print();
   };
 

@@ -10,6 +10,8 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock } from 'lucide-react';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 function formatDurasi(durasi) {
   if (!durasi) return '-';
@@ -270,10 +272,6 @@ export default function TabAttendanceLogs({
 
   // EXPORT EXCEL (Formatted XLS)
   const exportToCSV = () => {
-    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
-      showToast('Fitur Dibatasi', 'Ekspor Excel tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mengunduh.', 'warning');
-      return;
-    }
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
     
     const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
@@ -336,11 +334,42 @@ export default function TabAttendanceLogs({
       </html>
     `;
 
+    const fileName = `Riwayat_Absensi_${new Date().toISOString().split('T')[0]}.xls`;
+
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      try {
+        const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            const base64Data = reader.result.split(',')[1];
+            const fileResult = await Filesystem.writeFile({
+              path: fileName,
+              data: base64Data,
+              directory: Directory.Cache
+            });
+            await Share.share({
+              title: 'Bagikan File Excel',
+              text: `File Excel Absensi: ${fileName}`,
+              url: fileResult.uri,
+              dialogTitle: 'Kirim / Simpan Excel'
+            });
+          } catch (err) {
+            showToast('Gagal Simpan', `Error: ${err.message}`, 'error');
+          }
+        };
+      } catch (err) {
+        showToast('Gagal Ekspor', `Error: ${err.message}`, 'error');
+      }
+      return;
+    }
+
     const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Riwayat_Absensi_${new Date().toISOString().split('T')[0]}.xls`);
+    link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -348,10 +377,115 @@ export default function TabAttendanceLogs({
 
   // EXPORT PDF
   const exportToPDF = () => {
+    const headers = ['Tanggal', 'Check In', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
+    const rows = filteredLogs.map(row => [
+      row.displayDate,
+      row.checkIn,
+      row.nik,
+      row.name,
+      row.afdeling,
+      row.checkOut,
+      row.durasi ? formatDurasi(row.durasi) : '-',
+      row.keterangan,
+      row.lokasi || '-'
+    ]);
+
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Cetak Riwayat Absensi</title>
+          <style>
+            @page {
+              size: landscape;
+              margin: 10mm;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              font-family: 'Consolas', Courier, monospace;
+              font-size: 14px;
+            }
+            h3 {
+              text-align: center;
+              margin-bottom: 20px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 8px;
+              text-align: center;
+              vertical-align: middle;
+            }
+            th {
+              background-color: #46bdc6 !important;
+              color: white !important;
+              font-weight: bold;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          </style>
+        </head>
+        <body>
+          <h3>Riwayat Log Absensi Biometrik</h3>
+          <table>
+            <thead>
+              <tr>
+                ${headers.map(h => `<th>${h}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => `
+                <tr>
+                  ${row.map(cell => `<td>${cell}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() {
+              window.print();
+            }
+          </script>
+        </body>
+      </html>
+    `;
+
+    const fileName = `Cetak_Riwayat_Absensi_${new Date().toISOString().split('T')[0]}.html`;
+
     if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
-      showToast('Fitur Dibatasi', 'Cetak PDF tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mencetak PDF.', 'warning');
+      try {
+        const blob = new Blob([printHtml], { type: 'text/html' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            const base64Data = reader.result.split(',')[1];
+            const fileResult = await Filesystem.writeFile({
+              path: fileName,
+              data: base64Data,
+              directory: Directory.Cache
+            });
+            await Share.share({
+              title: 'Cetak Laporan PDF',
+              text: `Buka file ini di Chrome HP untuk mencetak ke PDF`,
+              url: fileResult.uri,
+              dialogTitle: 'Kirim / Buka File Cetak'
+            });
+          } catch (err) {
+            showToast('Gagal Cetak', `Error: ${err.message}`, 'error');
+          }
+        };
+      } catch (err) {
+        showToast('Gagal Cetak', `Error: ${err.message}`, 'error');
+      }
       return;
     }
+
     window.print();
   };
 
