@@ -290,13 +290,13 @@ export default function TabAttendanceLogs({
       <table border="1">
         <thead>
           <tr style="height: 30px;">
-            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12pt; font-weight: bold; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
+            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 14pt; font-weight: bold; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
           ${rows.map(row => `
             <tr style="height: 24px;">
-              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 12pt; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
+              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 14pt; text-align: center; vertical-align: middle; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
             </tr>
           `).join('')}
         </tbody>
@@ -366,7 +366,7 @@ export default function TabAttendanceLogs({
         .freeze-table-header th *,
         .freeze-table-header td * {
           font-family: Arial, Helvetica, sans-serif !important;
-          font-size: 12px !important;
+          font-size: 14px !important;
           text-align: center !important;
           vertical-align: middle !important;
         }
@@ -410,7 +410,7 @@ export default function TabAttendanceLogs({
           .freeze-table-header th *,
           .freeze-table-header td * {
             font-family: 'Consolas', Courier, monospace !important;
-            font-size: 12px !important;
+            font-size: 14px !important;
             text-align: center !important;
             vertical-align: middle !important;
           }
