@@ -492,7 +492,7 @@ export default function TabAttendanceLogs({
               <TableHead>Durasi</TableHead>
               <TableHead>Keterangan</TableHead>
               <TableHead>Lokasi</TableHead>
-              <TableHead>Aksi</TableHead>
+              <TableHead className="no-print">Aksi</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -559,7 +559,7 @@ export default function TabAttendanceLogs({
                       );
                     })()}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="no-print">
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
                         <Edit2 size={14} />
