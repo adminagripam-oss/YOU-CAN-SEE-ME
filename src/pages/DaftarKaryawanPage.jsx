@@ -480,7 +480,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                 <TableHead>Jabatan</TableHead>
                 <TableHead>Status TK</TableHead>
                 <TableHead>Status Pernikahan</TableHead>
-                <TableHead>Biometrik</TableHead>
+                <TableHead className="no-print">Biometrik</TableHead>
                 <TableHead className="no-print">Aksi</TableHead>
               </TableRow>
             </TableHeader>
@@ -499,7 +499,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     <TableCell>{emp.jabatan || emp.department || '-'}</TableCell>
                     <TableCell>{emp.status_tk || '-'}</TableCell>
                     <TableCell>{emp.status_perkawinan || '-'}</TableCell>
-                    <TableCell>
+                    <TableCell className="no-print">
                       {emp.has_master_biometric ? (
                         <span className="status-badge success">Siap</span>
                       ) : (
