@@ -242,7 +242,8 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   });
 
   // ---------------------------------
-  // Export Logic
+  // ---------------------------------
+  // Export Logic (Formatted Excel & PDF Printout)
   // ---------------------------------
   const exportToCSV = () => {
     if (filteredEmployees.length === 0) {
@@ -250,40 +251,97 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       return;
     }
     
-    // Headers
     const headers = ['NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan', 'Biometrik Siap'];
     
-    // Rows
     const rows = filteredEmployees.map(emp => [
-      `"${emp.nik || ''}"`,
-      `"${emp.name || ''}"`,
-      `"${emp.afdeling || ''}"`,
-      `"${emp.nama_kebun || ''}"`,
-      `"${emp.jabatan || emp.department || ''}"`,
-      `"${emp.status_tk || ''}"`,
-      `"${emp.status_perkawinan || ''}"`,
-      `"${emp.has_master_biometric ? 'Ya' : 'Tidak'}"`
+      emp.nik || '',
+      emp.name || '',
+      emp.afdeling || '',
+      emp.nama_kebun || '',
+      emp.jabatan || emp.department || '',
+      emp.status_tk || '',
+      emp.status_perkawinan || '',
+      emp.has_master_biometric ? 'Ya' : 'Tidak'
     ]);
-    
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+
+    const tableHtml = `
+      <table border="1">
+        <thead>
+          <tr style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; height: 30px;">
+            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; text-align: left; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(row => `
+            <tr style="font-family: 'Consolas'; font-size: 12px; height: 24px;">
+              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 12px; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    const template = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <!--[if gte mso 9]>
+          <xml>
+            <x:ExcelWorkbook>
+              <x:ExcelWorksheets>
+                <x:ExcelWorksheet>
+                  <x:Name>Data Karyawan</x:Name>
+                  <x:WorksheetOptions>
+                    <x:Selected/>
+                    <x:FreezePanes/>
+                    <x:SplitHorizontal>1</x:SplitHorizontal>
+                    <x:TopRowBottomPane>1</x:TopRowBottomPane>
+                    <x:ActivePane>2</x:ActivePane>
+                  </x:WorksheetOptions>
+                </x:ExcelWorksheet>
+              </x:ExcelWorksheets>
+            </x:ExcelWorkbook>
+          </xml>
+          <![endif]-->
+          <meta http-equiv="content-type" content="text/plain; charset=UTF-8"/>
+        </head>
+        <body>
+          ${tableHtml}
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Data_Karyawan_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Data_Karyawan_${new Date().toISOString().split('T')[0]}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   const exportToPDF = () => {
-    // Print window using browser's built-in PDF printer capability
     window.print();
   };
 
   return (
     <div style={{ width: '100%', padding: '1rem', boxSizing: 'border-box' }} className="print-container">
-      {/* Hide Print Style for normal view */}
+      {/* Table & Print Styles */}
       <style>{`
+        .freeze-table-header th {
+          position: sticky !important;
+          top: 0 !important;
+          background-color: #46bdc6 !important;
+          color: #ffffff !important;
+          font-family: 'Consolas', Courier, monospace !important;
+          font-size: 12px !important;
+          font-weight: bold !important;
+          z-index: 5 !important;
+          text-transform: uppercase !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        
         @media print {
           body * {
             visibility: hidden;
@@ -299,6 +357,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           }
           .no-print {
             display: none !important;
+          }
+          .freeze-table-header th {
+            background-color: #46bdc6 !important;
+            color: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>
@@ -360,8 +424,8 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           </div>
         </div>
 
-        <div className="table-container" style={{ marginTop: 0 }}>
-          <Table>
+        <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
+          <Table className="freeze-table-header">
             <TableHeader>
               <TableRow>
                 <TableHead>NIK</TableHead>

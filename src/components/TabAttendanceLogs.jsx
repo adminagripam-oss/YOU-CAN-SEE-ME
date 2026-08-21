@@ -268,17 +268,75 @@ export default function TabAttendanceLogs({
     }
   };
 
-  // EXPORT CSV
+  // EXPORT EXCEL (Formatted XLS)
   const exportToCSV = () => {
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
-    let csvContent = "data:text/csv;charset=utf-8,Tanggal,NIK,Nama Karyawan,Afdeling,Check In,Check Out,Durasi,Keterangan,Lokasi\n";
-    filteredLogs.forEach(row => {
-      csvContent += `${row.displayDate},${row.nik},${row.name},${row.afdeling},${row.checkIn},${row.checkOut},${row.durasi ? formatDurasi(row.durasi) : '-'},${row.keterangan},"${row.lokasi}"\n`;
-    });
-    const encodedUri = encodeURI(csvContent);
+    
+    const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
+    
+    const rows = filteredLogs.map(row => [
+      row.displayDate,
+      row.nik,
+      row.name,
+      row.afdeling,
+      row.checkIn,
+      row.checkOut,
+      row.durasi ? formatDurasi(row.durasi) : '-',
+      row.keterangan,
+      row.lokasi || '-'
+    ]);
+
+    const tableHtml = `
+      <table border="1">
+        <thead>
+          <tr style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; height: 30px;">
+            ${headers.map(h => `<th style="background-color: #46bdc6; color: #ffffff; font-family: 'Consolas'; font-size: 12px; font-weight: bold; text-align: left; padding: 5px; border: 1px solid #ddd;">${h}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(row => `
+            <tr style="font-family: 'Consolas'; font-size: 12px; height: 24px;">
+              ${row.map(cell => `<td style="font-family: 'Consolas'; font-size: 12px; padding: 5px; border: 1px solid #ddd;">${cell}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    const template = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <!--[if gte mso 9]>
+          <xml>
+            <x:ExcelWorkbook>
+              <x:ExcelWorksheets>
+                <x:ExcelWorksheet>
+                  <x:Name>Riwayat Absensi</x:Name>
+                  <x:WorksheetOptions>
+                    <x:Selected/>
+                    <x:FreezePanes/>
+                    <x:SplitHorizontal>1</x:SplitHorizontal>
+                    <x:TopRowBottomPane>1</x:TopRowBottomPane>
+                    <x:ActivePane>2</x:ActivePane>
+                  </x:WorksheetOptions>
+                </x:ExcelWorksheet>
+              </x:ExcelWorksheets>
+            </x:ExcelWorkbook>
+          </xml>
+          <![endif]-->
+          <meta http-equiv="content-type" content="text/plain; charset=UTF-8"/>
+        </head>
+        <body>
+          ${tableHtml}
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "Data_Log_Absensi.csv");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Riwayat_Absensi_${new Date().toISOString().split('T')[0]}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -300,7 +358,47 @@ export default function TabAttendanceLogs({
   };
 
   return (
-    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="glass-card print-area" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Table & Print Styles */}
+      <style>{`
+        .freeze-table-header th {
+          position: sticky !important;
+          top: 0 !important;
+          background-color: #46bdc6 !important;
+          color: #ffffff !important;
+          font-family: 'Consolas', Courier, monospace !important;
+          font-size: 12px !important;
+          font-weight: bold !important;
+          z-index: 5 !important;
+          text-transform: uppercase !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print-area, .print-area * {
+            visibility: visible;
+          }
+          .print-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .freeze-table-header th {
+            background-color: #46bdc6 !important;
+            color: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
       
       {/* Header & Toolbar */}
       <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -313,7 +411,7 @@ export default function TabAttendanceLogs({
               Pencatatan data gabungan absensi harian karyawan.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px' }} className="no-print">
             <button className="btn-action edit" onClick={exportToCSV} style={{ padding: '8px 14px' }}>
               <FileSpreadsheet size={16} /> Export Excel
             </button>
@@ -324,7 +422,7 @@ export default function TabAttendanceLogs({
         </div>
 
         {/* Search Bar */}
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+        <div className="no-print" style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <Search size={18} color="var(--text-muted)" />
           <input
             type="text"
@@ -337,8 +435,8 @@ export default function TabAttendanceLogs({
       </div>
 
       {/* Table */}
-      <div className="table-container" style={{ marginTop: 0 }}>
-        <Table>
+      <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
+        <Table className="freeze-table-header">
           <TableHeader>
             <TableRow>
               <TableHead>Tanggal</TableHead>
