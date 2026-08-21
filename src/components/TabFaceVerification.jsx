@@ -1703,6 +1703,32 @@ export default function TabFaceVerification({
                 </button>
               </div>
 
+              {/* Real-Time On-Screen AI Diagnostic Bar (Moved Above Camera) */}
+              <div
+                style={{
+                  background: 'rgba(15, 23, 42, 0.06)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  marginBottom: '12px',
+                  fontSize: '0.72rem',
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: 'var(--text-main)',
+                  width: 'fit-content'
+                }}
+              >
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: debugAiInfo.faces > 0 ? '#10b981' : '#f59e0b' }}></span>
+                <strong>AI Status:</strong>
+                <span>Backend: {debugAiInfo.backend}</span>
+                <span>|</span>
+                <span>Wajah: {debugAiInfo.faces}</span>
+                <span>|</span>
+                <span>Mesh: {debugAiInfo.nodes} pts</span>
+              </div>
+
               <div
                 className="webcam-wrapper"
                 style={{
@@ -1722,36 +1748,6 @@ export default function TabFaceVerification({
                   className="overlay-canvas"
                   style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
                 ></canvas>
-
-                {/* ── Real-Time On-Screen AI Diagnostic Badge ──────────── */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '10px',
-                    left: '10px',
-                    zIndex: 20,
-                    background: 'rgba(15, 23, 42, 0.88)',
-                    backdropFilter: 'blur(4px)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
-                    padding: '4px 10px',
-                    color: '#fff',
-                    fontSize: '0.72rem',
-                    fontFamily: 'monospace',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: debugAiInfo.faces > 0 ? '#10b981' : '#f59e0b' }}></span>
-                  <span>AI: {debugAiInfo.backend}</span>
-                  <span>|</span>
-                  <span>Wajah: {debugAiInfo.faces}</span>
-                  <span>|</span>
-                  <span>Mesh: {debugAiInfo.nodes} pts</span>
-                </div>
 
                 {/* ── GPS Granted Badge (koordinat live di bawah kamera) ───── */}
                 {gpsPermission === 'granted' && liveCoords && (
