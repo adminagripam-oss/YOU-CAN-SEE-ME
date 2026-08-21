@@ -247,6 +247,10 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   // Export Logic (Formatted Excel & PDF Printout)
   // ---------------------------------
   const exportToCSV = () => {
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      showToast('Fitur Dibatasi', 'Ekspor Excel tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mengunduh.', 'warning');
+      return;
+    }
     if (filteredEmployees.length === 0) {
       showToast('Data Kosong', 'Tidak ada data untuk diekspor.', 'warning');
       return;
@@ -295,6 +299,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     <x:Selected/>
                     <x:FreezePanes/>
                     <x:SplitHorizontal>1</x:SplitHorizontal>
+                    <x:SplitHorizontal>1</x:SplitHorizontal>
                     <x:TopRowBottomPane>1</x:TopRowBottomPane>
                     <x:ActivePane>2</x:ActivePane>
                   </x:WorksheetOptions>
@@ -322,6 +327,10 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   };
 
   const exportToPDF = () => {
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      showToast('Fitur Dibatasi', 'Cetak PDF tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mencetak PDF.', 'warning');
+      return;
+    }
     window.print();
   };
 
