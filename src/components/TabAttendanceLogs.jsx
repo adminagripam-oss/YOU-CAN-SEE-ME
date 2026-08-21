@@ -270,6 +270,10 @@ export default function TabAttendanceLogs({
 
   // EXPORT EXCEL (Formatted XLS)
   const exportToCSV = () => {
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      showToast('Fitur Dibatasi', 'Ekspor Excel tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mengunduh.', 'warning');
+      return;
+    }
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
     
     const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
@@ -344,6 +348,10 @@ export default function TabAttendanceLogs({
 
   // EXPORT PDF
   const exportToPDF = () => {
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+      showToast('Fitur Dibatasi', 'Cetak PDF tidak didukung langsung di dalam aplikasi APK. Silakan buka situs web agriface.agri-pam.id menggunakan browser Chrome di HP Anda untuk mencetak PDF.', 'warning');
+      return;
+    }
     window.print();
   };
 
