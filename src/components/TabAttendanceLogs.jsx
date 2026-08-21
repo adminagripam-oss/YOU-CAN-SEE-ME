@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock } from 'lucide-react';
 
 function formatDurasi(durasi) {
   if (!durasi) return '-';
@@ -513,7 +513,7 @@ export default function TabAttendanceLogs({
                   <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
                   <TableCell>
                     {log.durasi ? (
-                      <span className="durasi-badge"><i className="fa-regular fa-clock"></i> {formatDurasi(log.durasi)}</span>
+                      <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
                     ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
                        <span className="durasi-badge checkin" style={{ fontSize:'0.7rem', padding:'2px 6px' }}>Sedang Bekerja</span>
                     ) : '-'}
