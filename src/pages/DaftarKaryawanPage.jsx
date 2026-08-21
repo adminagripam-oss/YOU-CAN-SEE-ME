@@ -182,6 +182,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
 
     if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
       payload.descriptor_json = JSON.stringify(editCurrentDescriptorRef.current);
+      payload.has_master_biometric = true;
     }
 
     try {
