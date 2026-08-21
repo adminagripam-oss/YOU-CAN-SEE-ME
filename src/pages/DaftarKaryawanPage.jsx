@@ -362,10 +362,20 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             position: absolute;
             left: 0;
             top: 0;
-            width: 100%;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
           }
           .no-print {
             display: none !important;
+          }
+          .table-container {
+            max-height: none !important;
+            overflow: visible !important;
+            height: auto !important;
           }
           .freeze-table-header th {
             background-color: #46bdc6 !important;
@@ -381,6 +391,23 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             font-size: 14px !important;
             text-align: center !important;
             vertical-align: middle !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+          @page {
+            size: landscape;
+            margin: 10mm;
           }
         }
       `}</style>
