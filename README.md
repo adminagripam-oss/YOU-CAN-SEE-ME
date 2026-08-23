@@ -16,7 +16,7 @@ npm start
 Or double-click `start.bat` in Windows.
 
 Open your browser and navigate to:
-👉 **[http://localhost:8080](http://localhost:8080)**
+👉 **[http://localhost:8081](http://localhost:8081)**
 
 ---
 
@@ -33,7 +33,7 @@ For active development with Vite HMR:
    ```
 
 Open your browser and navigate to:
-👉 **[http://localhost:5173](http://localhost:5173)** *(API calls `/api` are automatically proxied to port `8080`)*.
+👉 **[http://localhost:8080](http://localhost:8080)** *(API calls `/api` are automatically proxied to port `8081`)*.
 
 ---
 
@@ -50,7 +50,7 @@ npm start
 ## ⚙️ Environment Configuration (`.env`)
 Ensure your `.env` file contains:
 ```env
-PORT=8080
+PORT=8081
 SUPABASE_URL=https://<your-supabase-project>.supabase.co
 SUPABASE_ANON_KEY=<your-supabase-anon-key>
 ```
