@@ -117,8 +117,9 @@ export async function loadHumanWithFallback() {
   if (!window.HumanLib?.Human) {
     try {
       console.log('[Human Singleton] Loading human.esm.js dynamically from root...');
-      const libPath = '/' + 'human.esm.js';
-      const mod = await import(/* @vite-ignore */ libPath);
+      // Menggunakan new Function('return import(...)') untuk menyembunyikan import dari static analyzer Vite
+      const importFunc = new Function('return import("/human.esm.js")');
+      const mod = await importFunc();
       window.HumanLib = { Human: mod.Human };
       console.log('[Human Singleton] ✅ human.esm.js successfully loaded dynamically.');
     } catch (err) {
