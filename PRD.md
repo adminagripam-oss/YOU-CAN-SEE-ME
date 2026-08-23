@@ -526,3 +526,33 @@ Pemberitahuan pembaruan versi **v2.9.0** menandai peluncuran dukungan ekspor dat
 ### 16.5 Penonaktifkan Pengisian Database Otomatis (Anti-Seed Backend)
 * **User-Authorized CRUD**: Menghapus seluruh logika fungsi `seedInitialData()` di backend server (`server.js`). Tindakan ini mencegah sistem memasukkan kembali data contoh karyawan secara sepihak saat database dinilai kosong (0 records), menjamin daftar karyawan bersih sepenuhnya dikelola oleh pengguna admin.
 
+---
+
+## 17. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v3.0.0)
+
+Pemberitahuan pembaruan versi **v3.0.0** menandai peluncuran dukungan penyimpanan native SQLite lokal di APK, auto-sync terintegrasi sensor koneksi native perangkat, mekanisme toleransi kegagalan GPS multi-stage, serta penyederhanaan notifikasi status mode online/offline:
+
+### 17.1 Integrasi Penyimpanan Lokal Native SQLite untuk Android APK (Hybrid Storage Layer)
+* **Bypass Batasan IndexedDB**: Untuk meningkatkan keandalan penyimpanan offline-first pada APK Android, aplikasi kini menggunakan plugin `@capacitor-community/sqlite` yang menggantikan Dexie.js (IndexedDB) di perangkat mobile.
+* **Perantara Hibrida Cerdas (db.js)**: Menyediakan abstraction layer dinamis yang mendeteksi platform runtime via `Capacitor.isNativePlatform()`. Jika mendeteksi lingkungan browser web (localhost/PWA), sistem otomatis tetap memakai Dexie.js, sedangkan jika mendeteksi APK Android, sistem otomatis beralih ke SQLite database `AgriFaceLocalDB`.
+* **Inisialisasi Tabel SQLite**: Membuat tabel lokal di startup aplikasi (`App.jsx` memicu `initSQLite()`) untuk:
+  - `local_employees`: Menyimpan cache data karyawan.
+  - `local_master_descriptors`: Menyimpan cache data biometrik wajah (vektor 1024-dimensi dan nilai GFV).
+  - `local_attendance_queue`: Menyimpan antrean log kehadiran karyawan yang diambil saat offline.
+* **Emulasi Interface Dexie**: Lapisan pembungkus `db` mengemulasikan metode `.toArray()`, `.clear()`, dan `.bulkPut()` pada tabel SQLite agar seluruh komponen UI absensi dapat memproses data lokal tanpa perlu merombak baris kode internal komponen.
+
+### 17.2 Integrasi Sensor Koneksi Native Capacitor Network & Auto-Sync
+* **Deteksi Jaringan Native**: Mengganti event listener online/offline bawaan browser web dengan `@capacitor/network` ketika berjalan sebagai APK native. Sistem kini menggunakan `Network.addListener('networkStatusChange', ...)` untuk memicu sinkronisasi secara instan saat koneksi seluler/Wi-Fi terdeteksi kembali.
+* **Metode Pengecekan Status Dinamis**: Auto-sync engine di [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) menggunakan method `Network.getStatus()` untuk memvalidasi status koneksi sebelum menjalankan sinkronisasi latar belakang log absensi offline ke cloud Supabase.
+
+### 7.3 Mekanisme Toleransi Kegagalan GPS Multi-Stage & Bypass Lokasi Kantor
+* **Pengulangan Deteksi Multi-Stage**: Untuk mengatasi kendala sensor GPS perangkat mobile saat offline di perkebunan atau saat diuji coba di dalam ruangan (*indoors*), modul GPS di [AbsensiPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/AbsensiPage.jsx) dan [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx) dimodifikasi:
+  - Tahap 1: Meminta koordinat GPS akurasi tinggi (High Accuracy) dengan timeout longgar 10 detik dan memanfaatkan data cache posisi selama 30 detik (`maximumAge: 30000`).
+  - Tahap 2 (Fallback): Jika Tahap 1 gagal karena timeout/sinyal terhalang, sistem mengulangi permintaan dalam mode akurasi standar (Low Accuracy) dengan timeout 10 detik dan cache 5 menit.
+  - Tahap 3 (Bypass Kantor): Jika kedua tahap di atas tetap gagal/timeout (misal saat dites di dalam rumah/ruangan tertutup tanpa sinyal satelit), sistem otomatis mem-bypass pembatasan koordinat dengan menggunakan koordinat kantor default (`OFFICE_LAT`, `OFFICE_LON`) disertai dengan peringatan Toast warna kuning. Hal ini mencegah aplikasi terblokir atau macet saat melakukan absensi.
+
+### 17.4 Penyederhanaan Notifikasi Mode Online & Mode Offline (Shadcn Toast Style)
+* **Status Ringkas dan Bersih**: Menyederhanakan pesan notifikasi status koneksi yang dipicu saat membuka aplikasi maupun saat terjadi perubahan jaringan menjadi lebih bersih dan terstandardisasi:
+  - **Mode Online**: Menampilkan Toast hijau (`success`) berbunyi *"Mode Online - Aplikasi terhubung ke internet."*
+  - **Mode Offline**: Menampilkan Toast kuning (`warning`) berbunyi *"Mode Offline - Aplikasi berjalan luring (offline)."*
+
