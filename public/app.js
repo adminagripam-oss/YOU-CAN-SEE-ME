@@ -6,7 +6,7 @@
 // Robust API Base URL Fallback to prevent "Failed to fetch" when opened via file://
 const API_BASE_URL = (window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file'))
   ? ''
-  : 'http://localhost:8080';
+  : 'http://localhost:8081';
 
 let modelsLoaded = false;
 let human = null;

@@ -113,6 +113,18 @@ async function initBackend(humanInstance) {
  * 3. Load model dari: Origin Domain → Relatif → CDN
  */
 export async function loadHumanWithFallback() {
+  // Load /human.esm.js dynamically if not already loaded in window
+  if (!window.HumanLib?.Human) {
+    try {
+      console.log('[Human Singleton] Loading human.esm.js dynamically from root...');
+      const mod = await import(/* @vite-ignore */ '/human.esm.js');
+      window.HumanLib = { Human: mod.Human };
+      console.log('[Human Singleton] ✅ human.esm.js successfully loaded dynamically.');
+    } catch (err) {
+      console.error('[Human Singleton] ❌ Failed to load human.esm.js dynamically:', err);
+    }
+  }
+
   // Tunggu window.HumanLib siap (maks 10 detik)
   for (let i = 0; i < 100; i++) {
     if (window.HumanLib?.Human) break;

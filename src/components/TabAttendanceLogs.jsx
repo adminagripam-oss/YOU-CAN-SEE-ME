@@ -93,7 +93,7 @@ export default function TabAttendanceLogs({
       const dateKey = tsDate.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'); // YYYY-MM-DD format for internal grouping
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
       const key = `${log.nik}_${dateKey}`;
-      
+
       if (!groups[key]) {
         groups[key] = {
           id: key,
@@ -165,7 +165,7 @@ export default function TabAttendanceLogs({
         try {
           // Kumpulkan ID yang akan dihapus
           const idsToDelete = [];
-          if (group.inLog?.id)  idsToDelete.push(group.inLog.id);
+          if (group.inLog?.id) idsToDelete.push(group.inLog.id);
           if (group.outLog?.id) idsToDelete.push(group.outLog.id);
 
           if (idsToDelete.length === 0) {
@@ -228,16 +228,16 @@ export default function TabAttendanceLogs({
         // Construct new timestamp
         const oldDate = new Date(editData.inLog.timestamp);
         const [hours, minutes, seconds] = editData.editCheckIn.split(':');
-        oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
-        
+        oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+
         let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
         newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
 
-        const { error } = await supabase.from('attendance_logs').update({ 
+        const { error } = await supabase.from('attendance_logs').update({
           timestamp: oldDate.toISOString(),
           status: newStatus
         }).eq('id', editData.inLog.id);
-        
+
         if (error) success = false;
       }
 
@@ -245,16 +245,16 @@ export default function TabAttendanceLogs({
       if (editData.outLog && editData.editCheckOut) {
         const oldDate = new Date(editData.outLog.timestamp);
         const [hours, minutes, seconds] = editData.editCheckOut.split(':');
-        oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
-        
+        oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+
         let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
         newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
 
-        const { error } = await supabase.from('attendance_logs').update({ 
+        const { error } = await supabase.from('attendance_logs').update({
           timestamp: oldDate.toISOString(),
           status: newStatus
         }).eq('id', editData.outLog.id);
-        
+
         if (error) success = false;
       }
 
@@ -273,9 +273,9 @@ export default function TabAttendanceLogs({
   // EXPORT EXCEL (Formatted XLS)
   const exportToCSV = () => {
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
-    
+
     const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
-    
+
     const rows = filteredLogs.map(row => [
       row.displayDate,
       row.nik,
@@ -491,10 +491,10 @@ export default function TabAttendanceLogs({
 
   const renderKeteranganIcon = (ket) => {
     switch (ket) {
-      case 'Hadir': return <span className="status-badge success" style={{ gap: '4px', fontSize:'0.75rem' }}><CheckCircle size={14}/> Hadir</span>;
-      case 'Izin': return <span className="status-badge info" style={{ background:'rgba(56, 189, 248, 0.1)', color:'#38bdf8', border:'1px solid rgba(56, 189, 248, 0.3)', gap: '4px', fontSize:'0.75rem' }}><Mail size={14}/> Izin</span>;
-      case 'Sakit': return <span className="status-badge warning" style={{ background:'rgba(245, 158, 11, 0.1)', color:'#f59e0b', border:'1px solid rgba(245, 158, 11, 0.3)', gap: '4px', fontSize:'0.75rem' }}><Power size={14}/> Sakit</span>;
-      case 'Mangkir': return <span className="status-badge danger" style={{ background:'rgba(239, 68, 68, 0.1)', color:'#ef4444', border:'1px solid rgba(239, 68, 68, 0.3)', gap: '4px', fontSize:'0.75rem' }}><XCircle size={14}/> Mangkir</span>;
+      case 'Hadir': return <span className="status-badge success" style={{ gap: '4px', fontSize: '0.75rem' }}><CheckCircle size={14} /> Hadir</span>;
+      case 'Izin': return <span className="status-badge info" style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', gap: '4px', fontSize: '0.75rem' }}><Mail size={14} /> Izin</span>;
+      case 'Sakit': return <span className="status-badge warning" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', gap: '4px', fontSize: '0.75rem' }}><Power size={14} /> Sakit</span>;
+      case 'Mangkir': return <span className="status-badge danger" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', gap: '4px', fontSize: '0.75rem' }}><XCircle size={14} /> Mangkir</span>;
       default: return ket;
     }
   };
@@ -585,7 +585,7 @@ export default function TabAttendanceLogs({
           }
         }
       `}</style>
-      
+
       {/* Header & Toolbar */}
       <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -657,7 +657,7 @@ export default function TabAttendanceLogs({
                     {log.durasi ? (
                       <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
                     ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
-                       <span className="durasi-badge checkin" style={{ fontSize:'0.7rem', padding:'2px 6px' }}>Sedang Bekerja</span>
+                      <span className="durasi-badge checkin" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Sedang Bekerja</span>
                     ) : '-'}
                   </TableCell>
                   <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
@@ -725,20 +725,20 @@ export default function TabAttendanceLogs({
             <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>Edit Log Absensi</h3>
             </div>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                Karyawan: <strong style={{ color: 'var(--text-main)' }}>{editData.name} ({editData.nik})</strong><br/>
+                Karyawan: <strong style={{ color: 'var(--text-main)' }}>{editData.name} ({editData.nik})</strong><br />
                 Tanggal: <strong style={{ color: 'var(--text-main)' }}>{editData.displayDate}</strong>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-In</label>
-                <input 
-                  type="time" 
+                <input
+                  type="time"
                   step="1"
-                  value={editData.editCheckIn} 
-                  onChange={(e) => setEditData({...editData, editCheckIn: e.target.value})} 
+                  value={editData.editCheckIn}
+                  onChange={(e) => setEditData({ ...editData, editCheckIn: e.target.value })}
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
                   disabled={!editData.inLog}
                 />
@@ -747,11 +747,11 @@ export default function TabAttendanceLogs({
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-Out</label>
-                <input 
-                  type="time" 
+                <input
+                  type="time"
                   step="1"
-                  value={editData.editCheckOut} 
-                  onChange={(e) => setEditData({...editData, editCheckOut: e.target.value})} 
+                  value={editData.editCheckOut}
+                  onChange={(e) => setEditData({ ...editData, editCheckOut: e.target.value })}
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
                   disabled={!editData.outLog}
                 />
@@ -760,9 +760,9 @@ export default function TabAttendanceLogs({
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Keterangan</label>
-                <select 
-                  value={editData.editKeterangan} 
-                  onChange={(e) => setEditData({...editData, editKeterangan: e.target.value})} 
+                <select
+                  value={editData.editKeterangan}
+                  onChange={(e) => setEditData({ ...editData, editKeterangan: e.target.value })}
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
                 >
                   <option value="Hadir">Hadir</option>
@@ -773,7 +773,7 @@ export default function TabAttendanceLogs({
               </div>
 
             </div>
-            
+
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
               <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>Batal</button>
               <button type="button" className="btn btn-primary" onClick={saveEdit}>Simpan Perubahan</button>

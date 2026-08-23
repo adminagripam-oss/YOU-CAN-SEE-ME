@@ -15,7 +15,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (() => {
   // Vercel (deploy preview) → relative path
   if (hostname.includes('vercel.app')) return '';
   // GitHub Pages / file protocol → arahkan ke server lokal
-  if (hostname.includes('github.io') || window.location.protocol === 'file:') return 'http://localhost:8080';
+  if (hostname.includes('github.io') || window.location.protocol === 'file:') return 'http://localhost:8081';
   // Development lokal (localhost) → relative path karena Vite proxy sudah handle
   return '';
 })();

@@ -37,17 +37,7 @@
 
 
 
-  <!-- @vladmandic/human: dimuat LANGSUNG dari file statis (bukan di-bundle Vite)
-       KRITIS: Vite/Rollup merusak internal TF.js kernel registry saat bundle.
-       Dengan memuat sebagai script eksternal, library bekerja as-is tanpa transformasi. -->
-  <script type="module">
-    import(/* @vite-ignore */ '/human.esm.js')
-      .then((mod) => {
-        window.HumanLib = { Human: mod.Human };
-        console.log('[HTML] window.HumanLib berhasil dimuat dari /human.esm.js');
-      })
-      .catch((err) => console.error('[HTML] Gagal memuat /human.esm.js:', err));
-  </script>
+  <!-- @vladmandic/human: dimuat LANGSUNG secara dinamis di humanSingleton.js (bukan di-bundle Vite) -->
 
   <!-- Developer Console Virtual (Eruda) untuk debugging langsung di layar HP/Tablet -->
   <script src="/eruda.js"></script>
