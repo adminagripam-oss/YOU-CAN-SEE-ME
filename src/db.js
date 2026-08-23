@@ -1,20 +1,30 @@
 import Dexie from 'dexie';
+import { Capacitor } from '@capacitor/core';
+import {
+  sqliteCacheUserMasterVector,
+  sqliteCacheGeometricVector,
+  sqliteGetCachedUserMasterVector,
+  sqliteQueueOfflineAttendance,
+  sqliteGetUnsyncedLogs,
+  sqliteRemoveSyncedLogs,
+  sqliteClearEmployeesCache,
+  sqliteBulkPutEmployeesCache,
+  sqliteGetEmployeesCache
+} from './services/sqliteService';
 
 /**
  * Dexie.js IndexedDB Database for Offline-First Face Attendance App
- * v2: adds geometric_descriptor_json (40-d GFV) alongside 128-d face embedding
+ * Used as dynamic fallback when running on Web
  */
-export const db = new Dexie('FaceAttendanceOfflineDB');
+const dexieDb = new Dexie('FaceAttendanceOfflineDB');
 
-// v1: original schema (kept for upgrade chain)
-db.version(1).stores({
+dexieDb.version(1).stores({
   user_master: '++id, employee_id, nik, name, department, updated_at',
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
   employees_cache: 'id, nik, name, department, has_master_biometric'
 });
 
-// v2: geometric_descriptor_json column added to user_master
-db.version(2).stores({
+dexieDb.version(2).stores({
   user_master: '++id, employee_id, nik, name, department, updated_at',
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
   employees_cache: 'id, nik, name, department, has_master_biometric'
@@ -27,10 +37,53 @@ db.version(2).stores({
 });
 
 /**
- * Save / Cache Master Descriptor for a user in IndexedDB.
- * Accepts both 128-d embedding (descriptor_json) and 40-d GFV (geometric_descriptor_json).
+ * Unified Database Wrapper Object (mimics Dexie.js structure for direct table access)
+ */
+export const db = {
+  employees_cache: {
+    async toArray() {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetEmployeesCache();
+      } else {
+        return await dexieDb.employees_cache.toArray();
+      }
+    },
+    async clear() {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteClearEmployeesCache();
+      } else {
+        await dexieDb.employees_cache.clear();
+      }
+    },
+    async bulkPut(data) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteBulkPutEmployeesCache(data);
+      } else {
+        await dexieDb.employees_cache.bulkPut(data);
+      }
+    }
+  },
+  attendance_sync_queue: {
+    async toArray() {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetUnsyncedLogs();
+      } else {
+        return await dexieDb.attendance_sync_queue.toArray();
+      }
+    }
+  }
+};
+
+/**
+ * Save / Cache Master Descriptor.
+ * Automatically delegates to SQLite on native APK, or Dexie on Web.
  */
 export async function cacheUserMasterVector(user) {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteCacheUserMasterVector(user);
+    return;
+  }
+
   try {
     const empId = user.employee_id || user.id;
     if (!empId) return;
@@ -55,7 +108,7 @@ export async function cacheUserMasterVector(user) {
       }
     }
 
-    const allMasters = await db.user_master.toArray();
+    const allMasters = await dexieDb.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(empId));
 
     const payload = {
@@ -74,9 +127,9 @@ export async function cacheUserMasterVector(user) {
     };
 
     if (existing) {
-      await db.user_master.update(existing.id, payload);
+      await dexieDb.user_master.update(existing.id, payload);
     } else {
-      await db.user_master.add({ employee_id: empId, ...payload });
+      await dexieDb.user_master.add({ employee_id: empId, ...payload });
     }
     console.log(`[IndexedDB] Cached master for ${user.name} | GFV: ${payload.geometric_descriptor_json ? 'YES' : 'NO'}`);
   } catch (err) {
@@ -88,12 +141,17 @@ export async function cacheUserMasterVector(user) {
  * Update ONLY the geometric feature vector for an existing cached employee.
  */
 export async function cacheGeometricVector(employeeId, gfv) {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteCacheGeometricVector(employeeId, gfv);
+    return;
+  }
+
   try {
     if (!employeeId || !gfv) return;
-    const allMasters = await db.user_master.toArray();
+    const allMasters = await dexieDb.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
     if (existing) {
-      await db.user_master.update(existing.id, {
+      await dexieDb.user_master.update(existing.id, {
         geometric_descriptor_json: gfv,
         updated_at: new Date().toISOString(),
       });
@@ -104,13 +162,16 @@ export async function cacheGeometricVector(employeeId, gfv) {
 }
 
 /**
- * Get Cached Master Descriptor from IndexedDB.
- * Returns: { descriptor_json, geometric_descriptor_json, ... }
+ * Get Cached Master Descriptor.
  */
 export async function getCachedUserMasterVector(employeeId) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetCachedUserMasterVector(employeeId);
+  }
+
   try {
     if (!employeeId) return null;
-    const allMasters = await db.user_master.toArray();
+    const allMasters = await dexieDb.user_master.toArray();
     return allMasters.find((m) => String(m.employee_id) === String(employeeId)) || null;
   } catch (err) {
     console.error('[IndexedDB Get Master Error]:', err);
@@ -119,9 +180,13 @@ export async function getCachedUserMasterVector(employeeId) {
 }
 
 /**
- * Save Offline Attendance Log to Sync Queue
+ * Save Offline Attendance Log to Sync Queue.
  */
 export async function queueOfflineAttendance(logData) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteQueueOfflineAttendance(logData);
+  }
+
   try {
     const queueItem = {
       employee_id: logData.employee_id,
@@ -138,7 +203,7 @@ export async function queueOfflineAttendance(logData) {
       is_synced: false,
       created_at: new Date().toISOString()
     };
-    const id = await db.attendance_sync_queue.add(queueItem);
+    const id = await dexieDb.attendance_sync_queue.add(queueItem);
     console.log(`[IndexedDB Queue] Attendance log queued offline with ID: ${id}`);
     return { ...queueItem, id };
   } catch (err) {
@@ -148,11 +213,15 @@ export async function queueOfflineAttendance(logData) {
 }
 
 /**
- * Get all unsynced logs from IndexedDB
+ * Get all unsynced logs.
  */
 export async function getUnsyncedLogs() {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetUnsyncedLogs();
+  }
+
   try {
-    const allQueue = await db.attendance_sync_queue.toArray();
+    const allQueue = await dexieDb.attendance_sync_queue.toArray();
     return allQueue.filter((item) => !item.is_synced || item.is_synced === 0);
   } catch (err) {
     console.error('[IndexedDB Get Unsynced Error]:', err);
@@ -161,12 +230,17 @@ export async function getUnsyncedLogs() {
 }
 
 /**
- * Remove synced items from IndexedDB Queue
+ * Remove synced items from Queue.
  */
 export async function removeSyncedLogs(ids) {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteRemoveSyncedLogs(ids);
+    return;
+  }
+
   try {
     if (!ids || ids.length === 0) return;
-    await db.attendance_sync_queue.bulkDelete(ids);
+    await dexieDb.attendance_sync_queue.bulkDelete(ids);
   } catch (err) {
     console.error('[IndexedDB Delete Synced Error]:', err);
   }

@@ -7,6 +7,7 @@ import { supabase } from './supabaseClient';
 import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import { AuthProvider } from './context/AuthContext';
+import { initSQLite } from './services/sqliteService';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicRoute from './components/PublicRoute';
 import AuthLayout from './layouts/AuthLayout';
@@ -47,6 +48,21 @@ function AppContent() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [dbReady, setDbReady] = useState(false);
+
+  // SQLite Native Initializer
+  useEffect(() => {
+    async function setupStorage() {
+      try {
+        await initSQLite();
+      } catch (err) {
+        console.error('[App] SQLite initialization error:', err);
+      } finally {
+        setDbReady(true);
+      }
+    }
+    setupStorage();
+  }, []);
 
   const [confirmModalConfig, setConfirmModalConfig] = useState({
     isOpen: false,
@@ -254,8 +270,10 @@ function AppContent() {
     };
   }, [fetchLogs, refreshUnsyncedCount, showToast]);
 
-  // Initial Data & face-api Model Loading
+  // Initial Data & face-api Model Loading (waits for dbReady)
   useEffect(() => {
+    if (!dbReady) return;
+
     fetchEmployees();
     fetchLogs();
 
@@ -274,7 +292,7 @@ function AppContent() {
     }
 
     loadHumanModels();
-  }, [fetchEmployees, fetchLogs]);
+  }, [dbReady, fetchEmployees, fetchLogs]);
 
   return (
     <>
