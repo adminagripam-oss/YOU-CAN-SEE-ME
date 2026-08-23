@@ -33,7 +33,7 @@ Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Of
                                       +-------------------+-------------------+
                                       |                                       |
                          Tier 1: Express API                     Tier 2: Direct Supabase SDK
-                         (http://localhost:8080)                 (HTTPS / CORS Safe)
+                         (http://localhost:8081)                 (HTTPS / CORS Safe)
                                       |                                       |
                                       v                                       v
                         +---------------------------+           +---------------------------+
@@ -496,3 +496,33 @@ Pemberitahuan pembaruan versi **v2.8.0** menandai penyelesaian masalah caching p
 * **Pembekuan Kolom Navigasi (Sticky Sidebar)**: Menambahkan aturan CSS `position: sticky; top: 0; height: 100vh; overflow-y: auto;` pada [index.css](file:///d:/FACE%20VERIFICATION/src/index.css) untuk `.app-sidebar`. Kolom ikon navigasi kini tetap diam (*freeze*) melayang di layar saat konten utama di-scroll ke bawah.
 * **Relokasi Tombol Logout**: Memindahkan tombol **Logout** pada [Sidebar.jsx](file:///d:/FACE%20VERIFICATION/src/components/Sidebar.jsx) dari bagian footer ke dalam kelompok navigasi utama tepat di bawah menu *Log Absensi*.
 * **Penanganan Logout & Proteksi Rute Kunci**: Mengintegrasikan `logout()` di [AuthContext.jsx](file:///d:/FACE%20VERIFICATION/src/context/AuthContext.jsx) dengan [ProtectedRoute.jsx](file:///d:/FACE%20VERIFICATION/src/components/ProtectedRoute.jsx) untuk menjamin pembersihan sesi penuh (`localStorage.removeItem('logged_in_admin')`) dan pengarahan paksa instan dari halaman mana pun ke [LoginPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LoginPage.jsx).
+
+---
+
+## 16. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v2.9.0)
+
+Pemberitahuan pembaruan versi **v2.9.0** menandai peluncuran dukungan ekspor data offline-first langsung dari APK, standardisasi format cetak PDF lanskap, perbaikan status biometrik dinamis, pembersihan icon yang rusak saat offline, serta penghapusan otomatisasi database seed di backend:
+
+### 16.1 Ekspor Data Offline-First Native Share Dialog dari APK (Android WebView Bypass)
+* **Bypass Hambatan WebView**: Mengingat Android WebView secara bawaan memblokir pengunduhan data Blob memori (`blob:`) lokal dan tidak mendukung dialog cetak `window.print()`, sistem kini menggunakan integrasi plugin `@capacitor/filesystem` dan `@capacitor/share`.
+* **Ekspor Excel Native Share**: Menghasilkan dokumen Excel (.xls) secara offline, menyimpannya di folder cache perangkat (`Directory.Cache`), lalu memicu *Native Android Share Dialog*. Pengguna dapat mengirim file via WhatsApp, Email, atau menyimpannya di Drive/Lokal HP.
+* **Cetak PDF Hibrida via Chrome**: Menghasilkan dokumen cetak mandiri (.html), menyimpannya di cache lokal, lalu membagikannya ke browser Google Chrome HP pengguna. Chrome HP secara otomatis akan langsung memicu dialog pencetakan bawaan sistem OS Android saat halaman dimuat.
+
+### 16.2 Standardisasi Tata Letak Print PDF & Penyaringan Kolom
+* **Orientasi Lanskap & Fit-to-Paper**: Mengonfigurasi media `@media print` dengan aturan `@page { size: landscape; margin: 10mm; }` agar orientasi cetak default adalah tidur (lanskap).
+* **Penghilangan Limit Scroll Kontainer**: Menonaktifkan batas tinggi scroll `.table-container { max-height: none !important; overflow: visible !important; height: auto !important; }` pada media cetak agar baris data tercetak utuh dari awal sampai akhir tanpa terpotong.
+* **Filter Kolom Cetak yang Ditargetkan**:
+  - Tabel Karyawan: Hanya mencetak kolom **NIK**, **Nama**, **Afdeling**, **Nama Kebun**, **Jabatan**, **Status TK**, dan **Status Pernikahan** (menyembunyikan kolom Biometrik dan Aksi).
+  - Tabel Riwayat Log: Hanya mencetak kolom **Tanggal**, **Check In**, **NIK**, **Nama Karyawan**, **Afdeling**, **Check Out**, **Durasi**, **Keterangan**, dan **Lokasi** (menyembunyikan kolom Aksi).
+
+### 16.3 Peningkatan Tampilan Web UI (Arial Font & Sizing)
+* **Arial 14px untuk Web UI**: Mengunci seluruh tampilan tabel data master dan log absensi di browser web dengan font **Arial** ukuran **14px** agar selaras secara responsif di monitor desktop maupun layar tablet.
+* **Consolas 12pt untuk Hasil Ekspor**: Font **Consolas** berukuran **12pt** dengan penyejajaran horizontal/vertikal tengah, judul tebal (bold), dan warna latar header hijau tosca (`#46bdc6`) khusus diterapkan pada hasil ekspor file Excel saja.
+
+### 16.4 Resolusi Status Biometrik & Perbaikan Ikon Offline
+* **Cross-Reference Biometrics**: Memperbarui pemanggilan data karyawan di `App.jsx` agar secara dinamis mencocokkan ID karyawan dengan data `master_descriptors`. Status kolom biometrik karyawan terjamin selalu akurat ("Siap" atau "Belum") meskipun terdapat record null pada database Supabase.
+* **Offline Lucide Clock Icon**: Mengganti pemanggilan icon jam durasi kerja berbasis FontAwesome (`fa-clock`) yang sebelumnya rusak menampilkan kotak kosong `[ ]` saat offline, dengan menggunakan icon `Clock` dari pustaka lokal `lucide-react` agar dapat dimuat sempurna tanpa koneksi internet.
+
+### 16.5 Penonaktifkan Pengisian Database Otomatis (Anti-Seed Backend)
+* **User-Authorized CRUD**: Menghapus seluruh logika fungsi `seedInitialData()` di backend server (`server.js`). Tindakan ini mencegah sistem memasukkan kembali data contoh karyawan secara sepihak saat database dinilai kosong (0 records), menjamin daftar karyawan bersih sepenuhnya dikelola oleh pengguna admin.
+
