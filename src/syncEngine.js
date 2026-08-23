@@ -1,13 +1,32 @@
 import { supabase } from './supabaseClient';
 import { getUnsyncedLogs, removeSyncedLogs, db } from './db';
+import { Capacitor } from '@capacitor/core';
+import { Network } from '@capacitor/network';
 
 let isSyncing = false;
 
 /**
- * Executes Auto-Sync of offline attendance logs stored in IndexedDB to Server
+ * Checks if the device is currently online (handles native and web fallback)
+ */
+async function checkOnline() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const status = await Network.getStatus();
+      return status.connected;
+    } catch (e) {
+      console.warn('[Sync Engine] Failed to get native network status, falling back to navigator.onLine:', e);
+      return navigator.onLine;
+    }
+  }
+  return navigator.onLine;
+}
+
+/**
+ * Executes Auto-Sync of offline attendance logs stored in local DB to Server
  */
 export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete = null) {
-  if (isSyncing || !navigator.onLine) return { count: 0 };
+  const isOnline = await checkOnline();
+  if (isSyncing || !isOnline) return { count: 0 };
 
   try {
     const pendingLogs = await getUnsyncedLogs();
@@ -31,7 +50,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     const syncedIds = pendingLogs.map(log => log.id);
 
-    // Remove synced records from IndexedDB
+    // Remove synced records from local DB
     await removeSyncedLogs(syncedIds);
     console.log(`[Auto-Sync Success] Successfully synced ${syncedIds.length} records!`);
 
@@ -66,17 +85,37 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
     syncPendingAttendanceLogs(showToast, onSyncComplete);
   };
 
-  window.addEventListener('online', handleOnline);
+  let networkListener = null;
+
+  if (Capacitor.isNativePlatform()) {
+    Network.addListener('networkStatusChange', (status) => {
+      if (status.connected) {
+        console.log('[Network Status] Device is ONLINE (Native). Triggering Auto-Sync...');
+        syncPendingAttendanceLogs(showToast, onSyncComplete);
+      }
+    }).then(handle => {
+      networkListener = handle;
+    });
+  } else {
+    window.addEventListener('online', handleOnline);
+  }
 
   // Periodic fallback check every 20 seconds if online and items exist
-  const intervalId = setInterval(() => {
-    if (navigator.onLine) {
+  const intervalId = setInterval(async () => {
+    const isOnline = await checkOnline();
+    if (isOnline) {
       syncPendingAttendanceLogs(showToast, onSyncComplete);
     }
   }, 20000);
 
   return () => {
-    window.removeEventListener('online', handleOnline);
+    if (Capacitor.isNativePlatform()) {
+      if (networkListener) {
+        networkListener.remove();
+      }
+    } else {
+      window.removeEventListener('online', handleOnline);
+    }
     clearInterval(intervalId);
   };
 }
