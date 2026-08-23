@@ -81,29 +81,7 @@ if (supabaseServiceRoleKey) {
 }
 console.log(`[SUPABASE] Connected to Supabase Cloud Database at: ${supabaseUrl}`);
 
-// Seed Initial Sample Employees if Table is Empty
-async function seedInitialData() {
-  try {
-    const { count, error } = await supabase.from('employees').select('*', { count: 'exact', head: true });
-    if (error) {
-      console.warn('[SUPABASE SEED WARN]', error.message);
-      return;
-    }
-
-    if (count === 0) {
-      console.log('[SUPABASE] Seeding initial sample employees into database...');
-      await supabase.from('employees').insert([
-        { nik: 'EMP-001', name: 'Budi Santoso', department: 'IT & Software Development' },
-        { nik: 'EMP-002', name: 'Siti Rahma', department: 'Human Resources' },
-        { nik: 'EMP-003', name: 'Andi Wijaya', department: 'Finance & Accounting' }
-      ]);
-      console.log('[SUPABASE] Seed completed successfully!');
-    }
-  } catch (err) {
-    console.error('[SUPABASE SEED ERROR]', err.message);
-  }
-}
-seedInitialData();
+// Database connection successfully verified
 
 // ==========================================
 // HELPER FUNCTIONS & UTILITIES
