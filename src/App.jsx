@@ -8,6 +8,8 @@ import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import { AuthProvider } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
+import { Capacitor } from '@capacitor/core';
+import { Network } from '@capacitor/network';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicRoute from './components/PublicRoute';
 import AuthLayout from './layouts/AuthLayout';
@@ -240,21 +242,72 @@ function AppContent() {
     setIsSyncing(false);
   };
 
-  // Network Listener Setup
+  // Network Listener Setup (Supports both native SQLite/Network and web IndexedDB)
   useEffect(() => {
+    const storageName = Capacitor.isNativePlatform() ? 'SQLite' : 'IndexedDB';
 
-
-    const updateOnlineStatus = () => {
-      setIsOnline(navigator.onLine);
-      if (navigator.onLine) {
-        showToast('Koneksi Terhubung', 'Internet kembali aktif. Memulai Auto-Sync IndexedDB...', 'info');
+    const handleStatusChange = (isConnected) => {
+      setIsOnline(isConnected);
+      if (isConnected) {
+        showToast('Koneksi Terhubung', 'Internet kembali aktif. Memulai Auto-Sync data ke cloud...', 'success');
       } else {
-        showToast('Mode Offline', 'Tidak ada internet. Absensi akan disimpan di IndexedDB HP.', 'info');
+        showToast('Mode Offline Aktif', `Tidak ada internet. Absensi akan disimpan di ${storageName} lokal HP.`, 'warning');
       }
     };
 
-    window.addEventListener('online', updateOnlineStatus);
-    window.addEventListener('offline', updateOnlineStatus);
+    // 1. Initial status detection
+    const checkInitialConnection = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const status = await Network.getStatus();
+          setIsOnline(status.connected);
+          if (status.connected) {
+            showToast('Koneksi Online', 'Aplikasi terhubung ke database cloud Supabase.', 'success');
+          } else {
+            showToast('Mode Offline Aktif', 'Tidak ada internet. Absensi akan disimpan di SQLite lokal HP.', 'warning');
+          }
+        } catch (e) {
+          setIsOnline(navigator.onLine);
+        }
+      } else {
+        setIsOnline(navigator.onLine);
+        if (navigator.onLine) {
+          showToast('Koneksi Online', 'Aplikasi terhubung ke database cloud Supabase.', 'success');
+        } else {
+          showToast('Mode Offline Aktif', 'Tidak ada internet. Absensi akan disimpan di IndexedDB HP.', 'warning');
+        }
+      }
+    };
+    checkInitialConnection();
+
+    // 2. Event Listeners
+    let networkListener = null;
+
+    if (Capacitor.isNativePlatform()) {
+      Network.addListener('networkStatusChange', (status) => {
+        handleStatusChange(status.connected);
+      }).then(handle => {
+        networkListener = handle;
+      });
+    } else {
+      const handleWebOnline = () => handleStatusChange(true);
+      const handleWebOffline = () => handleStatusChange(false);
+      window.addEventListener('online', handleWebOnline);
+      window.addEventListener('offline', handleWebOffline);
+
+      const cleanupSync = initAutoSyncListener(showToast, () => {
+        fetchLogs();
+        refreshUnsyncedCount();
+      });
+
+      refreshUnsyncedCount();
+
+      return () => {
+        window.removeEventListener('online', handleWebOnline);
+        window.removeEventListener('offline', handleWebOffline);
+        cleanupSync();
+      };
+    }
 
     const cleanupSync = initAutoSyncListener(showToast, () => {
       fetchLogs();
@@ -264,8 +317,9 @@ function AppContent() {
     refreshUnsyncedCount();
 
     return () => {
-      window.removeEventListener('online', updateOnlineStatus);
-      window.removeEventListener('offline', updateOnlineStatus);
+      if (networkListener) {
+        networkListener.remove();
+      }
       cleanupSync();
     };
   }, [fetchLogs, refreshUnsyncedCount, showToast]);
