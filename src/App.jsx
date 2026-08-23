@@ -244,38 +244,31 @@ function AppContent() {
 
   // Network Listener Setup (Supports both native SQLite/Network and web IndexedDB)
   useEffect(() => {
-    const storageName = Capacitor.isNativePlatform() ? 'SQLite' : 'IndexedDB';
-
     const handleStatusChange = (isConnected) => {
       setIsOnline(isConnected);
       if (isConnected) {
-        showToast('Koneksi Terhubung', 'Internet kembali aktif. Memulai Auto-Sync data ke cloud...', 'success');
+        showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
       } else {
-        showToast('Mode Offline Aktif', `Tidak ada internet. Absensi akan disimpan di ${storageName} lokal HP.`, 'warning');
+        showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
       }
     };
 
     // 1. Initial status detection
     const checkInitialConnection = async () => {
+      let isConnected = navigator.onLine;
       if (Capacitor.isNativePlatform()) {
         try {
           const status = await Network.getStatus();
-          setIsOnline(status.connected);
-          if (status.connected) {
-            showToast('Koneksi Online', 'Aplikasi terhubung ke database cloud Supabase.', 'success');
-          } else {
-            showToast('Mode Offline Aktif', 'Tidak ada internet. Absensi akan disimpan di SQLite lokal HP.', 'warning');
-          }
+          isConnected = status.connected;
         } catch (e) {
-          setIsOnline(navigator.onLine);
+          isConnected = navigator.onLine;
         }
+      }
+      setIsOnline(isConnected);
+      if (isConnected) {
+        showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
       } else {
-        setIsOnline(navigator.onLine);
-        if (navigator.onLine) {
-          showToast('Koneksi Online', 'Aplikasi terhubung ke database cloud Supabase.', 'success');
-        } else {
-          showToast('Mode Offline Aktif', 'Tidak ada internet. Absensi akan disimpan di IndexedDB HP.', 'warning');
-        }
+        showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
       }
     };
     checkInitialConnection();
