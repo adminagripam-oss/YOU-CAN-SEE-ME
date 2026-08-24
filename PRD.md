@@ -4,9 +4,9 @@
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
 - **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA & Auto-Sync Engine
 - **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
-- **Versi Dokumen**: 2.6.0 (Server-First Hybrid API, Deduplication & Minimalist UI Release)
+- **Versi Dokumen**: 3.1.0 (One-Face-Per-Employee Biometric Constraint, Offline-Capable Cosine Similarity Engine, Afdeling Mapping, Duration Calculation Release)
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage & pgcrypto) & Dexie.js v2 (IndexedDB Local Storage)
-- **Biometric Engine**: `@vladmandic/face-api` v1.7.15 (ResNet-34, 128-d Vector) + MediaPipe Face Mesh & EAR Liveness Engine (68-Point 3D Landmarks & 40-d GFV Cosine Similarity Engine)
+- **Biometric Engine**: `@vladmandic/human` v3.x (1024-dim Embedding Vector) + MediaPipe Face Mesh 478-Point & EAR Liveness Engine + Cosine Similarity Duplicate-Check Engine (Threshold ≥ 0.85)
 - **Status System**: Live Production Specifications & Enterprise-Ready PWA
 
 ---
@@ -169,8 +169,9 @@ Sistem secara cerdas membedakan status absensi hari ini:
 ### FR-3: Registrasi Master Biometrik Wajah
 - Pendaftaran master biometrik melalui dua mode: **Kamera Live** atau **Upload Foto (JPG/PNG/WEBP)**.
 - Validasi otomatis bahwa foto mengandung tepat 1 wajah yang terdeteksi jelas.
-- Pemeriksaan anti-duplikasi ($d \ge 0.55$ terhadap karyawan lain).
-- Penyimpanan ke Supabase DB (`master_descriptors`) dan caching otomatis ke IndexedDB HP (`db.user_master`).
+- **Satu Wajah Per Karyawan**: Setiap karyawan hanya boleh memiliki satu profil biometrik wajah yang unik. Sistem menjalankan validasi anti-duplikasi berbasis **Cosine Similarity** dengan threshold $\ge 0.85$ terhadap seluruh vektor master yang tersimpan di cache lokal — baik secara **real-time saat kamera aktif** maupun saat **submit formulir**.
+- Validasi duplikasi berlaku sepenuhnya **offline** karena menggunakan data dari SQLite lokal (APK) atau IndexedDB (web browser).
+- Penyimpanan ke Supabase DB (`master_descriptors`) dan caching otomatis ke SQLite/IndexedDB HP (`user_master`).
 
 ### FR-4: Manajemen Data Karyawan (CRUD)
 - Registrasi karyawan baru dengan NIK, Nama, dan Departemen.
@@ -545,7 +546,7 @@ Pemberitahuan pembaruan versi **v3.0.0** menandai peluncuran dukungan penyimpana
 * **Deteksi Jaringan Native**: Mengganti event listener online/offline bawaan browser web dengan `@capacitor/network` ketika berjalan sebagai APK native. Sistem kini menggunakan `Network.addListener('networkStatusChange', ...)` untuk memicu sinkronisasi secara instan saat koneksi seluler/Wi-Fi terdeteksi kembali.
 * **Metode Pengecekan Status Dinamis**: Auto-sync engine di [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) menggunakan method `Network.getStatus()` untuk memvalidasi status koneksi sebelum menjalankan sinkronisasi latar belakang log absensi offline ke cloud Supabase.
 
-### 7.3 Mekanisme Toleransi Kegagalan GPS Multi-Stage & Bypass Lokasi Kantor
+### 17.3 Mekanisme Toleransi Kegagalan GPS Multi-Stage & Bypass Lokasi Kantor
 * **Pengulangan Deteksi Multi-Stage**: Untuk mengatasi kendala sensor GPS perangkat mobile saat offline di perkebunan atau saat diuji coba di dalam ruangan (*indoors*), modul GPS di [AbsensiPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/AbsensiPage.jsx) dan [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx) dimodifikasi:
   - Tahap 1: Meminta koordinat GPS akurasi tinggi (High Accuracy) dengan timeout longgar 10 detik dan memanfaatkan data cache posisi selama 30 detik (`maximumAge: 30000`).
   - Tahap 2 (Fallback): Jika Tahap 1 gagal karena timeout/sinyal terhalang, sistem mengulangi permintaan dalam mode akurasi standar (Low Accuracy) dengan timeout 10 detik dan cache 5 menit.
@@ -556,3 +557,57 @@ Pemberitahuan pembaruan versi **v3.0.0** menandai peluncuran dukungan penyimpana
   - **Mode Online**: Menampilkan Toast hijau (`success`) berbunyi *"Mode Online - Aplikasi terhubung ke internet."*
   - **Mode Offline**: Menampilkan Toast kuning (`warning`) berbunyi *"Mode Offline - Aplikasi berjalan luring (offline)."*
 
+---
+
+## 18. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v3.1.0)
+
+Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-face-per-employee*, validasi duplikasi wajah berbasis Cosine Similarity yang beroperasi penuh secara luring (offline), pengayaan tampilan data Afdeling/Kebun di seluruh modul, kalkulasi durasi kerja otomatis, serta penguatan otentikasi admin berbasis PostgreSQL.
+
+### 18.1 Constraint Satu Wajah Per Karyawan (One-Face-Per-Employee Biometric Lock)
+* **Kebutuhan Bisnis**: Sebelumnya sistem tidak mencegah satu identitas biometrik (wajah) digunakan untuk mendaftarkan lebih dari satu karyawan. Hal ini membuka celah *identity fraud* pada absensi.
+* **Validasi Real-Time di Kamera**: Saat kamera registrasi aktif, setiap frame wajah yang terdeteksi langsung dibandingkan secara asinkron terhadap seluruh vektor master yang ada di storage lokal menggunakan fungsi `cosineSimilarity()`. Jika nilai similaritas $\ge 0.85$, status kamera berubah merah dengan pesan:
+  `⚠️ WAJAH SUDAH TERDAFTAR: [Nama Karyawan] (96.2%)`
+* **Double-Check Saat Submit**: Validasi yang sama dijalankan ulang pada saat tombol *Simpan* ditekan sebagai lapisan keamanan kedua, memblokir pengiriman data jika wajah terdeteksi duplikasi.
+* **Self-Exclusion pada Edit Biometrik**: Di form *edit biometrik* karyawan, karyawan yang sedang diedit dikecualikan dari pemeriksaan duplikasi (*self-exclusion*) agar admin tetap bisa memperbarui wajah karyawan yang sama.
+
+### 18.2 Cosine Similarity Engine Berbasis Cache Lokal (Offline-Capable)
+* **Fungsi Utilitas `cosineSimilarity(a, b)`**: Ditambahkan sebagai fungsi ekspor di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js). Menghitung kesamaan vektor dengan formula:
+  $$\text{CosineSimilarity}(A, B) = \frac{A \cdot B}{\|A\| \cdot \|B\|}$$
+  dengan nilai rentang $[-1, 1]$; semakin mendekati $1.0$ berarti semakin identik.
+* **Fungsi `getAllMasterVectors()`**: Ditambahkan di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) sebagai abstraction layer yang secara otomatis mengambil **semua vektor master** dari:
+  - **SQLite** (`local_master_descriptors JOIN local_employees`) — saat berjalan sebagai APK native.
+  - **IndexedDB / Dexie.js** (`user_master` table) — saat berjalan di browser web.
+* **Fungsi `sqliteGetAllMasterVectors()`**: Ditambahkan di [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) sebagai implementasi query native SQLite yang mengembalikan semua pasang `employee_id, name, nik, descriptor_json` dari tabel lokal.
+* **Threshold**: Nilai ambang batas similaritas yang digunakan adalah $\ge 0.85$ (85%).
+
+### 18.3 Mapping Kolom Afdeling/Kebun pada Seluruh Modul
+* **Dashboard Log Absensi ([DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx))**: Tabel riwayat log absensi di dashboard kini menampilkan kolom **Afdeling** dan **Nama Kebun** yang dipetakan secara dinamis dari daftar master karyawan (`employees` prop) menggunakan `employee_id` atau `nik` sebagai kunci pencarian.
+* **Halaman Log Absensi ([LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx))**: Tabel riwayat absensi biometrik menampilkan kolom **Afdeling** yang dikonsumsi dari data karyawan master, berlaku baik dalam **Mode Online** maupun **Mode Offline**.
+
+### 18.4 Kalkulasi Durasi Kerja Otomatis
+* **Rumus Durasi**: Kolom **Durasi** pada tabel [LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx) kini dihitung secara otomatis dengan rumus:
+  $$\text{Durasi} = \text{Waktu Check-Out} - \text{Waktu Check-In}$$
+  dan ditampilkan dalam format intuitif **`Xj Ym`** (contoh: `8j 15m`).
+* **Berlaku untuk Semua Mode**: Kalkulasi berjalan secara identik untuk log yang berasal dari mode online (Supabase) maupun mode offline (SQLite queue).
+
+### 18.5 Perbaikan Ikon Mode Offline (Lucide CloudOff)
+* **Masalah**: Ikon mode offline yang sebelumnya menggunakan FontAwesome (`fa-wifi-slash`) tidak dapat dimuat saat perangkat offline karena membutuhkan CDN eksternal, menampilkan kotak kosong `[ ]`.
+* **Solusi**: Mengganti ikon dengan `CloudOff` dari pustaka `lucide-react` yang di-bundle langsung di dalam APK, sehingga selalu tersedia tanpa koneksi internet.
+
+### 18.6 Penguatan Otentikasi Admin via PostgreSQL (`admin_auth`)
+* **Tabel Baru `admin_auth`**: Membuat tabel otentikasi admin di Supabase dengan kolom `username`, `password_hash` (bcrypt via `pgcrypto`), `name`, `is_active`, dan `created_at`.
+* **Fungsi RPC `verify_admin_login`**: Menambahkan/memperbarui fungsi RPC di PostgreSQL untuk memverifikasi kredensial admin secara aman menggunakan `crypt(p_password, password_hash)` dari ekstensi `pgcrypto` tanpa mengekspos hash ke sisi klien.
+* **Keamanan Data**: Tabel `admin_auth` dilindungi oleh Row Level Security (RLS) dengan policy yang memblokir akses langsung dari klien — seluruh otentikasi hanya dapat dilakukan melalui fungsi RPC `SECURITY DEFINER`.
+* **Fallback Offline**: Jika Supabase tidak dapat dijangkau (offline), sistem secara otomatis melakukan validasi kredensial lokal (`username: admin`, `password: tanaman`) untuk menjamin akses dashboard tetap tersedia saat jaringan terputus.
+
+### 18.7 Ringkasan Perubahan File
+
+| File | Jenis | Deskripsi Perubahan |
+| :--- | :--- | :--- |
+| [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) | ➕ Penambahan | Fungsi `sqliteGetAllMasterVectors()` untuk query semua vektor dari SQLite |
+| [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) | ➕ Penambahan | Fungsi `cosineSimilarity()` dan `getAllMasterVectors()` (abstraction layer SQLite + Dexie) |
+| [TabEmployeeManagement.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabEmployeeManagement.jsx) | 🔧 Upgrade | Real-time duplicate check di kamera & upload foto; double-check saat submit |
+| [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Duplicate check di edit biometrik dengan self-exclusion; mapping Afdeling di tabel |
+| [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx) | 🔧 Upgrade | Mapping Afdeling/Kebun dari `employees` master ke kolom log absensi dashboard |
+| [LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx) | 🔧 Upgrade | Kolom Afdeling, kalkulasi durasi otomatis, penggantian ikon CloudOff (Lucide) |
+| Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, fungsi RPC `verify_admin_login`, ekstensi `pgcrypto`, RLS policy |
