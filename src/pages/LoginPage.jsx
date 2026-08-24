@@ -21,7 +21,7 @@ export default function LoginPage({ showToast, theme, toggleTheme }) {
     try {
       const res = await login({ username, password });
       if (res.success) {
-        if (showToast) showToast('Login Berhasil', res.message, 'success');
+        if (showToast) showToast('Login Berhasil', '', 'success');
       } else {
         if (showToast) showToast('Login Gagal', res.message, 'error');
       }
