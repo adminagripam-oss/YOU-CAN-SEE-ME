@@ -243,14 +243,25 @@ function AppContent() {
       console.warn('[FETCH OFFLINE LOGS ERROR]:', e);
     }
 
-    // Step 3: Merge and de-duplicate based on employee_id and timestamp (to nearest second)
+    // Step 3: Merge and de-duplicate based on employee_id, local date (YYYY-MM-DD), and attendance_type
+    const getLocalDateString = (ts) => {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     const mergedLogs = [...offlineLogs];
     const onlineSignatures = new Set();
 
     onlineLogs.forEach(oLog => {
-      if (oLog.timestamp) {
-        const dateStr = new Date(oLog.timestamp).toISOString().substring(0, 19);
-        onlineSignatures.add(`${oLog.employee_id}_${dateStr}`);
+      const localDate = getLocalDateString(oLog.timestamp);
+      if (localDate) {
+        const signature = `${oLog.employee_id}_${localDate}_${oLog.attendance_type}`;
+        onlineSignatures.add(signature);
       }
       mergedLogs.push(oLog);
     });
@@ -259,9 +270,9 @@ function AppContent() {
     const seen = new Set();
 
     mergedLogs.forEach(log => {
-      if (!log.timestamp) return;
-      const dateStr = new Date(log.timestamp).toISOString().substring(0, 19);
-      const signature = `${log.employee_id}_${dateStr}`;
+      const localDate = getLocalDateString(log.timestamp);
+      if (!localDate) return;
+      const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
       
       if (!seen.has(signature)) {
         seen.add(signature);

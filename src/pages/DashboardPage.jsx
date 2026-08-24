@@ -28,7 +28,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   // Count unique verified employee check-ins for the selectedDate
   const verifiedEmployeeIds = new Set(
     filteredLogs
-      .filter((l) => l.status === 'Verified' || l.status === 'Hadir' || l.status === 'Hadir (Verified)' || !l.status)
+      .filter((l) => {
+        const statusLower = (l.status || '').toLowerCase();
+        return statusLower === '' || statusLower.includes('hadir') || statusLower.includes('verified');
+      })
       .map((l) => l.nik || l.employee_id)
   );
 
