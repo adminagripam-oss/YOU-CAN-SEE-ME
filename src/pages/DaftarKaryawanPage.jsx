@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -228,6 +228,192 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         }
       },
     });
+  };
+
+  // CSV & Photos Bulk Import States
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [photoFiles, setPhotoFiles] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: '' });
+
+  // Parse CSV function supporting comma and semicolon
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length === 0) return [];
+    
+    const delimiter = lines[0].includes(';') ? ';' : ',';
+    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+    
+    const result = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''));
+      if (values.length < headers.length) continue;
+      
+      const obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = values[index];
+      });
+      result.push(obj);
+    }
+    return result;
+  };
+
+  // Convert File to Embedding
+  const processImageFileForEmbedding = (file) => {
+    return new Promise((resolve) => {
+      const imgUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        try {
+          if (human.config?.face?.description) {
+            human.config.face.description.enabled = true;
+          }
+          const result = await human.detect(img);
+          URL.revokeObjectURL(imgUrl);
+          if (result.face && result.face.length > 0 && result.face[0].embedding) {
+            resolve(Array.from(result.face[0].embedding));
+          } else {
+            resolve(null);
+          }
+        } catch (err) {
+          console.error('Error detecting face in imported photo:', err);
+          URL.revokeObjectURL(imgUrl);
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(imgUrl);
+        resolve(null);
+      };
+      img.src = imgUrl;
+    });
+  };
+
+  const handleStartImport = async () => {
+    if (!csvFile) {
+      showToast('File CSV Kosong', 'Harap pilih file CSV terlebih dahulu.', 'error');
+      return;
+    }
+    
+    setImporting(true);
+    setImportProgress({ current: 0, total: 0, status: 'Membaca file CSV...' });
+    
+    try {
+      const csvText = await csvFile.text();
+      const rows = parseCSV(csvText);
+      if (rows.length === 0) {
+        showToast('CSV Kosong', 'Tidak ada data karyawan yang valid di dalam file CSV.', 'error');
+        setImporting(false);
+        return;
+      }
+      
+      setImportProgress({ current: 0, total: rows.length, status: 'Memulai pencocokan foto...' });
+      
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const nik = row.nik || row.employee_id;
+        const name = row.name || row.nama;
+        
+        if (!nik || !name) {
+          failCount++;
+          continue;
+        }
+        
+        setImportProgress(prev => ({
+          ...prev,
+          current: i + 1,
+          status: `Memproses ${name} (NIK: ${nik})...`
+        }));
+        
+        // Find matching photo
+        const photoFile = photoFiles.find(file => {
+          const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+          return baseName.trim() === String(nik).trim();
+        });
+        
+        let descriptorJson = null;
+        let hasMasterBiometric = false;
+        
+        if (photoFile) {
+          const embedding = await processImageFileForEmbedding(photoFile);
+          if (embedding) {
+            descriptorJson = JSON.stringify(embedding);
+            hasMasterBiometric = true;
+          }
+        }
+        
+        // Build employee payload
+        const employeePayload = {
+          nik: String(nik).trim(),
+          name: String(name).trim(),
+          department: row.jabatan || row.department || 'Pekerja',
+          afdeling: row.afdeling || '',
+          nama_kebun: row.nama_kebun || row.kebun || '',
+          status_tk: row.status_tk || 'BHL',
+          jabatan: row.jabatan || row.department || 'Pekerja',
+          status_perkawinan: row.status_perkawinan || 'Lajang',
+          descriptor_json: descriptorJson,
+          has_master_biometric: hasMasterBiometric
+        };
+        
+        try {
+          // 1. Insert/Upsert into Supabase
+          const { data: insertedEmp, error: dbErr } = await supabase
+            .from('employees')
+            .upsert(employeePayload, { onConflict: 'nik' })
+            .select('id')
+            .single();
+            
+          if (dbErr) throw dbErr;
+          
+          const employeeId = insertedEmp?.id;
+          
+          // 2. If biometrics are ready, upsert descriptor
+          if (employeeId && descriptorJson) {
+            const { error: descErr } = await supabase
+              .from('master_descriptors')
+              .upsert({ employee_id: employeeId, descriptor_json: descriptorJson });
+            if (descErr) console.warn('Warning: Failed to save master descriptor:', descErr.message);
+          }
+          
+          // 3. Cache locally in SQLite/IndexedDB
+          await cacheUserMasterVector({
+            employee_id: employeeId,
+            nik: employeePayload.nik,
+            name: employeePayload.name,
+            department: employeePayload.jabatan,
+            afdeling: employeePayload.afdeling,
+            nama_kebun: employeePayload.nama_kebun,
+            status_tk: employeePayload.status_tk,
+            jabatan: employeePayload.jabatan,
+            status_perkawinan: employeePayload.status_perkawinan,
+            descriptor_json: descriptorJson,
+            has_master_biometric: hasMasterBiometric
+          });
+          
+          successCount++;
+        } catch (err) {
+          console.error(`Gagal menyimpan karyawan NIK: ${nik}`, err);
+          failCount++;
+        }
+      }
+      
+      showToast('Import Selesai', `Berhasil mengimpor ${successCount} karyawan. Gagal: ${failCount}`, 'success');
+      refreshEmployees();
+      setImportModalOpen(false);
+      setCsvFile(null);
+      setPhotoFiles([]);
+    } catch (err) {
+      console.error('Import CSV error:', err);
+      showToast('Gagal Import', `Terjadi kesalahan saat memproses CSV: ${err.message}`, 'error');
+    } finally {
+      setImporting(false);
+    }
   };
 
   // ---------------------------------
@@ -565,13 +751,16 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           
           {/* Export & Action Buttons */}
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn" onClick={exportToCSV} style={{ background: '#fff', color: '#333', border: '1px solid #ddd', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn" onClick={exportToCSV} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
               <FileSpreadsheet size={16} color="#107C41" /> Export Excel
             </button>
-            <button type="button" className="btn" onClick={exportToPDF} style={{ background: '#fff', color: '#333', border: '1px solid #ddd', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn" onClick={exportToPDF} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
               <FileDown size={16} color="#E81123" /> Export PDF
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => navigate('/karyawan')} style={{ background: '#1e293b', border: '1px solid #334155', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn" onClick={() => setImportModalOpen(true)} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
+              <Upload size={16} color="#4f46e5" /> Import CSV + Foto
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => navigate('/karyawan')} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
               <Plus size={16} /> Tambah Karyawan
             </button>
           </div>
@@ -728,8 +917,8 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                 {editUpdateBiometrics && (
                   <div style={{ marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                      <button type="button" className={`btn ${editFormMode === 'camera' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'camera' ? 'rgba(255,255,255,0.1)' : '' }} onClick={() => setEditFormMode('camera')}><i className="fa-solid fa-video"></i> Gunakan Kamera</button>
-                      <button type="button" className={`btn ${editFormMode === 'file' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'file' ? 'rgba(255,255,255,0.1)' : '' }} onClick={() => setEditFormMode('file')}><i className="fa-solid fa-upload"></i> Unggah File Foto</button>
+                      <button type="button" className={`btn ${editFormMode === 'camera' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'camera' ? 'var(--bg-primary)' : undefined, color: editFormMode !== 'camera' ? 'var(--text-main)' : '#fff', border: editFormMode !== 'camera' ? '1px solid var(--border-color)' : '1px solid transparent', width: 'auto' }} onClick={() => setEditFormMode('camera')}><i className="fa-solid fa-video"></i> Gunakan Kamera</button>
+                      <button type="button" className={`btn ${editFormMode === 'file' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'file' ? 'var(--bg-primary)' : undefined, color: editFormMode !== 'file' ? 'var(--text-main)' : '#fff', border: editFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent', width: 'auto' }} onClick={() => setEditFormMode('file')}><i className="fa-solid fa-upload"></i> Unggah File Foto</button>
                     </div>
                     {editFormMode === 'camera' ? (
                       <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
@@ -756,6 +945,86 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Simpan Perubahan</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk Import CSV + Photos Modal ── */}
+      {importModalOpen && (
+        <div className="login-modal-overlay no-print" style={{ zIndex: 99999 }}>
+          <div className="login-modal-content" style={{ maxWidth: '500px', width: '90%', padding: '1.75rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-main)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold' }}>Import Massal CSV & Foto</h3>
+              <button type="button" onClick={() => !importing && setImportModalOpen(false)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '1.2rem', cursor: 'pointer' }}>&times;</button>
+            </div>
+            
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', background: 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-primary)' }}>
+              <strong>Petunjuk CSV:</strong> File CSV harus memiliki header <code>nik</code> dan <code>name</code>. Nama file foto harus sama dengan NIK (contoh: <code>12345.jpg</code> untuk NIK 12345).
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', fontSize: '0.85rem' }}>1. Pilih File CSV Karyawan</label>
+              <input 
+                type="file" 
+                accept=".csv" 
+                disabled={importing}
+                onChange={(e) => setCsvFile(e.target.files[0])}
+                style={{ width: '100%', padding: '8px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-primary)', color: 'inherit' }}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', fontSize: '0.85rem' }}>2. Pilih Foto Wajah Karyawan (Bisa Banyak File)</label>
+              <input 
+                type="file" 
+                multiple
+                accept="image/*" 
+                disabled={importing}
+                onChange={(e) => setPhotoFiles(Array.from(e.target.files))}
+                style={{ width: '100%', padding: '8px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-primary)', color: 'inherit' }}
+              />
+              {photoFiles.length > 0 && (
+                <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--accent-success)' }}>
+                  ✓ {photoFiles.length} foto wajah siap diproses.
+                </div>
+              )}
+            </div>
+
+            {importing && (
+              <div style={{ background: 'rgba(0,0,0,0.05)', padding: '12px', borderRadius: '6px', marginBottom: '1.5rem', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '6px' }}>
+                  <span>Progres Import:</span>
+                  <span>{importProgress.current} / {importProgress.total}</span>
+                </div>
+                <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.1)', borderRadius: '4px', overflow: 'hidden', marginBottom: '8px' }}>
+                  <div style={{ width: `${(importProgress.current / importProgress.total) * 100}%`, height: '100%', background: 'var(--accent-primary)', transition: 'width 0.2s' }}></div>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  {importProgress.status}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '15px' }}>
+              <button 
+                type="button" 
+                className="btn" 
+                disabled={importing}
+                onClick={() => setImportModalOpen(false)}
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', padding: '8px 16px', width: 'auto' }}
+              >
+                Batal
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                disabled={importing || !csvFile}
+                onClick={handleStartImport}
+                style={{ padding: '8px 16px', width: 'auto' }}
+              >
+                {importing ? 'Memproses...' : 'Mulai Import'}
+              </button>
+            </div>
           </div>
         </div>
       )}
