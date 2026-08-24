@@ -400,27 +400,24 @@ export function useNormalizedFaceMesh({
     const canvas = canvasRef.current;
 
     if (video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
-      // 1. Ensure Offscreen Canvas is setup for aspect cropping
+      const intrinsicWidth = video.videoWidth;
+      const intrinsicHeight = video.videoHeight;
+
+      // 1. Ensure Offscreen Canvas matches video dimensions
       if (!offscreenCanvasRef.current) {
         offscreenCanvasRef.current = document.createElement('canvas');
       }
       const offscreen = offscreenCanvasRef.current;
-      if (offscreen.width !== STD_WIDTH || offscreen.height !== STD_HEIGHT) {
-        offscreen.width = STD_WIDTH;
-        offscreen.height = STD_HEIGHT;
+      if (offscreen.width !== intrinsicWidth || offscreen.height !== intrinsicHeight) {
+        offscreen.width = intrinsicWidth;
+        offscreen.height = intrinsicHeight;
       }
 
       const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
       if (!offCtx) return;
 
-      // Calculate crops for standard 4:3
-      const { srcX, srcY, srcW, srcH } = computeCenterCrop(
-        video.videoWidth,
-        video.videoHeight
-      );
-
-      // Perform center-crop and draw into standardized offscreen canvas (640x480)
-      offCtx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, STD_WIDTH, STD_HEIGHT);
+      // Draw the video directly onto the offscreen canvas matching intrinsic dimensions
+      offCtx.drawImage(video, 0, 0, intrinsicWidth, intrinsicHeight);
 
       // 2. Call injected facial model on the normalized offscreen image
       let detection: any = null;
@@ -430,9 +427,9 @@ export function useNormalizedFaceMesh({
         console.warn('[useNormalizedFaceMesh] Face detection error:', err);
       }
 
-      // 3. Align output canvas overlay to match standard coordinates
-      if (canvas.width !== STD_WIDTH) canvas.width = STD_WIDTH;
-      if (canvas.height !== STD_HEIGHT) canvas.height = STD_HEIGHT;
+      // 3. Align output canvas overlay to match intrinsic dimensions
+      if (canvas.width !== intrinsicWidth) canvas.width = intrinsicWidth;
+      if (canvas.height !== intrinsicHeight) canvas.height = intrinsicHeight;
 
       const ctx = canvas.getContext('2d');
 
@@ -440,7 +437,7 @@ export function useNormalizedFaceMesh({
 
       if (!detection || !meshData || meshData.length === 0) {
         // Clear screen and reset filters if face is lost
-        if (ctx) ctx.clearRect(0, 0, STD_WIDTH, STD_HEIGHT);
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
         smoothedMeshRef.current = null;
         oneEuroFiltersRef.current = [];
         callbacksRef.current.onNoFace?.();

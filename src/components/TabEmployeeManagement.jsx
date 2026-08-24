@@ -88,7 +88,7 @@ export default function TabEmployeeManagement({
     }
 
     // Menggambar 478 Mesh Points ke canvas overlay
-    ctx.clearRect(0, 0, 640, 480);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     if (smoothedMesh && smoothedMesh.length > 0) {
       ctx.fillStyle = 'rgba(0, 255, 0, 0.85)';
       for (const pt of smoothedMesh) {

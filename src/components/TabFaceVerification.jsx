@@ -1298,7 +1298,7 @@ export default function TabFaceVerification({
     // ── Draw Biometric Node Overlay ───────────────────────────────────────
     // Gunakan smoothedMesh (koordinat piksel canvas 640×480, sudah di-smooth EMA)
     // agar visualisasi konsisten di semua device
-    ctx.clearRect(0, 0, 640, 480);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     drawGeometricMesh(
       ctx,
       smoothedMesh,
