@@ -437,10 +437,6 @@ export function useNormalizedFaceMesh({
 
       // Reset transform before drawing
       offCtx.setTransform(1, 0, 0, 1, 0, 0);
-      
-      // Apply scaleX(-1) mirror transformation on the offscreen canvas
-      offCtx.translate(STD_WIDTH, 0);
-      offCtx.scale(-1, 1);
 
       // Draw standard cropped video frame
       offCtx.drawImage(
