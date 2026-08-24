@@ -192,18 +192,14 @@ export default function TabEmployeeManagement({
 
       if (currentEmpDescriptorRef.current) {
         const descJson = JSON.stringify(currentEmpDescriptorRef.current);
-        const { error: bioErr } = await supabase
+        await supabase
           .from('master_descriptors')
           .upsert({
             employee_id: createdEmpId,
             descriptor_json: descJson,
           }, { onConflict: 'employee_id' });
 
-        if (bioErr) {
-          console.error('[SUPABASE DIRECT REGISTER BIO ERROR]:', bioErr);
-        } else {
-          await supabase.from('employees').update({ has_master_biometric: true }).eq('id', createdEmpId);
-        }
+
 
         await cacheUserMasterVector({
           employee_id: createdEmpId,
