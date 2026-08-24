@@ -153,7 +153,7 @@ export async function loadHumanWithFallback() {
   const pathsToTry = [
     window.location.origin + '/models',
     './models',
-    'https://cdn.jsdelivr.net/npm/@vladmandic/human/models',
+    'https://cdn.jsdelivr.net/npm/@vladmandic/human@3.3.6/models',
   ];
 
   let lastErr = null;
