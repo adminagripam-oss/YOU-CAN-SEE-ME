@@ -71,6 +71,22 @@ export const db = {
       } else {
         return await dexieDb.attendance_sync_queue.toArray();
       }
+    },
+    async delete(id) {
+      const idStr = String(id);
+      // Bersihkan prefix "offline_" jika ada
+      const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
+      const cleanIdInt = parseInt(cleanId, 10);
+      
+      if (Capacitor.isNativePlatform()) {
+        if (!isNaN(cleanIdInt)) {
+          await sqliteRemoveSyncedLogs([cleanIdInt]);
+        }
+      } else {
+        if (!isNaN(cleanIdInt)) {
+          await dexieDb.attendance_sync_queue.delete(cleanIdInt);
+        }
+      }
     }
   }
 };

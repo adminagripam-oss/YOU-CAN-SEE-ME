@@ -635,3 +635,18 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
 ### 18.11 Pinning Versi Model CDN ke v3.3.6
 * **Masalah Silent Update CDN**: Pemuatan fallback dari CDN jsdelivr tanpa versi tetap (menggunakan `@latest` atau `@1.x`) berpotensi mengunduh versi model `faceres` yang lebih baru atau berbeda secara tidak sengaja di kemudian hari. Hal ini merusak validitas pencocokan vektor.
 * **Solusi Versi Pinned**: Mengunci jalur CDN secara eksplisit di [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) ke `https://cdn.jsdelivr.net/npm/@vladmandic/human@3.3.6/models` untuk memastikan versi model neural network yang diunduh selalu konsisten 100% di semua device.
+
+### 18.12 Enforce Absensi Maksimal Sekali Sehari (Check-In & Check-Out Limit)
+* **Kebutuhan Bisnis**: Satu karyawan hanya diizinkan melakukan **Check-In tepat 1x** dan **Check-Out tepat 1x** dalam satu hari untuk menghindari redundansi atau spam pencatatan kehadiran ganda.
+* **Mekanisme Validasi & UI**:
+  * Ketika `fetchAttendanceStatus` mendeteksi bahwa karyawan yang dipilih memiliki log `CHECK_IN` dan `CHECK_OUT` valid untuk hari ini (baik di Supabase online maupun Dexie offline queue), tombol kehadiran diubah menjadi disabled dengan tulisan: `🔒 Absensi Selesai Hari Ini`.
+  * Pada kamera face-matching, jika absensi harian terdeteksi sudah lengkap, sistem akan langsung menonaktifkan proses facial matching dan menghentikan pengajuan otomatis (*auto-submit*), serta menampilkan pesan overlay: `✓ Absensi Hari Ini Sudah Lengkap`.
+* **Pengecekan Dinamis (Exception Bypass)**: Aturan pembatasan sekali sehari ini dikecualikan secara dinamis jika admin menghapus salah satu log absensi (baik check-in maupun check-out) milik karyawan tersebut dari [TabAttendanceLogs.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabAttendanceLogs.jsx). Begitu log dihapus, status absensi karyawan otomatis di-reset sehingga mereka dapat melakukan scan/absen kembali pada hari yang sama.
+
+### 18.13 Pembersihan Log Offline secara Lokal (IndexedDB & SQLite)
+* **Masalah Deletion Mismatch**: Saat menghapus catatan absensi dari logs page, sistem sebelumnya hanya menghapusnya dari database online Supabase. Catatan absensi offline gantung yang masih berada di antrean antarmuka lokal (`offline_` prefix) tidak terhapus dari SQLite (APK) maupun IndexedDB (Web), menyebabkan data tersebut tetap tampil secara redundan (*dual data*).
+* **Penyelesaian**:
+  * Menambahkan fungsi `delete` pada objek `attendance_sync_queue` di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js).
+  * Pada form log absensi [TabAttendanceLogs.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabAttendanceLogs.jsx), proses `handleDeleteGroup` kini memisahkan ID log yang akan dihapus. Log dengan prefix `offline_` akan didelete secara lokal dari SQLite (`local_attendance_queue` via `sqliteRemoveSyncedLogs`) maupun IndexedDB (`attendance_sync_queue`), sedangkan log online dihapus dari Supabase.
+  * Memperbaiki logika deduplikasi merge logs pada [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) dengan memeriksa signature offline log terhadap `onlineSignatures` *sebelum* mendaftarkannya ke dalam set `seen` untuk mencegah tersembunyinya log online akibat tabrakan kunci signature.
+

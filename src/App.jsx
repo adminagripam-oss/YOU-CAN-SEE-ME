@@ -288,13 +288,13 @@ function AppContent() {
       if (!localDate) return;
       const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
       
+      // Skip offline log if its signature is already in online logs
+      if (log.isOfflineQueue && onlineSignatures.has(signature)) {
+        return;
+      }
+
       if (!seen.has(signature)) {
         seen.add(signature);
-        
-        // Skip offline log if its signature is already in online logs
-        if (log.isOfflineQueue && onlineSignatures.has(signature)) {
-          return;
-        }
         finalLogs.push(log);
       }
     });

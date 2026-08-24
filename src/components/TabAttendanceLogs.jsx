@@ -189,23 +189,35 @@ export default function TabAttendanceLogs({
 
           console.log('[DELETE] Menghapus IDs:', idsToDelete);
 
-          // Menghapus data langsung ke Supabase Cloud
+          // Hapus data (SQLite/IndexedDB jika offline log, atau Supabase jika online log)
           try {
             // Optimistic update: instantly remove from local state
             setDeletedLogIds(prev => [...prev, ...idsToDelete]);
 
-            const { error: sbErr } = await supabase
-              .from('attendance_logs')
-              .delete()
-              .in('id', idsToDelete);
+            const offlineIds = idsToDelete.filter(id => String(id).startsWith('offline_'));
+            const onlineIds = idsToDelete.filter(id => !String(id).startsWith('offline_'));
 
-            if (!sbErr) {
-              showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
-            } else {
-              throw sbErr;
+            if (offlineIds.length > 0) {
+              const { db } = await import('../db');
+              for (const offlineId of offlineIds) {
+                await db.attendance_sync_queue.delete(offlineId);
+              }
             }
+
+            if (onlineIds.length > 0) {
+              const { error: sbErr } = await supabase
+                .from('attendance_logs')
+                .delete()
+                .in('id', onlineIds);
+
+              if (sbErr) {
+                throw sbErr;
+              }
+            }
+
+            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
           } catch (sbEx) {
-            console.error('[DELETE EXCEPTION]:', sbEx.message);
+            console.error('[DELETE EXCEPTION]:', sbEx?.message || sbEx);
             // Revert optimistic update on failure
             setDeletedLogIds(prev => prev.filter(id => !idsToDelete.includes(id)));
             showToast('Gagal Menghapus', 'Gagal menghapus data.', 'error');

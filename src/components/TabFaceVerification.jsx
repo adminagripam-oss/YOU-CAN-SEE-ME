@@ -1185,7 +1185,16 @@ export default function TabFaceVerification({
     }
 
     // ── 1-to-1 Match via Cosine Similarity ───────────────────────────────
-    // Skip calculations if already matched to avoid duplicate checks and fluctuations
+    // Skip calculations if already matched or if attendance is complete for today
+    const currentStatus = attendanceStatusRef.current;
+    if (currentStatus.checkInTime && currentStatus.checkOutTime) {
+      setLivenessStatusMsg('✓ Absensi Hari Ini Sudah Lengkap');
+      setMatchRate(0);
+      setIsMatched(false);
+      isMatchedRef.current = false;
+      return;
+    }
+
     if (currentDescRef.current && !isMatchedRef.current) {
       let rawPct = 0;
       const threshold = 80.0;
@@ -1332,6 +1341,11 @@ export default function TabFaceVerification({
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
     if (!selectedEmployeeId) {
       showToast('Pilih Karyawan', 'Harap pilih karyawan terlebih dahulu!', 'error');
+      return;
+    }
+
+    if (attendanceStatus.checkInTime && attendanceStatus.checkOutTime) {
+      showToast('Absensi Lengkap', 'Karyawan ini sudah melakukan Check-In dan Check-Out hari ini.', 'warning');
       return;
     }
 
