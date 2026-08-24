@@ -650,7 +650,29 @@ export default function TabAttendanceLogs({
                   <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
                   <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                   <TableCell className="nik-cell">{log.nik}</TableCell>
-                  <TableCell>{log.name}</TableCell>
+                  <TableCell>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{log.name}</span>
+                      {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) && (
+                        <span 
+                          style={{ 
+                            fontSize: '0.65rem', 
+                            background: 'var(--accent-warning)', 
+                            color: '#fff', 
+                            padding: '2px 6px', 
+                            borderRadius: '4px', 
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px' 
+                          }}
+                          title="Data absensi disimpan lokal dan akan disinkronkan saat online"
+                        >
+                          <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize: '0.6rem' }}></i> Offline
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
                   <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
                   <TableCell>
@@ -703,12 +725,18 @@ export default function TabAttendanceLogs({
                   </TableCell>
                   <TableCell className="no-print">
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
-                        <Edit2 size={14} />
-                      </button>
-                      <button className="btn-action delete" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleDeleteGroup(log)} title="Hapus">
-                        <Trash2 size={14} />
-                      </button>
+                      {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) ? (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Menunggu Sinkronisasi</span>
+                      ) : (
+                        <>
+                          <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
+                            <Edit2 size={14} />
+                          </button>
+                          <button className="btn-action delete" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleDeleteGroup(log)} title="Hapus">
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

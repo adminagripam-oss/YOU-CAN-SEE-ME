@@ -173,53 +173,110 @@ function AppContent() {
   }, []);
 
   // Fetch Attendance Logs (1-Tier: Direct Supabase)
+  // Fetch Attendance Logs (2-Tier: Supabase + Offline Local Queue with Deduplication)
   const fetchLogs = useCallback(async () => {
-    let logData = null;
+    let onlineLogs = [];
 
-    // Tier 1: Direct Supabase Cloud Database Query with Employee Detail Enrichment
-    if (!logData) {
-      try {
-        const { data: rawLogs, error } = await supabase
-          .from('attendance_logs')
-          .select('*')
-          .order('timestamp', { ascending: false });
+    // Step 1: Query Supabase online logs
+    try {
+      const { data: rawLogs, error } = await supabase
+        .from('attendance_logs')
+        .select('*')
+        .order('timestamp', { ascending: false });
 
-        if (!error && rawLogs) {
-          const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
-          let empMap = new Map();
-          if (empIds.length > 0) {
-            const { data: empData } = await supabase
-              .from('employees')
-              .select('id, nik, name, department, afdeling')
-              .in('id', empIds);
-            if (empData) {
-              empMap = new Map(empData.map((e) => [e.id, e]));
-            }
+      if (!error && rawLogs) {
+        const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
+        let empMap = new Map();
+        if (empIds.length > 0) {
+          const { data: empData } = await supabase
+            .from('employees')
+            .select('id, nik, name, department, afdeling')
+            .in('id', empIds);
+          if (empData) {
+            empMap = new Map(empData.map((e) => [e.id, e]));
           }
-
-          logData = rawLogs.map((log) => {
-            const emp = empMap.get(log.employee_id) || {};
-            const typeLabel =
-              log.attendance_type ||
-              (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
-            return {
-              ...log,
-              attendance_type: typeLabel,
-              nik: emp.nik || log.nik || '-',
-              name: emp.name || log.name || `Karyawan #${log.employee_id}`,
-              department: emp.department || log.department || '-',
-              afdeling: emp.afdeling || log.afdeling || '-'
-            };
-          });
         }
-      } catch (err) {
-        console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
+
+        onlineLogs = rawLogs.map((log) => {
+          const emp = empMap.get(log.employee_id) || {};
+          const typeLabel =
+            log.attendance_type ||
+            (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
+          return {
+            ...log,
+            attendance_type: typeLabel,
+            nik: emp.nik || log.nik || '-',
+            name: emp.name || log.name || `Karyawan #${log.employee_id}`,
+            department: emp.department || log.department || '-',
+            afdeling: emp.afdeling || log.afdeling || '-'
+          };
+        });
       }
+    } catch (err) {
+      console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
     }
 
-    if (logData) {
-      setLogs(logData);
+    // Step 2: Query offline pending logs from SQLite / IndexedDB
+    let offlineLogs = [];
+    try {
+      const pending = await getUnsyncedLogs();
+      if (pending && pending.length > 0) {
+        offlineLogs = pending.map(log => {
+          const typeLabel = log.attendance_type || 'CHECK-IN';
+          return {
+            id: `offline_${log.id}`,
+            employee_id: log.employee_id,
+            timestamp: log.timestamp || new Date().toISOString(),
+            location: log.location || 'Offline Queue',
+            status: log.status || 'Hadir (Offline)',
+            euclidean_distance: log.euclidean_distance || 0,
+            attendance_type: typeLabel,
+            nik: log.nik || '-',
+            name: log.name || 'Karyawan',
+            department: log.department || '-',
+            afdeling: log.afdeling || '-',
+            isOfflineQueue: true
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('[FETCH OFFLINE LOGS ERROR]:', e);
     }
+
+    // Step 3: Merge and de-duplicate based on employee_id and timestamp (to nearest second)
+    const mergedLogs = [...offlineLogs];
+    const onlineSignatures = new Set();
+
+    onlineLogs.forEach(oLog => {
+      if (oLog.timestamp) {
+        const dateStr = new Date(oLog.timestamp).toISOString().substring(0, 19);
+        onlineSignatures.add(`${oLog.employee_id}_${dateStr}`);
+      }
+      mergedLogs.push(oLog);
+    });
+
+    const finalLogs = [];
+    const seen = new Set();
+
+    mergedLogs.forEach(log => {
+      if (!log.timestamp) return;
+      const dateStr = new Date(log.timestamp).toISOString().substring(0, 19);
+      const signature = `${log.employee_id}_${dateStr}`;
+      
+      if (!seen.has(signature)) {
+        seen.add(signature);
+        
+        // Skip offline log if its signature is already in online logs
+        if (log.isOfflineQueue && onlineSignatures.has(signature)) {
+          return;
+        }
+        finalLogs.push(log);
+      }
+    });
+
+    // Sort by timestamp descending
+    finalLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    setLogs(finalLogs);
   }, []);
 
   // Check Unsynced Count from IndexedDB
