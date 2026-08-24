@@ -1199,10 +1199,22 @@ export default function TabFaceVerification({
         console.group('🔍 [FACE MATCH DIAGNOSTIC]');
         console.log('currentDesc (embedding) → panjang:', currentDescRef.current?.length ?? 'NULL');
         console.log('masterVector            → panjang:', masterVectorRef.current?.length ?? 'NULL — Pastikan karyawan sudah didaftarkan biometriknya!');
+        
         if (currentDescRef.current && masterVectorRef.current) {
           if (currentDescRef.current.length !== masterVectorRef.current.length) {
             console.warn('❌ DIMENSI TIDAK COCOK:', currentDescRef.current.length, '≠', masterVectorRef.current.length);
           } else {
+            const normA = Math.sqrt(currentDescRef.current.reduce((s, v) => s + v * v, 0));
+            const normB = Math.sqrt(masterVectorRef.current.reduce((s, v) => s + v * v, 0));
+            console.log('📈 Vector Norms -> currentDesc:', normA.toFixed(4), '| masterVector:', normB.toFixed(4));
+            console.log('🔢 currentDesc (first 5):', JSON.stringify(currentDescRef.current.slice(0, 5)));
+            console.log('🔢 masterVector (first 5):', JSON.stringify(masterVectorRef.current.slice(0, 5)));
+            
+            // TF.js configuration diagnostics
+            const tfBackend = human.tf?.getBackend?.() || 'unknown';
+            const forceF16 = human.tf?.env?.()?.get?.('WEBGL_FORCE_F16_TEXTURES');
+            console.log('⚙️ TF.js Env -> Backend:', tfBackend, '| FORCE_F16:', forceF16 ?? 'undefined');
+            
             const testSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
             console.log('✅ Cosine Similarity RAW:', (testSim * 100).toFixed(2) + '%');
           }
