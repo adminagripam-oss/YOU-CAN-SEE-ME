@@ -38,8 +38,20 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     console.log(`[Auto-Sync] Attempting to sync ${pendingLogs.length} pending offline attendance logs to server...`);
 
     const logsToInsert = pendingLogs.map(log => {
-      const { id, is_synced, created_at, ...rest } = log;
-      return rest;
+      return {
+        employee_id: log.employee_id,
+        timestamp: log.timestamp,
+        location: log.location,
+        status: log.status,
+        euclidean_distance: log.euclidean_distance,
+        latitude: log.latitude !== undefined ? log.latitude : (log.lat !== undefined ? log.lat : null),
+        longitude: log.longitude !== undefined ? log.longitude : (log.lng !== undefined ? log.lng : null),
+        durasi: log.durasi || null,
+        attendance_type: log.attendance_type || 'CHECK_IN',
+        nik: log.nik || null,
+        name: log.name || null,
+        department: log.department || null
+      };
     });
 
     const { error } = await supabase
