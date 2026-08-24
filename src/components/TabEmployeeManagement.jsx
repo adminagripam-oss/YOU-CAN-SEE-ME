@@ -366,8 +366,10 @@ export default function TabEmployeeManagement({
                 style={{
                   padding: '6px 12px',
                   fontSize: '0.8rem',
-                  background: empFormMode !== 'camera' ? 'rgba(255,255,255,0.1)' : undefined,
-                  color: '#fff',
+                  background: empFormMode !== 'camera' ? 'var(--bg-primary)' : undefined,
+                  color: empFormMode !== 'camera' ? 'var(--text-main)' : '#fff',
+                  border: empFormMode !== 'camera' ? '1px solid var(--border-color)' : '1px solid transparent',
+                  width: 'auto',
                 }}
                 onClick={() => setEmpFormMode('camera')}
               >
@@ -379,8 +381,10 @@ export default function TabEmployeeManagement({
                 style={{
                   padding: '6px 12px',
                   fontSize: '0.8rem',
-                  background: empFormMode !== 'file' ? 'rgba(255,255,255,0.1)' : undefined,
-                  color: '#fff',
+                  background: empFormMode !== 'file' ? 'var(--bg-primary)' : undefined,
+                  color: empFormMode !== 'file' ? 'var(--text-main)' : '#fff',
+                  border: empFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent',
+                  width: 'auto',
                 }}
                 onClick={() => setEmpFormMode('file')}
               >
