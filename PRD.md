@@ -604,14 +604,14 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
 
 | File | Jenis | Deskripsi Perubahan |
 | :--- | :--- | :--- |
-| [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) | ➕ Penambahan | Fungsi `sqliteGetAllMasterVectors()` untuk query semua vektor dari SQLite |
-| [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) | ➕ Penambahan | Fungsi `cosineSimilarity()` dan `getAllMasterVectors()` (abstraction layer SQLite + Dexie) |
+| [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) | ➕ Penambahan | Fungsi `sqliteGetAllMasterVectors()` untuk query semua vektor; `sqliteDeleteEmployeeBiometrics()` untuk menghapus cache SQLite |
+| [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) | ➕ Penambahan | Fungsi `cosineSimilarity()`, `getAllMasterVectors()`, dan `deleteLocalEmployee()` (abstraction layer pembersihan cache SQLite + Dexie) |
 | [TabEmployeeManagement.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabEmployeeManagement.jsx) | 🔧 Upgrade | Real-time duplicate check di kamera & upload foto; double-check saat submit |
-| [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Duplicate check di edit biometrik dengan self-exclusion; mapping Afdeling di tabel |
+| [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Duplicate check di edit biometrik dengan self-exclusion; mapping Afdeling di tabel; pembersihan cache saat hapus karyawan |
 | [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx) | 🔧 Upgrade | Mapping Afdeling/Kebun dari `employees` master ke kolom log absensi dashboard |
 | [LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx) | 🔧 Upgrade | Kolom Afdeling, kalkulasi durasi otomatis, penggantian ikon CloudOff (Lucide) |
 | [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) | 🔧 Upgrade | Pendaftaran saluran realtime Supabase dan mekanisme fallback polling data |
-| [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) | 🔧 Upgrade | Menambahkan environment flag `WEBGL_FORCE_F16_TEXTURES: true` ke config Human |
+| [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) | 🔧 Upgrade | Menambahkan environment flag `WEBGL_FORCE_F16_TEXTURES: true` ke config Human; pinning CDN model ke v3.3.6 |
 | Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, fungsi RPC `verify_admin_login`, ekstensi `pgcrypto`, RLS policy, pub-sub replication |
 
 ### 18.8 Sinkronisasi Data Real-Time Antar-Perangkat (Supabase Realtime Sync)
@@ -624,3 +624,14 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
 * **Akar Masalah Mismatch**: Laptop/PC desktop memproses perhitungan neural network di WebGL menggunakan presisi desimal 32-bit (FP32), sementara mobile WebView pada Android memprosesnya dalam presisi 16-bit (FP16) karena arsitektur GPU mobile. Perbedaan presisi bit ini menyebabkan vektor descriptor 1024-dimensi bergeser nilainya sehingga didapatkan persentase kemiripan sangat rendah/0%.
 * **Penyelesaian**: Mengintegrasikan flag `WEBGL_FORCE_F16_TEXTURES: true` ke dalam inisialisasi instance Human singleton. Laptop kini dipaksa memproses ekstraksi wajah menggunakan format FP16 yang identik dengan HP/Tablet, memastikan kompatibilitas pendaftaran biometrik lintas hardware.
 
+### 18.10 Pembersihan Cache Biometrik Lokal Saat Hapus Karyawan
+* **Masalah Sisa Cache (Stale Cache Bug)**: Saat karyawan dihapus, database pusat (Supabase) berhasil terhapus, tetapi data biometrik master lama tetap tersimpan di dalam IndexedDB (Web) atau SQLite (APK) lokal. Akibatnya, saat admin mencoba mendaftarkan wajah yang sama lagi, sistem memblokir pendaftaran dengan peringatan "Wajah sudah terdaftar" karena cache biometrik lokal tidak disinkronisasikan.
+* **Solusi Pembersihan Hapus**:
+  * Menambahkan fungsi `deleteLocalEmployee(employeeId)` di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js).
+  * Di browser Web, fungsi ini menghapus baris terkait di tabel IndexedDB `user_master` menggunakan Dexie.js.
+  * Di APK Native, fungsi ini memanggil `sqliteDeleteEmployeeBiometrics()` di [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) untuk mengeksekusi `DELETE` dari tabel lokal `local_master_descriptors` dan `local_employees`.
+  * Integrasi dipicu langsung di dalam fungsi hapus karyawan pada [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx).
+
+### 18.11 Pinning Versi Model CDN ke v3.3.6
+* **Masalah Silent Update CDN**: Pemuatan fallback dari CDN jsdelivr tanpa versi tetap (menggunakan `@latest` atau `@1.x`) berpotensi mengunduh versi model `faceres` yang lebih baru atau berbeda secara tidak sengaja di kemudian hari. Hal ini merusak validitas pencocokan vektor.
+* **Solusi Versi Pinned**: Mengunci jalur CDN secara eksplisit di [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) ke `https://cdn.jsdelivr.net/npm/@vladmandic/human@3.3.6/models` untuk memastikan versi model neural network yang diunduh selalu konsisten 100% di semua device.
