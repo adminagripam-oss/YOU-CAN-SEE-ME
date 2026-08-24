@@ -177,6 +177,18 @@ function AppContent() {
   const fetchLogs = useCallback(async () => {
     let onlineLogs = [];
 
+    // Step 0: Load local cached employees for offline details mapping (always showing afdeling)
+    let localEmployees = [];
+    try {
+      const cached = await db.employees_cache.toArray();
+      if (cached) localEmployees = cached;
+    } catch (e) {
+      console.warn('[FETCH LOGS LOCAL CACHE WARN]:', e);
+    }
+
+    // Map of employees by ID
+    const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
+
     // Step 1: Query Supabase online logs
     try {
       const { data: rawLogs, error } = await supabase
@@ -186,19 +198,20 @@ function AppContent() {
 
       if (!error && rawLogs) {
         const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
-        let empMap = new Map();
         if (empIds.length > 0) {
           const { data: empData } = await supabase
             .from('employees')
             .select('id, nik, name, department, afdeling')
             .in('id', empIds);
           if (empData) {
-            empMap = new Map(empData.map((e) => [e.id, e]));
+            empData.forEach(e => {
+              masterEmpMap.set(String(e.id), e);
+            });
           }
         }
 
         onlineLogs = rawLogs.map((log) => {
-          const emp = empMap.get(log.employee_id) || {};
+          const emp = masterEmpMap.get(String(log.employee_id)) || {};
           const typeLabel =
             log.attendance_type ||
             (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
@@ -222,6 +235,7 @@ function AppContent() {
       const pending = await getUnsyncedLogs();
       if (pending && pending.length > 0) {
         offlineLogs = pending.map(log => {
+          const emp = masterEmpMap.get(String(log.employee_id)) || {};
           const typeLabel = log.attendance_type || 'CHECK-IN';
           return {
             id: `offline_${log.id}`,
@@ -231,10 +245,10 @@ function AppContent() {
             status: log.status || 'Hadir (Offline)',
             euclidean_distance: log.euclidean_distance || 0,
             attendance_type: typeLabel,
-            nik: log.nik || '-',
-            name: log.name || 'Karyawan',
-            department: log.department || '-',
-            afdeling: log.afdeling || '-',
+            nik: emp.nik || log.nik || '-',
+            name: emp.name || log.name || 'Karyawan',
+            department: emp.department || log.department || '-',
+            afdeling: emp.afdeling || log.afdeling || '-',
             isOfflineQueue: true
           };
         });
