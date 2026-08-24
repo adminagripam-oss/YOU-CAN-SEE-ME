@@ -22,6 +22,13 @@ function getHumanClass() {
 const humanConfig = {
   modelBasePath: window.location.origin + '/models',
 
+  env: {
+    // Memaksa WebGL menggunakan presisi 16-bit (FP16) di semua perangkat, 
+    // termasuk laptop/PC. Ini sangat penting agar vektor 1024-dimensi 
+    // yang dihasilkan Laptop dan Tablet bernilai persis sama!
+    WEBGL_FORCE_F16_TEXTURES: true,
+  },
+
   face: {
     enabled: true,
     detector: {
