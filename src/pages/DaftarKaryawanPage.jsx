@@ -14,7 +14,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector, getAllMasterVectors, cosineSimilarity } from '../db';
+import { cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 
@@ -309,8 +309,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       confirmText: 'Ya, Hapus Data',
       onConfirm: async () => {
         try {
+          // 1. Hapus dari database cloud Supabase
           const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
           if (delErr) throw delErr;
+
+          // 2. Bersihkan cache biometrik lokal (IndexedDB / SQLite) agar wajah bisa didaftarkan ulang
+          await deleteLocalEmployee(emp.id);
           
           showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan.', 'success');
           refreshEmployees();
