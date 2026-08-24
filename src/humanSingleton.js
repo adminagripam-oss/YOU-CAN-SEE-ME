@@ -68,6 +68,17 @@ function getHuman() {
   if (!_human) {
     const HumanClass = getHumanClass();
     _human = new HumanClass(humanConfig);
+    
+    // Force override F16 configuration directly onto the Human instance and TF.js environment
+    _human.env.WEBGL_FORCE_F16_TEXTURES = true;
+    if (_human.tf && _human.tf.env) {
+      try {
+        _human.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        console.log('[Human Singleton] 🔥 Force-override: WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
+      } catch (e) {
+        console.warn('[Human Singleton] Failed to set WEBGL_FORCE_F16_TEXTURES in TF.js:', e.message);
+      }
+    }
   }
   return _human;
 }
@@ -148,6 +159,17 @@ export async function loadHumanWithFallback() {
 
   // ── Step 1: Pastikan TF.js backend SIAP sebelum apapun ──
   await initBackend(humanInstance);
+
+  // Force-override environment parameters again after backend initialization
+  humanInstance.env.WEBGL_FORCE_F16_TEXTURES = true;
+  if (humanInstance.tf && humanInstance.tf.env) {
+    try {
+      humanInstance.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+      console.log('[Human Singleton] 🔥 Force-override (post-backend): WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
+    } catch (e) {
+      console.warn('[Human Singleton] Failed to set WEBGL_FORCE_F16_TEXTURES post-backend:', e.message);
+    }
+  }
 
   // ── Step 2: Load model ──
   const pathsToTry = [
