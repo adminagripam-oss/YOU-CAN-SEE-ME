@@ -9,7 +9,8 @@ import {
   sqliteRemoveSyncedLogs,
   sqliteClearEmployeesCache,
   sqliteBulkPutEmployeesCache,
-  sqliteGetEmployeesCache
+  sqliteGetEmployeesCache,
+  sqliteGetAllMasterVectors
 } from './services/sqliteService';
 
 /**
@@ -243,5 +244,45 @@ export async function removeSyncedLogs(ids) {
     await dexieDb.attendance_sync_queue.bulkDelete(ids);
   } catch (err) {
     console.error('[IndexedDB Delete Synced Error]:', err);
+  }
+}
+
+/**
+ * Cosine similarity between two equal-length numeric vectors.
+ * Returns value in [-1, 1]; higher = more similar.
+ */
+export function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Get ALL cached master vectors from local storage.
+ * Native APK → SQLite (local_master_descriptors JOIN local_employees)
+ * Web/Dev    → IndexedDB (Dexie user_master table)
+ * Used for one-face-per-employee duplicate check (fully offline-capable).
+ */
+export async function getAllMasterVectors() {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetAllMasterVectors();
+  }
+  try {
+    const allMasters = await dexieDb.user_master.toArray();
+    return allMasters.map(m => ({
+      employee_id: m.employee_id,
+      nik: m.nik,
+      name: m.name,
+      descriptor_json: m.descriptor_json || m.face_vector || null,
+    }));
+  } catch (err) {
+    console.error('[IndexedDB getAllMasterVectors Error]:', err);
+    return [];
   }
 }

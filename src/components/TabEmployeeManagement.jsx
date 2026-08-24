@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector, cacheGeometricVector } from '../db';
+import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 
@@ -29,6 +29,9 @@ export default function TabEmployeeManagement({
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoFileName, setPhotoFileName] = useState('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // null = belum dicek | { isDuplicate, matchedName, matchedNik, similarity } = hasil cek
+  const [faceCheckResult, setFaceCheckResult] = useState(null);
+  const DUPLICATE_THRESHOLD = 0.85; // threshold cosine similarity
 
   // Removed Edit Modal State (moved to DaftarKaryawanPage)
 
@@ -51,10 +54,37 @@ export default function TabEmployeeManagement({
   // Callback saat wajah diproses di register mode
   const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx }) => {
     if (detection.embedding) {
-      currentEmpDescriptorRef.current = Array.from(detection.embedding);
-      currentEmpGFVRef.current = []; // Obsolete GFV
-      setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi [1024-dim Human]`);
-      setCameraStatusColor('var(--accent-success)');
+      const newVec = Array.from(detection.embedding);
+      currentEmpDescriptorRef.current = newVec;
+      currentEmpGFVRef.current = [];
+
+      // Cek duplikasi wajah secara real-time (async, non-blocking)
+      (async () => {
+        try {
+          const allMasters = await getAllMasterVectors();
+          let bestSim = 0, bestName = '', bestNik = '';
+          for (const m of allMasters) {
+            const vec = m.descriptor_json;
+            if (!Array.isArray(vec) || vec.length !== 1024) continue;
+            const sim = cosineSimilarity(newVec, vec);
+            if (sim > bestSim) { bestSim = sim; bestName = m.name; bestNik = m.nik; }
+          }
+          if (bestSim >= DUPLICATE_THRESHOLD) {
+            setFaceCheckResult({ isDuplicate: true, matchedName: bestName, matchedNik: bestNik, similarity: bestSim });
+            setCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+            setCameraStatusColor('var(--accent-error)');
+          } else {
+            setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
+            setCameraStatusText(`✓ Wajah Baru Terdeteksi [Valid — Belum Terdaftar]`);
+            setCameraStatusColor('var(--accent-success)');
+          }
+        } catch (_) {
+          // fallback: jika tidak bisa cek, tetap izinkan
+          setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi [1024-dim Human]`);
+          setCameraStatusColor('var(--accent-success)');
+          setFaceCheckResult(null);
+        }
+      })();
     }
 
     // Menggambar 478 Mesh Points ke canvas overlay
@@ -70,12 +100,13 @@ export default function TabEmployeeManagement({
         ctx.fill();
       }
     }
-  }, []);
+  }, [DUPLICATE_THRESHOLD]);
 
   // Callback saat tidak ada wajah di register mode
   const onRegNoFace = useCallback(() => {
     currentEmpDescriptorRef.current = null;
     currentEmpGFVRef.current = null;
+    setFaceCheckResult(null);
     setCameraStatusText('Menunggu Wajah di Kamera...');
     setCameraStatusColor('var(--accent-warning)');
   }, []);
@@ -131,14 +162,42 @@ export default function TabEmployeeManagement({
           }
           const result = await human.detect(img);
           
-          if (result.face && result.face.length > 0 && result.face[0].embedding) {
-            currentEmpDescriptorRef.current = Array.from(result.face[0].embedding);
-            currentEmpGFVRef.current = [];
-            setCameraStatusText(`✓ Wajah Diekstrak dari Foto [1024-dim Human]`);
-            setCameraStatusColor('var(--accent-success)');
+        if (result.face && result.face.length > 0 && result.face[0].embedding) {
+            const newVec = Array.from(result.face[0].embedding);
+            // Cek duplikasi untuk upload foto juga
+            try {
+              const allMasters = await getAllMasterVectors();
+              let bestSim = 0, bestName = '';
+              for (const m of allMasters) {
+                const vec = m.descriptor_json;
+                if (!Array.isArray(vec) || vec.length !== 1024) continue;
+                const sim = cosineSimilarity(newVec, vec);
+                if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+              }
+              if (bestSim >= DUPLICATE_THRESHOLD) {
+                currentEmpDescriptorRef.current = newVec;
+                currentEmpGFVRef.current = [];
+                setFaceCheckResult({ isDuplicate: true, matchedName: bestName, matchedNik: '', similarity: bestSim });
+                setCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+                setCameraStatusColor('var(--accent-error)');
+              } else {
+                currentEmpDescriptorRef.current = newVec;
+                currentEmpGFVRef.current = [];
+                setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
+                setCameraStatusText(`✓ Wajah Diekstrak dari Foto [Valid — Belum Terdaftar]`);
+                setCameraStatusColor('var(--accent-success)');
+              }
+            } catch (_) {
+              currentEmpDescriptorRef.current = newVec;
+              currentEmpGFVRef.current = [];
+              setFaceCheckResult(null);
+              setCameraStatusText(`✓ Wajah Diekstrak dari Foto [1024-dim Human]`);
+              setCameraStatusColor('var(--accent-success)');
+            }
           } else {
             currentEmpDescriptorRef.current = null;
             currentEmpGFVRef.current = null;
+            setFaceCheckResult(null);
             setCameraStatusText('Wajah Tidak Terdeteksi dalam Foto! Gunakan foto lain.');
             setCameraStatusColor('var(--accent-error)');
           }
@@ -160,6 +219,39 @@ export default function TabEmployeeManagement({
     if (!empNik.trim() || !empName.trim() || !empJabatan.trim()) {
       showToast('Peringatan Form', 'Mohon lengkapi NIK, Nama, dan Jabatan!', 'error');
       return;
+    }
+
+    // Blokir jika wajah sudah terdeteksi sebagai duplikasi
+    if (faceCheckResult?.isDuplicate) {
+      showToast(
+        'Wajah Sudah Terdaftar',
+        `Wajah ini sudah terdaftar atas nama "${faceCheckResult.matchedName}". Satu wajah hanya boleh digunakan untuk satu karyawan.`,
+        'error'
+      );
+      return;
+    }
+
+    // Jika ada vektor wajah, lakukan double-check server-side di submit
+    if (currentEmpDescriptorRef.current) {
+      try {
+        const allMasters = await getAllMasterVectors();
+        for (const m of allMasters) {
+          const vec = m.descriptor_json;
+          if (!Array.isArray(vec) || vec.length !== 1024) continue;
+          const sim = cosineSimilarity(currentEmpDescriptorRef.current, vec);
+          if (sim >= DUPLICATE_THRESHOLD) {
+            showToast(
+              'Wajah Sudah Terdaftar',
+              `Wajah ini sudah terdaftar atas nama "${m.name}" (NIK: ${m.nik}). Similaritas: ${(sim * 100).toFixed(1)}%.`,
+              'error'
+            );
+            return;
+          }
+        }
+      } catch (dupErr) {
+        console.warn('[Duplicate Check Error]:', dupErr);
+        // Lanjutkan jika cek gagal (tidak blokir pendaftaran)
+      }
     }
 
     setIsSubmitting(true);
@@ -234,6 +326,7 @@ export default function TabEmployeeManagement({
       setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
       currentEmpDescriptorRef.current = null;
       currentEmpGFVRef.current = null;
+      setFaceCheckResult(null);
 
       refreshEmployees();
     } catch (err) {

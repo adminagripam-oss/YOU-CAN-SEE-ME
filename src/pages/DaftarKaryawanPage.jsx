@@ -14,7 +14,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector } from '../db';
+import { cacheUserMasterVector, getAllMasterVectors, cosineSimilarity } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 
@@ -34,6 +34,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const [editCameraStatusText, setEditCameraStatusText] = useState('Menunggu Wajah di Kamera...');
   const [editCameraStatusColor, setEditCameraStatusColor] = useState('var(--accent-warning)');
   const [editPhotoPreview, setEditPhotoPreview] = useState(null);
+  // null = belum dicek | { isDuplicate, matchedName, similarity } = hasil cek duplikasi
+  const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
+  const EDIT_DUPLICATE_THRESHOLD = 0.85;
   
   const editCurrentDescriptorRef = useRef(null);
   const editVideoRef = useRef(null);
@@ -54,9 +57,36 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   // Callback saat wajah diproses
   const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
     if (detection.embedding) {
-      editCurrentDescriptorRef.current = Array.from(detection.embedding);
-      setEditCameraStatusText(`✓ Wajah Terdeteksi [1024-dim Human]`);
-      setEditCameraStatusColor('var(--accent-success)');
+      const newVec = Array.from(detection.embedding);
+      editCurrentDescriptorRef.current = newVec;
+
+      // Cek duplikasi real-time, kecuali diri sendiri (editingEmp.id)
+      (async () => {
+        try {
+          const allMasters = await getAllMasterVectors();
+          let bestSim = 0, bestName = '';
+          for (const m of allMasters) {
+            if (String(m.employee_id) === String(editingEmp.id)) continue; // skip self
+            const vec = m.descriptor_json;
+            if (!Array.isArray(vec) || vec.length !== 1024) continue;
+            const sim = cosineSimilarity(newVec, vec);
+            if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+          }
+          if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+            setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+            setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+            setEditCameraStatusColor('var(--accent-error)');
+          } else {
+            setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+            setEditCameraStatusText(`✓ Wajah Baru Valid [Belum Digunakan Karyawan Lain]`);
+            setEditCameraStatusColor('var(--accent-success)');
+          }
+        } catch (_) {
+          setEditFaceCheckResult(null);
+          setEditCameraStatusText(`✓ Wajah Terdeteksi [1024-dim Human]`);
+          setEditCameraStatusColor('var(--accent-success)');
+        }
+      })();
     }
 
     ctx.clearRect(0, 0, 640, 480);
@@ -71,11 +101,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         ctx.fill();
       }
     }
-  }, []);
+  }, [editingEmp.id, EDIT_DUPLICATE_THRESHOLD]);
 
   // Callback saat tidak ada wajah
   const onEditNoFace = React.useCallback(() => {
     editCurrentDescriptorRef.current = null;
+    setEditFaceCheckResult(null);
     setEditCameraStatusText('Menunggu Wajah di Kamera...');
     setEditCameraStatusColor('var(--accent-warning)');
   }, []);
@@ -122,11 +153,37 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         }
         const result = await human.detect(img);
         if (result.face && result.face.length > 0 && result.face[0].embedding) {
-          editCurrentDescriptorRef.current = Array.from(result.face[0].embedding);
-          setEditCameraStatusText('✓ Wajah Diekstrak dari Foto [1024-dim Human]');
-          setEditCameraStatusColor('var(--accent-success)');
+          const newVec = Array.from(result.face[0].embedding);
+          // Cek duplikasi, skip diri sendiri
+          try {
+            const allMasters = await getAllMasterVectors();
+            let bestSim = 0, bestName = '';
+            for (const m of allMasters) {
+              if (String(m.employee_id) === String(editingEmp.id)) continue;
+              const vec = m.descriptor_json;
+              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const sim = cosineSimilarity(newVec, vec);
+              if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+            }
+            editCurrentDescriptorRef.current = newVec;
+            if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+              setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+              setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+              setEditCameraStatusColor('var(--accent-error)');
+            } else {
+              setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+              setEditCameraStatusText('✓ Wajah Diekstrak dari Foto [Valid — Belum Digunakan Lain]');
+              setEditCameraStatusColor('var(--accent-success)');
+            }
+          } catch (_) {
+            editCurrentDescriptorRef.current = newVec;
+            setEditFaceCheckResult(null);
+            setEditCameraStatusText('✓ Wajah Diekstrak dari Foto [1024-dim Human]');
+            setEditCameraStatusColor('var(--accent-success)');
+          }
         } else {
           editCurrentDescriptorRef.current = null;
+          setEditFaceCheckResult(null);
           setEditCameraStatusText('Wajah Tidak Ditemukan! Coba foto lain.');
           setEditCameraStatusColor('var(--accent-danger)');
         }
@@ -155,6 +212,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     setEditUpdateBiometrics(false);
     setEditPhotoPreview(null);
     editCurrentDescriptorRef.current = null;
+    setEditFaceCheckResult(null);
     setEditModalOpen(true);
   };
 
@@ -169,6 +227,39 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     if (editUpdateBiometrics && !editCurrentDescriptorRef.current) {
       showToast('Peringatan Form', 'Anda memilih Update Biometrik, namun Wajah belum terdeteksi.', 'error');
       return;
+    }
+
+    // Blokir jika wajah yang baru terdeteksi sebagai duplikasi karyawan lain
+    if (editUpdateBiometrics && editFaceCheckResult?.isDuplicate) {
+      showToast(
+        'Wajah Sudah Terdaftar',
+        `Wajah ini sudah digunakan oleh "${editFaceCheckResult.matchedName}". Satu wajah hanya boleh untuk satu karyawan.`,
+        'error'
+      );
+      return;
+    }
+
+    // Double-check saat submit jika ada vektor baru
+    if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
+      try {
+        const allMasters = await getAllMasterVectors();
+        for (const m of allMasters) {
+          if (String(m.employee_id) === String(editingEmp.id)) continue; // skip self
+          const vec = m.descriptor_json;
+          if (!Array.isArray(vec) || vec.length !== 1024) continue;
+          const sim = cosineSimilarity(editCurrentDescriptorRef.current, vec);
+          if (sim >= EDIT_DUPLICATE_THRESHOLD) {
+            showToast(
+              'Wajah Sudah Terdaftar',
+              `Wajah ini sudah digunakan oleh "${m.name}" (NIK: ${m.nik}). Similaritas: ${(sim * 100).toFixed(1)}%.`,
+              'error'
+            );
+            return;
+          }
+        }
+      } catch (dupErr) {
+        console.warn('[Edit Duplicate Check Error]:', dupErr);
+      }
     }
 
     const payload = {
