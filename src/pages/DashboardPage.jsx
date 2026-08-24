@@ -427,7 +427,19 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
                   const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
                   const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
-                  const displayDept = l.department || l.afdeling || empMatch?.department || 'Kebun / Operational';
+
+                  // Prioritas: ambil dari data master karyawan (empMatch), lalu fallback ke field log
+                  const afdeling = empMatch?.afdeling || l.afdeling || '';
+                  const namaKebun = empMatch?.nama_kebun || l.nama_kebun || '';
+                  const displayAfdeling =
+                    afdeling && namaKebun
+                      ? `Afd. ${afdeling} – ${namaKebun}`
+                      : afdeling
+                      ? `Afd. ${afdeling}`
+                      : namaKebun
+                      ? namaKebun
+                      : l.department || empMatch?.department || 'Kebun / Operational';
+
                   const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
 
                   return (
@@ -454,7 +466,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                           {l.status || 'Hadir'}
                         </span>
                       </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayDept}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayAfdeling}</td>
                     </tr>
                   );
                 })}
