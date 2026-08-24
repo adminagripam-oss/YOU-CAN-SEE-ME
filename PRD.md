@@ -610,4 +610,17 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
 | [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Duplicate check di edit biometrik dengan self-exclusion; mapping Afdeling di tabel |
 | [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx) | 🔧 Upgrade | Mapping Afdeling/Kebun dari `employees` master ke kolom log absensi dashboard |
 | [LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx) | 🔧 Upgrade | Kolom Afdeling, kalkulasi durasi otomatis, penggantian ikon CloudOff (Lucide) |
-| Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, fungsi RPC `verify_admin_login`, ekstensi `pgcrypto`, RLS policy |
+| [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) | 🔧 Upgrade | Pendaftaran saluran realtime Supabase dan mekanisme fallback polling data |
+| [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) | 🔧 Upgrade | Menambahkan environment flag `WEBGL_FORCE_F16_TEXTURES: true` ke config Human |
+| Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, fungsi RPC `verify_admin_login`, ekstensi `pgcrypto`, RLS policy, pub-sub replication |
+
+### 18.8 Sinkronisasi Data Real-Time Antar-Perangkat (Supabase Realtime Sync)
+* **Kebutuhan Konsistensi**: Saat admin melakukan perubahan data (seperti menghapus atau menambah karyawan) di Laptop (Web App), perangkat tablet/HP (APK) tidak mengetahui perubahan tersebut karena data ter-cache di local SQLite/IndexedDB.
+* **Solusi Channel Publik**: Memanfaatkan fitur **Supabase Realtime Replication**. Aplikasi di HP/Tablet berlangganan ke saluran `agriface-realtime-sync` berbasis WebSocket.
+* **Auto-Refresh**: Begitu terjadi perubahan data (`INSERT`, `UPDATE`, `DELETE`) di database cloud Supabase, event push otomatis memicu fungsi `fetchEmployees()` dan `fetchLogs()` secara instan pada semua perangkat yang aktif secara online.
+* **Polling Fallback**: Jika WebSocket terblokir oleh jaringan/firewall, polling latar belakang konvensional setiap **30 detik** diaktifkan sebagai backup.
+
+### 18.9 Standardisasi Presisi WebGL FP16 Lintas Perangkat
+* **Akar Masalah Mismatch**: Laptop/PC desktop memproses perhitungan neural network di WebGL menggunakan presisi desimal 32-bit (FP32), sementara mobile WebView pada Android memprosesnya dalam presisi 16-bit (FP16) karena arsitektur GPU mobile. Perbedaan presisi bit ini menyebabkan vektor descriptor 1024-dimensi bergeser nilainya sehingga didapatkan persentase kemiripan sangat rendah/0%.
+* **Penyelesaian**: Mengintegrasikan flag `WEBGL_FORCE_F16_TEXTURES: true` ke dalam inisialisasi instance Human singleton. Laptop kini dipaksa memproses ekstraksi wajah menggunakan format FP16 yang identik dengan HP/Tablet, memastikan kompatibilitas pendaftaran biometrik lintas hardware.
+
