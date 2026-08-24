@@ -415,12 +415,70 @@ function AppContent() {
         console.log('[App] Model AI berhasil dimuat, backend:', window.__humanBackend || 'webgl');
       } catch (err) {
         console.error('[MODEL LOAD ERROR]:', err);
-        setModelStatusText('❌ Gagal memuat model AI: ' + err.message);
+        setModelStatusText('\u274c Gagal memuat model AI: ' + err.message);
         // Jangan set modelsLoaded = true — model benar-benar belum siap
       }
     }
 
     loadHumanModels();
+  }, [dbReady, fetchEmployees, fetchLogs]);
+
+  // ─── Supabase Realtime Sync + Polling Fallback ───────────────────────────
+  // Mendengarkan perubahan data dari device lain secara real-time.
+  // Berlaku HANYA saat online — tidak mempengaruhi sistem offline.
+  useEffect(() => {
+    if (!dbReady) return;
+
+    // 1. Supabase Realtime: Langganan perubahan tabel employees & attendance_logs
+    const realtimeChannel = supabase
+      .channel('agriface-realtime-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employees' },
+        (payload) => {
+          console.log('[Realtime] employees change detected:', payload.eventType);
+          fetchEmployees();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_logs' },
+        (payload) => {
+          console.log('[Realtime] attendance_logs change detected:', payload.eventType);
+          fetchLogs();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'master_descriptors' },
+        (payload) => {
+          console.log('[Realtime] master_descriptors change detected:', payload.eventType);
+          fetchEmployees(); // refresh biometric status
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Connected to Supabase Realtime channel.');
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Realtime] Channel error/timeout — falling back to polling.');
+        }
+      });
+
+    // 2. Fallback Polling 30 detik — backup jika WebSocket tidak tersedia
+    const pollingInterval = setInterval(() => {
+      if (navigator.onLine) {
+        console.log('[Polling] Auto-refresh data setiap 30 detik...');
+        fetchEmployees();
+        fetchLogs();
+      }
+    }, 30000);
+
+    return () => {
+      supabase.removeChannel(realtimeChannel);
+      clearInterval(pollingInterval);
+      console.log('[Realtime] Unsubscribed from Supabase Realtime channel.');
+    };
   }, [dbReady, fetchEmployees, fetchLogs]);
 
   return (
