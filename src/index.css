@@ -665,28 +665,89 @@ tr:hover {
 
 .toast-container {
   position: fixed;
-  top: 20px;
-  right: 20px;
   z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 380px;
-  width: calc(100% - 40px);
   pointer-events: none;
+}
+
+/* 1. Desktop / Laptop (Screen > 1024px) */
+@media (min-width: 1025px) {
+  .toast-container {
+    top: 24px;
+    right: 24px;
+    width: 320px;
+  }
+  .shadcn-alert {
+    padding: 10px 14px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .alert-title {
+    font-size: 0.88rem;
+  }
+  .alert-description {
+    font-size: 0.78rem;
+  }
+}
+
+/* 2. Tablet (Screen between 601px and 1024px) */
+@media (min-width: 601px) and (max-width: 1024px) {
+  .toast-container {
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 440px;
+    align-items: center;
+  }
+  .shadcn-alert {
+    width: 100%;
+    padding: 12px 18px;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    animation: slideInDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .alert-title {
+    font-size: 0.94rem;
+  }
+  .alert-description {
+    font-size: 0.84rem;
+  }
+}
+
+/* 3. Mobile / HP (Screen <= 600px) */
+@media (max-width: 600px) {
+  .toast-container {
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    width: calc(100% - 32px);
+    align-items: stretch;
+  }
+  .shadcn-alert {
+    padding: 12px 16px;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+    animation: slideInDownMobile 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .alert-title {
+    font-size: 0.9rem;
+  }
+  .alert-description {
+    font-size: 0.8rem;
+  }
 }
 
 .shadcn-alert {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 14px 16px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  box-shadow: var(--shadow-md);
   pointer-events: auto;
-  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   transition: all 0.3s ease;
 }
 
@@ -731,21 +792,29 @@ tr:hover {
 }
 
 .alert-title {
-  font-size: 0.92rem;
   font-weight: 700;
   margin-bottom: 2px;
 }
 
 .alert-description {
-  font-size: 0.82rem;
   color: var(--text-main);
   opacity: 0.9;
   line-height: 1.4;
 }
 
 @keyframes slideInRight {
-  from { opacity: 0; transform: translateX(40px); }
+  from { opacity: 0; transform: translateX(30px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInDownMobile {
+  from { opacity: 0; transform: translateY(-15px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ============================================
@@ -1477,12 +1546,7 @@ footer {
     padding: 1.25rem;
   }
 
-  .toast-container {
-    right: 10px;
-    left: 10px;
-    width: calc(100% - 20px);
-    max-width: 100%;
-  }
+  /* .toast-container responsive overridden globally above */
 
   .app-sidebar {
     position: fixed;
