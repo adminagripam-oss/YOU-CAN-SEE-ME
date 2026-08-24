@@ -69,8 +69,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Jika SUPABASE_SERVICE_ROLE_KEY tidak diset, fallback ke anon key
 const supabaseAdmin = supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    })
+    auth: { persistSession: false, autoRefreshToken: false }
+  })
   : supabase;
 
 if (supabaseServiceRoleKey) {
@@ -366,10 +366,10 @@ apiRouter.get('/biometrics/master/:employeeId', async (req, res) => {
     let geometric_descriptor_json = emp?.geometric_descriptor_json || null;
 
     if (typeof descriptor_json === 'string') {
-      try { descriptor_json = JSON.parse(descriptor_json); } catch {}
+      try { descriptor_json = JSON.parse(descriptor_json); } catch { }
     }
     if (typeof geometric_descriptor_json === 'string') {
-      try { geometric_descriptor_json = JSON.parse(geometric_descriptor_json); } catch {}
+      try { geometric_descriptor_json = JSON.parse(geometric_descriptor_json); } catch { }
     }
 
     res.json({
@@ -386,18 +386,18 @@ apiRouter.get('/biometrics/master/:employeeId', async (req, res) => {
 // 4. POST /api/attendance/verify - Core 1-to-1 Matching Endpoint (Check-In / Check-Out)
 apiRouter.post('/attendance/verify', async (req, res) => {
   try {
-    const { 
-      employee_id, 
-      nik, 
-      name, 
-      department, 
-      scan_descriptor, 
-      location = 'Kantor Pusat', 
-      attendance_type = 'CHECK_IN', 
+    const {
+      employee_id,
+      nik,
+      name,
+      department,
+      scan_descriptor,
+      location = 'Kantor Pusat',
+      attendance_type = 'CHECK_IN',
       status: customStatus,
       durasi,
       latitude,
-      longitude 
+      longitude
     } = req.body;
 
     // Check if status is manual assignment (Izin, Sakit, Mangkir)
@@ -897,7 +897,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Keep-alive interval to maintain persistent background daemon process
-setInterval(() => {}, 1000 * 60 * 60);
+setInterval(() => { }, 1000 * 60 * 60);
 
 // Start Server
 app.listen(PORT, () => {

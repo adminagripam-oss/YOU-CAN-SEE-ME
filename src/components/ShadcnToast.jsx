@@ -20,8 +20,8 @@ export default function ShadcnToast({ toasts = [] }) {
               <i className={`fa-solid ${iconClass}`}></i>
             </div>
             <div className="alert-content">
-              <div className="alert-title">{toast.title}</div>
-              <div className="alert-description">{toast.description}</div>
+              <div className="alert-title" style={!toast.description ? { marginBottom: 0 } : {}}>{toast.title}</div>
+              {toast.description && <div className="alert-description">{toast.description}</div>}
             </div>
           </div>
         );
