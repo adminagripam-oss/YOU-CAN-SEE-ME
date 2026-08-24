@@ -400,26 +400,59 @@ export function useNormalizedFaceMesh({
     const canvas = canvasRef.current;
 
     if (video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
-      const intrinsicWidth = video.videoWidth;
-      const intrinsicHeight = video.videoHeight;
-
-      // 1. Ensure Offscreen Canvas matches video dimensions
+      // 1. Ensure Offscreen Canvas is setup for standard 640x480 crop
       if (!offscreenCanvasRef.current) {
         offscreenCanvasRef.current = document.createElement('canvas');
       }
       const offscreen = offscreenCanvasRef.current;
-      if (offscreen.width !== intrinsicWidth || offscreen.height !== intrinsicHeight) {
-        offscreen.width = intrinsicWidth;
-        offscreen.height = intrinsicHeight;
+      if (offscreen.width !== STD_WIDTH || offscreen.height !== STD_HEIGHT) {
+        offscreen.width = STD_WIDTH;
+        offscreen.height = STD_HEIGHT;
       }
 
       const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
       if (!offCtx) return;
 
-      // Draw the video directly onto the offscreen canvas matching intrinsic dimensions
-      offCtx.drawImage(video, 0, 0, intrinsicWidth, intrinsicHeight);
+      // 2. Center Crop Logic
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      const videoRatio = videoWidth / videoHeight;
+      const TARGET_RATIO = STD_WIDTH / STD_HEIGHT;
 
-      // 2. Call injected facial model on the normalized offscreen image
+      let sourceWidth, sourceHeight, sourceX, sourceY;
+
+      if (videoRatio > TARGET_RATIO) {
+        // Video is wider than 4:3 (e.g. 16:9 laptop) -> cut left and right sides
+        sourceHeight = videoHeight;
+        sourceWidth = sourceHeight * TARGET_RATIO;
+        sourceX = (videoWidth - sourceWidth) / 2;
+        sourceY = 0;
+      } else {
+        // Video is taller than 4:3 (e.g. portrait tablet 9:16) -> cut top and bottom sides
+        sourceWidth = videoWidth;
+        sourceHeight = sourceWidth / TARGET_RATIO;
+        sourceX = 0;
+        sourceY = (videoHeight - sourceHeight) / 2;
+      }
+
+      // Reset transform before drawing
+      offCtx.setTransform(1, 0, 0, 1, 0, 0);
+      
+      // Apply scaleX(-1) mirror transformation on the offscreen canvas
+      offCtx.translate(STD_WIDTH, 0);
+      offCtx.scale(-1, 1);
+
+      // Draw standard cropped video frame
+      offCtx.drawImage(
+        video,
+        sourceX, sourceY, sourceWidth, sourceHeight,
+        0, 0, STD_WIDTH, STD_HEIGHT
+      );
+
+      // Restore transform state
+      offCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+      // 3. Call injected facial model on the standardized offscreen image
       let detection: any = null;
       try {
         detection = await callbacksRef.current.detectFaces(offscreen, timestamp);
@@ -427,9 +460,9 @@ export function useNormalizedFaceMesh({
         console.warn('[useNormalizedFaceMesh] Face detection error:', err);
       }
 
-      // 3. Align output canvas overlay to match intrinsic dimensions
-      if (canvas.width !== intrinsicWidth) canvas.width = intrinsicWidth;
-      if (canvas.height !== intrinsicHeight) canvas.height = intrinsicHeight;
+      // 4. Align output canvas overlay to match standard 640x480 coordinates
+      if (canvas.width !== STD_WIDTH) canvas.width = STD_WIDTH;
+      if (canvas.height !== STD_HEIGHT) canvas.height = STD_HEIGHT;
 
       const ctx = canvas.getContext('2d');
 
@@ -437,7 +470,7 @@ export function useNormalizedFaceMesh({
 
       if (!detection || !meshData || meshData.length === 0) {
         // Clear screen and reset filters if face is lost
-        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (ctx) ctx.clearRect(0, 0, STD_WIDTH, STD_HEIGHT);
         smoothedMeshRef.current = null;
         oneEuroFiltersRef.current = [];
         callbacksRef.current.onNoFace?.();
