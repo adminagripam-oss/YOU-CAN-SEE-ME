@@ -376,3 +376,27 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
     return [];
   }
 }
+
+/**
+ * Deletes local employee data and master biometric descriptors.
+ */
+export async function sqliteDeleteEmployeeBiometrics(employeeId: number): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    const set = [
+      {
+        statement: `DELETE FROM local_master_descriptors WHERE employee_id = ?`,
+        values: [employeeId]
+      },
+      {
+        statement: `DELETE FROM local_employees WHERE id = ?`,
+        values: [employeeId]
+      }
+    ];
+    await dbConnection.executeSet(set);
+    console.log(`[SQLite Service] Successfully deleted local master biometrics and cache for employee ID: ${employeeId}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteDeleteEmployeeBiometrics Error]:', err?.message || err);
+  }
+}
+

@@ -10,7 +10,8 @@ import {
   sqliteClearEmployeesCache,
   sqliteBulkPutEmployeesCache,
   sqliteGetEmployeesCache,
-  sqliteGetAllMasterVectors
+  sqliteGetAllMasterVectors,
+  sqliteDeleteEmployeeBiometrics
 } from './services/sqliteService';
 
 /**
@@ -302,3 +303,27 @@ export async function getAllMasterVectors() {
     return [];
   }
 }
+
+/**
+ * Purges deleted employee master vectors and cache records from local IndexedDB or SQLite.
+ */
+export async function deleteLocalEmployee(employeeId) {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteDeleteEmployeeBiometrics(Number(employeeId));
+    return;
+  }
+
+  try {
+    const allMasters = await dexieDb.user_master.toArray();
+    const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
+    if (existing) {
+      await dexieDb.user_master.delete(existing.id);
+      console.log(`[IndexedDB] Deleted master vector for employee ID: ${employeeId}`);
+    }
+    // Also remove from employees_cache table if it exists
+    await dexieDb.employees_cache.delete(Number(employeeId));
+  } catch (err) {
+    console.error('[IndexedDB deleteLocalEmployee Error]:', err);
+  }
+}
+
