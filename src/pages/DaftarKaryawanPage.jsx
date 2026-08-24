@@ -182,8 +182,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       status_perkawinan: editingEmp.status_perkawinan,
     };
 
+    let descriptorJson = null;
     if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
-      payload.descriptor_json = JSON.stringify(editCurrentDescriptorRef.current);
+      descriptorJson = JSON.stringify(editCurrentDescriptorRef.current);
       payload.has_master_biometric = true;
     }
 
@@ -191,8 +192,12 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
       if (empErr) throw empErr;
 
-      if (payload.descriptor_json) {
-        await supabase.from('master_descriptors').upsert({ employee_id: editingEmp.id, descriptor_json: payload.descriptor_json });
+      if (descriptorJson) {
+        const { error: descErr } = await supabase
+          .from('master_descriptors')
+          .upsert({ employee_id: editingEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+        if (descErr) throw descErr;
+
         await cacheUserMasterVector({
           employee_id: editingEmp.id,
           nik: editingEmp.nik || '',
@@ -347,7 +352,6 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           }
         }
         
-        // Build employee payload
         const employeePayload = {
           nik: String(nik).trim(),
           name: String(name).trim(),
@@ -357,7 +361,6 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           status_tk: row.status_tk || 'BHL',
           jabatan: row.jabatan || row.department || 'Pekerja',
           status_perkawinan: row.status_perkawinan || 'Lajang',
-          descriptor_json: descriptorJson,
           has_master_biometric: hasMasterBiometric
         };
         
