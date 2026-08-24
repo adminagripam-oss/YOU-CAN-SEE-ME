@@ -350,3 +350,29 @@ export async function sqliteGetEmployeesCache(): Promise<any[]> {
     return [];
   }
 }
+
+/**
+ * Gets ALL master descriptors joined with employee info.
+ * Used for duplicate face validation (one-face-per-employee check).
+ */
+export async function sqliteGetAllMasterVectors(): Promise<any[]> {
+  if (!dbConnection) return [];
+  try {
+    const res = await dbConnection.query(
+      `SELECT md.employee_id, md.descriptor_json, e.nik, e.name
+       FROM local_master_descriptors md
+       LEFT JOIN local_employees e ON md.employee_id = e.id
+       WHERE md.descriptor_json IS NOT NULL`
+    );
+    const rows = res.values || [];
+    return rows.map(row => ({
+      employee_id: row.employee_id,
+      nik: row.nik,
+      name: row.name,
+      descriptor_json: row.descriptor_json ? JSON.parse(row.descriptor_json) : null,
+    }));
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetAllMasterVectors Error]:', err?.message || err);
+    return [];
+  }
+}
