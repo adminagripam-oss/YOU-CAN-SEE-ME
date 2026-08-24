@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
@@ -682,7 +682,7 @@ export default function TabAttendanceLogs({
                           }}
                           title="Data absensi disimpan lokal dan akan disinkronkan saat online"
                         >
-                          <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize: '0.6rem' }}></i> Offline
+                          <CloudOff size={11} /> Offline
                         </span>
                       )}
                     </div>
