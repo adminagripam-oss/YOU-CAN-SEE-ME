@@ -141,6 +141,20 @@ export default function TabAttendanceLogs({
       }
     });
 
+    // Calculate dynamic duration for each group if both check-in and check-out exist
+    Object.values(groups).forEach(g => {
+      if (g.inLog && g.outLog) {
+        const inMs = new Date(g.inLog.timestamp).getTime();
+        const outMs = new Date(g.outLog.timestamp).getTime();
+        const diffMs = outMs - inMs;
+        if (diffMs > 0) {
+          g.durasi = Math.round(diffMs / 1000); // duration in seconds
+        }
+      } else if (g.outLog && g.outLog.durasi) {
+        g.durasi = g.outLog.durasi;
+      }
+    });
+
     return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
   }, [logs, deletedLogIds]);
 
