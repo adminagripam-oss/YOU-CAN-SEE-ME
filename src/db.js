@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import {
   sqliteCacheUserMasterVector,
   sqliteCacheGeometricVector,
@@ -82,6 +83,10 @@ export const db = {
       if (Capacitor.isNativePlatform()) {
         if (!isNaN(cleanIdInt)) {
           await sqliteRemoveSyncedLogs([cleanIdInt]);
+          // Write deletion action to public backup log
+          const timestamp = new Date().toISOString();
+          const deleteLine = `[${timestamp}] [DELETED BY ADMIN] Queue Log ID: ${cleanIdInt} deleted from local offline queue.\n`;
+          await writeToBackupStorage(deleteLine);
         }
       } else {
         if (!isNaN(cleanIdInt)) {
@@ -202,7 +207,13 @@ export async function getCachedUserMasterVector(employeeId) {
  */
 export async function queueOfflineAttendance(logData) {
   if (Capacitor.isNativePlatform()) {
-    return await sqliteQueueOfflineAttendance(logData);
+    const result = await sqliteQueueOfflineAttendance(logData);
+    if (result) {
+      const timestamp = result.timestamp || new Date().toISOString();
+      const logLine = `[${timestamp}] [OFFLINE QUEUED] [${result.attendance_type || 'CHECK_IN'}] NIK: ${result.nik || '-'} - ${result.name || 'Karyawan'} (Loc: ${result.location || 'Mobile'}, Dist: ${result.euclidean_distance || 0})\n`;
+      await writeToBackupStorage(logLine);
+    }
+    return result;
   }
 
   try {
@@ -326,4 +337,62 @@ export async function deleteLocalEmployee(employeeId) {
     console.error('[IndexedDB deleteLocalEmployee Error]:', err);
   }
 }
+
+/**
+ * Appends plain text audit logs directly to a public file inside the device's Documents folder.
+ * This guarantees the user's offline logs are never lost even if the app's cache or storage is cleared.
+ */
+export async function writeToBackupStorage(logLine) {
+  if (!Capacitor.isNativePlatform()) return;
+  const path = 'AgriFace_Offline_Backup.txt';
+  const directory = Directory.Documents;
+  const encoding = Encoding?.UTF8 || 'utf8';
+
+  try {
+    // Request public storage permission if not already granted on Android
+    try {
+      const status = await Filesystem.checkPermissions();
+      if (status.publicStorage !== 'granted') {
+        await Filesystem.requestPermissions();
+      }
+    } catch (pe) {
+      console.warn('[Filesystem Permission] Check/request failed:', pe);
+    }
+
+    // Append to file in user's public Documents directory
+    await Filesystem.appendFile({
+      path,
+      data: logLine,
+      directory,
+      encoding
+    });
+    console.log('[Storage Backup] Appended log to public Documents/AgriFace_Offline_Backup.txt');
+  } catch (err) {
+    console.warn('[Storage Backup] appendFile failed, falling back to read-modify-write:', err);
+    try {
+      let existing = '';
+      try {
+        const readResult = await Filesystem.readFile({
+          path,
+          directory,
+          encoding
+        });
+        existing = readResult.data || '';
+      } catch (readErr) {
+        // File doesn't exist yet, ignore
+      }
+
+      await Filesystem.writeFile({
+        path,
+        data: existing + logLine,
+        directory,
+        encoding
+      });
+      console.log('[Storage Backup] Fallback write successful to Documents/AgriFace_Offline_Backup.txt');
+    } catch (writeErr) {
+      console.error('[Storage Backup] Fallback write failed:', writeErr);
+    }
+  }
+}
+
 

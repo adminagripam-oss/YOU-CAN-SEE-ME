@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { getUnsyncedLogs, removeSyncedLogs, db } from './db';
+import { getUnsyncedLogs, removeSyncedLogs, db, writeToBackupStorage } from './db';
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 
@@ -65,6 +65,13 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     // Remove synced records from local DB
     await removeSyncedLogs(syncedIds);
     console.log(`[Auto-Sync Success] Successfully synced ${syncedIds.length} records!`);
+
+    // Write sync action to public backup log
+    if (Capacitor.isNativePlatform()) {
+      const timestamp = new Date().toISOString();
+      const syncLine = `[${timestamp}] [SYNC SUCCESS] Successfully uploaded ${syncedIds.length} offline attendance logs to cloud database.\n`;
+      await writeToBackupStorage(syncLine);
+    }
 
     if (showToast) {
       showToast(

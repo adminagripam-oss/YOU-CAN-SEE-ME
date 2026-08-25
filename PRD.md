@@ -650,3 +650,14 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
   * Pada form log absensi [TabAttendanceLogs.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabAttendanceLogs.jsx), proses `handleDeleteGroup` kini memisahkan ID log yang akan dihapus. Log dengan prefix `offline_` akan didelete secara lokal dari SQLite (`local_attendance_queue` via `sqliteRemoveSyncedLogs`) maupun IndexedDB (`attendance_sync_queue`), sedangkan log online dihapus dari Supabase.
   * Memperbaiki logika deduplikasi merge logs pada [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) dengan memeriksa signature offline log terhadap `onlineSignatures` *sebelum* mendaftarkannya ke dalam set `seen` untuk mencegah tersembunyinya log online akibat tabrakan kunci signature.
 
+### 18.14 Cadangan Audit Log Offline ke Penyimpanan Publik Dokumen (Public Storage Backup)
+* **Kebutuhan Keamanan Ekstra**: Pada platform mobile/APK, jika pengguna melakukan pembersihan penuh data aplikasi (*Clear Storage* / *Clear Data*), database SQLite internal `/data/data/...` akan terhapus bersih oleh sistem operasi Android. Hal ini berisiko melenyapkan log kehadiran offline yang belum sempat terunggah ke server cloud.
+* **Solusi Pencatatan Eksternal (Write-Ahead Logging Backup)**:
+  * Mengintegrasikan modul `@capacitor/filesystem` untuk menulis salinan cadangan (*dual-write*) ke folder **Documents** publik perangkat (`Directory.Documents`).
+  * File teks bernama `AgriFace_Offline_Backup.txt` dibuat dan diisi secara kumulatif (*append*) setiap kali:
+    * Log absensi offline baru didaftarkan (`queueOfflineAttendance`).
+    * Log absensi offline berhasil diunggah/sinkronisasi ke cloud database (`syncPendingAttendanceLogs`).
+    * Log absensi offline dihapus secara lokal oleh admin (`delete` queue).
+  * File cadangan audit log ini tersimpan di luar sandbox aplikasi (di folder `Documents` eksternal). Sehingga data log offline aman 100% dan **tidak akan terhapus** meskipun aplikasi di-uninstall, di-clear cache, atau di-clear data. Pengguna/admin dapat membuka File Manager perangkat kapan saja untuk membaca file log audit tersebut.
+
+
