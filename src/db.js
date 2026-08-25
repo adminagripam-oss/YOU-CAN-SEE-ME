@@ -345,28 +345,25 @@ export async function deleteLocalEmployee(employeeId) {
 export async function writeToBackupStorage(logLine) {
   if (!Capacitor.isNativePlatform()) return;
   const path = 'AgriFace_Offline_Backup.txt';
-  const directory = Directory.Documents;
+  const directory = Directory.External;
   const encoding = Encoding?.UTF8 || 'utf8';
 
   try {
-    // Request public storage permission if not already granted on Android
-    try {
-      const status = await Filesystem.checkPermissions();
-      if (status.publicStorage !== 'granted') {
-        await Filesystem.requestPermissions();
-      }
-    } catch (pe) {
-      console.warn('[Filesystem Permission] Check/request failed:', pe);
-    }
-
-    // Append to file in user's public Documents directory
+    // Append to file in user's public external app directory (bypasses Scoped Storage restrictions)
     await Filesystem.appendFile({
       path,
       data: logLine,
       directory,
       encoding
     });
-    console.log('[Storage Backup] Appended log to public Documents/AgriFace_Offline_Backup.txt');
+    
+    // Resolve and print the exact file path on the device
+    try {
+      const uriResult = await Filesystem.getUri({ directory, path });
+      console.log('[Storage Backup] Appended log to:', uriResult.uri);
+    } catch (_) {
+      console.log('[Storage Backup] Appended log to public external storage');
+    }
   } catch (err) {
     console.warn('[Storage Backup] appendFile failed, falling back to read-modify-write:', err);
     try {
@@ -388,7 +385,13 @@ export async function writeToBackupStorage(logLine) {
         directory,
         encoding
       });
-      console.log('[Storage Backup] Fallback write successful to Documents/AgriFace_Offline_Backup.txt');
+
+      try {
+        const uriResult = await Filesystem.getUri({ directory, path });
+        console.log('[Storage Backup] Fallback write successful to:', uriResult.uri);
+      } catch (_) {
+        console.log('[Storage Backup] Fallback write successful');
+      }
     } catch (writeErr) {
       console.error('[Storage Backup] Fallback write failed:', writeErr);
     }
