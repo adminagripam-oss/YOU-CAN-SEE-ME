@@ -142,17 +142,17 @@ function AppContent() {
         const cached = await db.employees_cache.toArray();
         if (cached) {
           empData = cached;
-          console.log('[INDEXEDDB CACHE] Loaded', cached.length, 'cached employees offline');
+          console.log(`[${Capacitor.isNativePlatform() ? 'SQLITE DATABASE' : 'INDEXEDDB CACHE'}] Loaded`, cached.length, 'cached employees offline');
         }
       } catch (err) {
-        console.error('[FETCH EMPLOYEES INDEXEDDB ERROR]:', err.message);
+        console.error(`[FETCH EMPLOYEES ${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} ERROR]:`, err.message);
       }
     }
 
     if (empData) {
       setEmployees(empData);
       
-      // Persist to IndexedDB local cache for mobile offline support
+      // Persist to local cache for mobile offline support
       // Only clear and rebuild if we got fresh data from API or Supabase
       if (dataSource !== 'indexeddb') {
         try {
@@ -166,16 +166,22 @@ function AppContent() {
             }
           }
         } catch (cacheErr) {
-          console.warn('[INDEXEDDB BULK PUT WARN]:', cacheErr.message);
+          console.warn(`[${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} BULK PUT WARN]:`, cacheErr.message);
         }
       }
     }
   }, []);
 
-  // Fetch Attendance Logs (1-Tier: Direct Supabase)
   // Fetch Attendance Logs (2-Tier: Supabase + Offline Local Queue with Deduplication)
   const fetchLogs = useCallback(async () => {
     let onlineLogs = [];
+
+    // Helper to normalize CHECK_IN / CHECK-IN / CHECKIN to CHECK-IN, etc.
+    const normalizeType = (type) => {
+      if (!type) return 'CHECK-IN';
+      const clean = type.toUpperCase().replace('_', '-');
+      return clean === 'CHECKIN' ? 'CHECK-IN' : clean;
+    };
 
     // Step 0: Load local cached employees for offline details mapping (always showing afdeling)
     let localEmployees = [];
@@ -212,9 +218,10 @@ function AppContent() {
 
         onlineLogs = rawLogs.map((log) => {
           const emp = masterEmpMap.get(String(log.employee_id)) || {};
-          const typeLabel =
+          const typeLabel = normalizeType(
             log.attendance_type ||
-            (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN');
+            (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
+          );
           return {
             ...log,
             attendance_type: typeLabel,
@@ -236,7 +243,7 @@ function AppContent() {
       if (pending && pending.length > 0) {
         offlineLogs = pending.map(log => {
           const emp = masterEmpMap.get(String(log.employee_id)) || {};
-          const typeLabel = log.attendance_type || 'CHECK-IN';
+          const typeLabel = normalizeType(log.attendance_type || 'CHECK-IN');
           return {
             id: `offline_${log.id}`,
             employee_id: log.employee_id,
