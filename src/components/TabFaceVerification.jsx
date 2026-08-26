@@ -1498,7 +1498,7 @@ export default function TabFaceVerification({
         });
 
         isSuccess = true;
-        successMsg = `Absensi ${typeLabel} berhasil disimpan di penyimpanan offline (Dexie.js)!`;
+        successMsg = `Absensi ${typeLabel} berhasil disimpan di penyimpanan offline!`;
       } catch (dexieErr) {
         console.error('[DEXIE QUEUE ERROR]:', dexieErr);
       }
