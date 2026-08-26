@@ -44,10 +44,11 @@ Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Of
                                                                               ^
                                       Tier 3: Local Offline Cache             |
                         +-----------------------------------------------------+
-                        |          INDEXEDDB (Dexie.js Engine)                |
-                        |  - user_master                                      |
-                        |  - attendance_sync_queue                            |
-                        |  - employees_cache                                  |
+                        |          LOCAL SQLITE (APK) / INDEXEDDB (WEB)       |
+                        |  - user_master (biometric vector cache)             |
+                        |  - attendance_sync_queue (offline logs queue)       |
+                        |  - employees_cache (master employee list cache)     |
+                        |  - attendance_logs (permanent history log cache)    |
                         +-----------------------------------------------------+
 ```
 
@@ -604,15 +605,16 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
 
 | File | Jenis | Deskripsi Perubahan |
 | :--- | :--- | :--- |
-| [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) | ➕ Penambahan | Fungsi `sqliteGetAllMasterVectors()` untuk query semua vektor; `sqliteDeleteEmployeeBiometrics()` untuk menghapus cache SQLite |
-| [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) | ➕ Penambahan | Fungsi `cosineSimilarity()`, `getAllMasterVectors()`, dan `deleteLocalEmployee()` (abstraction layer pembersihan cache SQLite + Dexie) |
-| [TabEmployeeManagement.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabEmployeeManagement.jsx) | 🔧 Upgrade | Real-time duplicate check di kamera & upload foto; double-check saat submit |
-| [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Duplicate check di edit biometrik dengan self-exclusion; mapping Afdeling di tabel; pembersihan cache saat hapus karyawan |
-| [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx) | 🔧 Upgrade | Mapping Afdeling/Kebun dari `employees` master ke kolom log absensi dashboard |
-| [LogsPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/LogsPage.jsx) | 🔧 Upgrade | Kolom Afdeling, kalkulasi durasi otomatis, penggantian ikon CloudOff (Lucide) |
-| [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) | 🔧 Upgrade | Pendaftaran saluran realtime Supabase dan mekanisme fallback polling data |
-| [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) | 🔧 Upgrade | Menambahkan environment flag `WEBGL_FORCE_F16_TEXTURES: true` ke config Human; pinning CDN model ke v3.3.6 |
-| Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, fungsi RPC `verify_admin_login`, ekstensi `pgcrypto`, RLS policy, pub-sub replication |
+| [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) | ➕ Penambahan / 🔧 Upgrade | Tabel `local_attendance_logs` untuk riwayat log lokal permanen; migrasi skema tabel; fungsi CRUD log SQLite; dan `sqliteQueueOfflineAttendance` dengan `afdeling` |
+| [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) | ➕ Penambahan / 🔧 Upgrade | Schema v4 Dexie dengan store `attendance_logs`; pembungkusan CRUD log multi-platform (Dexie & SQLite) |
+| [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) | 🔧 Upgrade | Rekonsiliasi sinkronisasi dengan menghapus ID berprefix `'offline_'` dan menyisipkan data cloud final, meniadakan 'afdeling' dari upload cloud |
+| [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx) | 🔧 Upgrade | Pengecekan status absensi harian dari tabel `attendance_logs` lokal; penyimpanan instan (dual-write) log online/offline secara lokal |
+| [TabAttendanceLogs.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabAttendanceLogs.jsx) | 🔧 Upgrade | Aksi hapus & edit tunggal yang menyinkronkan data di database lokal maupun cloud; pencarian dinamis berdasarkan kolom Afdeling & Department |
+| [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) | 🔧 Upgrade | Mengunduh log dari Supabase, menyinkronkan ke cache lokal, dan memuat riwayat log gabungan secara offline langsung dari database lokal |
+| [DaftarKaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DaftarKaryawanPage.jsx) | 🔧 Upgrade | Pembersihan cache saat hapus karyawan; pencocokan duplikasi biometrik dengan self-exclusion |
+| [DashboardPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/DashboardPage.jsx) | 🔧 Upgrade | Pemetaan afdeling dari master karyawan untuk data statistik log absensi harian dashboard |
+| [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) | 🔧 Upgrade | Konfigurasi `WEBGL_FORCE_F16_TEXTURES: true` dan pinning CDN model ke v3.3.6 |
+| Supabase SQL | ➕ Penambahan | Tabel `admin_auth`, RPC `verify_admin_login`, pgcrypto, dan replikasi pub-sub |
 
 ### 18.8 Sinkronisasi Data Real-Time Antar-Perangkat (Supabase Realtime Sync)
 * **Kebutuhan Konsistensi**: Saat admin melakukan perubahan data (seperti menghapus atau menambah karyawan) di Laptop (Web App), perangkat tablet/HP (APK) tidak mengetahui perubahan tersebut karena data ter-cache di local SQLite/IndexedDB.
@@ -660,4 +662,24 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
     * Log absensi offline dihapus secara lokal oleh admin (`delete` queue).
   * File cadangan audit log ini tersimpan di luar sandbox aplikasi (di folder `Documents` eksternal). Sehingga data log offline aman 100% dan **tidak akan terhapus** meskipun aplikasi di-uninstall, di-clear cache, atau di-clear data. Pengguna/admin dapat membuka File Manager perangkat kapan saja untuk membaca file log audit tersebut.
 
+### 18.15 Penyimpanan Permanen Riwayat Log Lokal (Dual-Write SQLite & IndexedDB)
+* **Masalah Ketergantungan Internet**: Halaman `LogsPage.jsx` sebelumnya memuat data riwayat absensi secara dinamis langsung dari Supabase Cloud. Saat perangkat tablet dijalankan tanpa internet (offline), halaman logs tidak dapat menampilkan riwayat absensi lama yang pernah dicatat, membuat pemantauan kehadiran di lapangan menjadi tidak mungkin.
+* **Solusi Arsitektur Dual-Write**:
+  * Membuat tabel **`local_attendance_logs`** di SQLite (APK) dan store **`attendance_logs`** di Dexie (Web) untuk menyimpan seluruh riwayat log secara permanen.
+  * Ketika absensi dilakukan secara online, sistem menulis data ke Supabase sekaligus menduplikasi salinannya secara instan ke SQLite lokal dengan status `is_synced = true`.
+  * Ketika absensi dilakukan secara offline, log dimasukkan ke antrean sinkronisasi sekaligus disalin ke tabel riwayat lokal dengan status `is_synced = false` dan ID berawalan `offline_`.
+  * Halaman logs memuat data gabungan ini langsung secara lokal, menjamin **riwayat log absensi 100% siap diakses offline**.
 
+### 18.16 Sinkronisasi Bersih Bebas Duplikasi (Sync Reconciliation)
+* **Masalah Duplikasi Saat Transisi Offline-Online**: Saat log offline diunggah ke Supabase oleh mesin sinkronisasi, log tersebut mendapatkan ID resmi baru dari cloud. Jika log lama dengan ID `'offline_X'` tidak dihapus dari tabel lokal, log tersebut akan terus tampil secara ganda (sebagai log offline terpisah dari log online barunya).
+* **Solusi Penghapusan Presisi**:
+  * Memperbarui [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) agar setelah sukses mengunggah log offline ke cloud, sistem secara eksplisit menghapus log sementara menggunakan format ID yang tepat: `db.attendance_logs.delete('offline_' + oldId)`.
+  * Ini secara instan membuang log hantu `'offline_X'` lokal dan menggantikannya dengan catatan sinkronisasi cloud yang sah, meniadakan duplikasi data absensi.
+
+### 18.17 Pemetaan Dinamis Afdeling Tanpa Beban Database
+* **Masalah Skema Supabase & Efisiensi**: Data pembagian divisi/kebun karyawan disimpan dalam kolom `afdeling`. Menambahkan kolom `afdeling` ke tabel log absensi cloud (`attendance_logs`) tidak efisien dan menyebabkan error `PGRST204` (kolom tidak ditemukan) jika skema Supabase belum dimigrasi.
+* **Solusi Pemetaan Frontend**:
+  * Kolom `afdeling` tidak dikirimkan ke tabel `attendance_logs` di Supabase untuk menjaga database ternormalisasi dan mencegah error skema.
+  * Di frontend React, fungsi `fetchLogs()` secara dinamis mencocokkan `employee_id` log absensi dengan data master karyawan (`employees` table yang memiliki data afdeling terdaftar hasil input `KaryawanPage.jsx`).
+  * Penyatuan data ini terjadi secara lokal di tingkat aplikasi, memastikan kolom Afdeling di Halaman Logs dan Dashboard tetap terisi lengkap tanpa membebani lalu lintas server.
+  * Menambahkan fungsi pencarian cerdas di logs page yang mendukung pemfilteran kata kunci afdeling (misal mencari log berdasarkan divisi: "Afd. III" atau "Afd. I").
