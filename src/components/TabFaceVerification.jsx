@@ -922,6 +922,36 @@ export default function TabFaceVerification({
       }
     }
 
+    // 2. Tier 2: Local Storage Cache Fallback (if offline or Supabase fails)
+    if (!statusData) {
+      try {
+        const getLocalDateString = (d) => {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        const todayStr = getLocalDateString(new Date());
+        const cachedStr = localStorage.getItem('attendance_status_today_' + todayStr);
+        if (cachedStr) {
+          const statusMap = JSON.parse(cachedStr);
+          const cachedStatus = statusMap[String(empId)];
+          if (cachedStatus) {
+            statusData = {
+              hasCheckedIn: cachedStatus.hasCheckedIn,
+              hasCheckedOut: cachedStatus.hasCheckedOut,
+              checked_in: cachedStatus.checked_in,
+              check_in_time: cachedStatus.check_in_time,
+              check_out_time: cachedStatus.check_out_time,
+            };
+            console.log(`[Storage Cache] Loaded offline fallback status for employee ${empId}:`, statusData);
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('[Storage Cache] Failed to load cached status:', cacheErr);
+      }
+    }
+
     // Determine base statuses
     let hasCheckedIn = statusData?.hasCheckedIn ?? statusData?.checked_in ?? false;
     let hasCheckedOut = statusData?.hasCheckedOut ?? false;

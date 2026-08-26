@@ -231,6 +231,44 @@ function AppContent() {
             afdeling: emp.afdeling || log.afdeling || '-'
           };
         });
+
+        // Cache today's online attendance status in localStorage for offline access
+        try {
+          const todayStr = getLocalDateString(new Date());
+          const statusMap = {};
+          
+          // Sort oldest to newest to reconstruct today's final state chronologically
+          const todayOnlineLogs = onlineLogs.filter(log => getLocalDateString(log.timestamp) === todayStr);
+          const sorted = [...todayOnlineLogs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          
+          sorted.forEach(log => {
+            const empId = String(log.employee_id);
+            if (!statusMap[empId]) {
+              statusMap[empId] = {
+                hasCheckedIn: false,
+                hasCheckedOut: false,
+                checked_in: false,
+                check_in_time: null,
+                check_out_time: null
+              };
+            }
+            
+            if (log.attendance_type === 'CHECK-IN') {
+              statusMap[empId].hasCheckedIn = true;
+              statusMap[empId].checked_in = true;
+              statusMap[empId].check_in_time = log.timestamp;
+            } else if (log.attendance_type === 'CHECK-OUT') {
+              statusMap[empId].hasCheckedOut = true;
+              statusMap[empId].checked_in = false;
+              statusMap[empId].check_out_time = log.timestamp;
+            }
+          });
+          
+          localStorage.setItem('attendance_status_today_' + todayStr, JSON.stringify(statusMap));
+          console.log(`[Storage Cache] Cached today's online attendance status for ${Object.keys(statusMap).length} employees`);
+        } catch (e) {
+          console.warn('[Storage Cache] Failed to cache today\'s attendance status:', e);
+        }
       }
     } catch (err) {
       console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
