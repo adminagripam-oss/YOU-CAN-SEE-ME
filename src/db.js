@@ -12,7 +12,10 @@ import {
   sqliteBulkPutEmployeesCache,
   sqliteGetEmployeesCache,
   sqliteGetAllMasterVectors,
-  sqliteDeleteEmployeeBiometrics
+  sqliteDeleteEmployeeBiometrics,
+  sqliteCacheTodayAttendance,
+  sqliteGetTodayAttendance,
+  sqliteClearTodayAttendanceCache
 } from './services/sqliteService';
 
 /**
@@ -37,6 +40,13 @@ dexieDb.version(2).stores({
       row.geometric_descriptor_json = null;
     }
   });
+});
+
+dexieDb.version(3).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date'
 });
 
 /**
@@ -79,7 +89,7 @@ export const db = {
       // Bersihkan prefix "offline_" jika ada
       const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
       const cleanIdInt = parseInt(cleanId, 10);
-      
+
       if (Capacitor.isNativePlatform()) {
         if (!isNaN(cleanIdInt)) {
           await sqliteRemoveSyncedLogs([cleanIdInt]);
@@ -92,6 +102,79 @@ export const db = {
         if (!isNaN(cleanIdInt)) {
           await dexieDb.attendance_sync_queue.delete(cleanIdInt);
         }
+      }
+    }
+  },
+  today_attendance_cache: {
+    async put(statusMap, cachedDate) {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await sqliteCacheTodayAttendance(statusMap, cachedDate);
+        } catch (e) {
+          console.error('[db.js put error]:', e, e?.stack || '');
+          throw e;
+        }
+      } else {
+        try {
+          // Clear older dates in Dexie
+          await dexieDb.today_attendance_cache.where('cached_date').notEqual(cachedDate).delete();
+          
+          const records = [];
+          const keys = Object.keys(statusMap);
+          for (let i = 0; i < keys.length; i++) {
+            const empId = keys[i];
+            const status = statusMap[empId];
+            if (!status) continue;
+            records.push({
+              employee_id: parseInt(empId),
+              hasCheckedIn: status.hasCheckedIn,
+              hasCheckedOut: status.hasCheckedOut,
+              checked_in: status.checked_in,
+              check_in_time: status.check_in_time,
+              check_out_time: status.check_out_time,
+              cached_date: cachedDate
+            });
+          }
+
+          if (records.length > 0) {
+            await dexieDb.today_attendance_cache.bulkPut(records);
+          }
+        } catch (e) {
+          console.warn('[Dexie Status Cache Put Error]:', e);
+        }
+      }
+    },
+    async get(empId, cachedDate) {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          return await sqliteGetTodayAttendance(Number(empId), cachedDate);
+        } catch (e) {
+          console.error('[db.js get error]:', e, e?.stack || '');
+          return null;
+        }
+      } else {
+        try {
+          const row = await dexieDb.today_attendance_cache.get(Number(empId));
+          if (row && row.cached_date === cachedDate) {
+            return {
+              hasCheckedIn: row.hasCheckedIn,
+              hasCheckedOut: row.hasCheckedOut,
+              checked_in: row.checked_in,
+              check_in_time: row.check_in_time,
+              check_out_time: row.check_out_time
+            };
+          }
+        } catch (e) {
+          console.warn('[Dexie Status Cache Get Error]:', e);
+        }
+        return null;
+      }
+    },
+    async clear() {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteClearTodayAttendanceCache();
+      } else {
+        await dexieDb.today_attendance_cache.clear();
       }
     }
   }
@@ -356,7 +439,7 @@ export async function writeToBackupStorage(logLine) {
       directory,
       encoding
     });
-    
+
     // Resolve and print the exact file path on the device
     try {
       const uriResult = await Filesystem.getUri({ directory, path });

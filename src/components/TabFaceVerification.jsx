@@ -922,7 +922,7 @@ export default function TabFaceVerification({
       }
     }
 
-    // 2. Tier 2: Local Storage Cache Fallback (if offline or Supabase fails)
+    // 2. Tier 2: SQLite/IndexedDB Status Fallback (if offline or Supabase fails)
     if (!statusData) {
       try {
         const getLocalDateString = (d) => {
@@ -932,23 +932,19 @@ export default function TabFaceVerification({
           return `${year}-${month}-${day}`;
         };
         const todayStr = getLocalDateString(new Date());
-        const cachedStr = localStorage.getItem('attendance_status_today_' + todayStr);
-        if (cachedStr) {
-          const statusMap = JSON.parse(cachedStr);
-          const cachedStatus = statusMap[String(empId)];
-          if (cachedStatus) {
-            statusData = {
-              hasCheckedIn: cachedStatus.hasCheckedIn,
-              hasCheckedOut: cachedStatus.hasCheckedOut,
-              checked_in: cachedStatus.checked_in,
-              check_in_time: cachedStatus.check_in_time,
-              check_out_time: cachedStatus.check_out_time,
-            };
-            console.log(`[Storage Cache] Loaded offline fallback status for employee ${empId}:`, statusData);
-          }
+        const cachedStatus = await db.today_attendance_cache.get(empId, todayStr);
+        if (cachedStatus) {
+          statusData = {
+            hasCheckedIn: cachedStatus.hasCheckedIn,
+            hasCheckedOut: cachedStatus.hasCheckedOut,
+            checked_in: cachedStatus.checked_in,
+            check_in_time: cachedStatus.check_in_time,
+            check_out_time: cachedStatus.check_out_time,
+          };
+          console.log(`[Local Database] Loaded offline fallback status for employee ${empId} from SQLite/IndexedDB:`, statusData);
         }
       } catch (cacheErr) {
-        console.warn('[Storage Cache] Failed to load cached status:', cacheErr);
+        console.warn('[Local Database] Failed to load status from database:', cacheErr);
       }
     }
 

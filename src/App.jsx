@@ -232,7 +232,7 @@ function AppContent() {
           };
         });
 
-        // Cache today's online attendance status in localStorage for offline access
+        // Save today's online attendance status to local database (SQLite/IndexedDB) for offline access
         try {
           const todayStr = getLocalDateString(new Date());
           const statusMap = {};
@@ -264,10 +264,10 @@ function AppContent() {
             }
           });
           
-          localStorage.setItem('attendance_status_today_' + todayStr, JSON.stringify(statusMap));
-          console.log(`[Storage Cache] Cached today's online attendance status for ${Object.keys(statusMap).length} employees`);
+          await db.today_attendance_cache.put(statusMap, todayStr);
+          console.log(`[Local Database] Saved today's online attendance status for ${Object.keys(statusMap).length} employees in ${Capacitor.isNativePlatform() ? 'SQLite Database' : 'IndexedDB'}`);
         } catch (e) {
-          console.warn('[Storage Cache] Failed to cache today\'s attendance status:', e);
+          console.warn('[Local Database] Failed to save today\'s attendance status:', e);
         }
       }
     } catch (err) {
