@@ -54,16 +54,49 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       };
     });
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('attendance_logs')
-      .insert(logsToInsert);
+      .insert(logsToInsert)
+      .select();
 
     if (error) throw error;
 
     const syncedIds = pendingLogs.map(log => log.id);
 
-    // Remove synced records from local DB
+    // Remove synced records from local DB queue
     await removeSyncedLogs(syncedIds);
+
+    // Update local attendance logs table: remove offline entries and put synced ones
+    try {
+      for (let i = 0; i < pendingLogs.length; i++) {
+        const oldId = pendingLogs[i].id;
+        // Delete the temporary offline log from the logs table
+        await db.attendance_logs.delete(String(oldId));
+      }
+      
+      if (data && data.length > 0) {
+        const localRecords = data.map(record => ({
+          id: String(record.id),
+          employee_id: record.employee_id,
+          nik: record.nik,
+          name: record.name,
+          department: record.department,
+          afdeling: record.afdeling || null,
+          timestamp: record.timestamp,
+          location: record.location,
+          lat: record.latitude !== undefined && record.latitude !== null ? record.latitude : (record.lat !== undefined ? record.lat : null),
+          lng: record.longitude !== undefined && record.longitude !== null ? record.longitude : (record.lng !== undefined ? record.lng : null),
+          status: record.status,
+          attendance_type: record.attendance_type,
+          euclidean_distance: record.euclidean_distance,
+          is_synced: true,
+          created_at: record.created_at
+        }));
+        await db.attendance_logs.bulkPut(localRecords);
+      }
+    } catch (dbErr) {
+      console.warn('[Sync Engine] Failed to update local attendance_logs table:', dbErr);
+    }
     console.log(`[Auto-Sync Success] Successfully synced ${syncedIds.length} records!`);
 
     // Write sync action to public backup log

@@ -195,7 +195,7 @@ function AppContent() {
     // Map of employees by ID
     const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
 
-    // Step 1: Query Supabase online logs
+    // Step 1: Fetch latest online logs from Supabase and cache them in local database
     try {
       const { data: rawLogs, error } = await supabase
         .from('attendance_logs')
@@ -223,86 +223,53 @@ function AppContent() {
             (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
           );
           return {
-            ...log,
-            attendance_type: typeLabel,
+            id: String(log.id),
+            employee_id: log.employee_id,
             nik: emp.nik || log.nik || '-',
             name: emp.name || log.name || `Karyawan #${log.employee_id}`,
             department: emp.department || log.department || '-',
-            afdeling: emp.afdeling || log.afdeling || '-'
+            afdeling: emp.afdeling || log.afdeling || '-',
+            timestamp: log.timestamp,
+            location: log.location,
+            lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
+            lng: log.longitude !== undefined && log.longitude !== null ? log.longitude : (log.lng !== undefined ? log.lng : null),
+            status: log.status,
+            attendance_type: typeLabel,
+            euclidean_distance: log.euclidean_distance,
+            is_synced: true,
+            created_at: log.created_at
           };
         });
 
-        // Save today's online attendance status to local database (SQLite/IndexedDB) for offline access
+        // Save fresh online logs to local database
         try {
-          const todayStr = getLocalDateString(new Date());
-          const statusMap = {};
-          
-          // Sort oldest to newest to reconstruct today's final state chronologically
-          const todayOnlineLogs = onlineLogs.filter(log => getLocalDateString(log.timestamp) === todayStr);
-          const sorted = [...todayOnlineLogs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          
-          sorted.forEach(log => {
-            const empId = String(log.employee_id);
-            if (!statusMap[empId]) {
-              statusMap[empId] = {
-                hasCheckedIn: false,
-                hasCheckedOut: false,
-                checked_in: false,
-                check_in_time: null,
-                check_out_time: null
-              };
+          const localLogs = await db.attendance_logs.toArray();
+          for (let i = 0; i < localLogs.length; i++) {
+            if (localLogs[i].is_synced) {
+              await db.attendance_logs.delete(localLogs[i].id);
             }
-            
-            if (log.attendance_type === 'CHECK-IN') {
-              statusMap[empId].hasCheckedIn = true;
-              statusMap[empId].checked_in = true;
-              statusMap[empId].check_in_time = log.timestamp;
-            } else if (log.attendance_type === 'CHECK-OUT') {
-              statusMap[empId].hasCheckedOut = true;
-              statusMap[empId].checked_in = false;
-              statusMap[empId].check_out_time = log.timestamp;
-            }
-          });
-          
-          await db.today_attendance_cache.put(statusMap, todayStr);
-          console.log(`[Local Database] Saved today's online attendance status for ${Object.keys(statusMap).length} employees in ${Capacitor.isNativePlatform() ? 'SQLite Database' : 'IndexedDB'}`);
-        } catch (e) {
-          console.warn('[Local Database] Failed to save today\'s attendance status:', e);
+          }
+          if (onlineLogs.length > 0) {
+            await db.attendance_logs.bulkPut(onlineLogs);
+          }
+          console.log(`[Local Database] Synchronized ${onlineLogs.length} online logs to local storage`);
+        } catch (dbErr) {
+          console.warn('[Local Database] Failed to cache online logs:', dbErr);
         }
       }
     } catch (err) {
       console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
     }
 
-    // Step 2: Query offline pending logs from SQLite / IndexedDB
-    let offlineLogs = [];
+    // Step 2: Query all logs from local database
+    let allLocalLogs = [];
     try {
-      const pending = await getUnsyncedLogs();
-      if (pending && pending.length > 0) {
-        offlineLogs = pending.map(log => {
-          const emp = masterEmpMap.get(String(log.employee_id)) || {};
-          const typeLabel = normalizeType(log.attendance_type || 'CHECK-IN');
-          return {
-            id: `offline_${log.id}`,
-            employee_id: log.employee_id,
-            timestamp: log.timestamp || new Date().toISOString(),
-            location: log.location || 'Offline Queue',
-            status: log.status || 'Hadir (Offline)',
-            euclidean_distance: log.euclidean_distance || 0,
-            attendance_type: typeLabel,
-            nik: emp.nik || log.nik || '-',
-            name: emp.name || log.name || 'Karyawan',
-            department: emp.department || log.department || '-',
-            afdeling: emp.afdeling || log.afdeling || '-',
-            isOfflineQueue: true
-          };
-        });
-      }
+      allLocalLogs = await db.attendance_logs.toArray();
     } catch (e) {
-      console.warn('[FETCH OFFLINE LOGS ERROR]:', e);
+      console.warn('[Local Database] Failed to load attendance logs:', e);
     }
 
-    // Step 3: Merge and de-duplicate based on employee_id, local date (YYYY-MM-DD), and attendance_type
+    // Step 3: De-duplicate and resolve metadata
     const getLocalDateString = (ts) => {
       if (!ts) return '';
       const d = new Date(ts);
@@ -313,34 +280,42 @@ function AppContent() {
       return `${year}-${month}-${day}`;
     };
 
-    const mergedLogs = [...offlineLogs];
-    const onlineSignatures = new Set();
-
-    onlineLogs.forEach(oLog => {
-      const localDate = getLocalDateString(oLog.timestamp);
-      if (localDate) {
-        const signature = `${oLog.employee_id}_${localDate}_${oLog.attendance_type}`;
-        onlineSignatures.add(signature);
-      }
-      mergedLogs.push(oLog);
-    });
-
     const finalLogs = [];
     const seen = new Set();
+    const onlineSignatures = new Set();
 
-    mergedLogs.forEach(log => {
+    allLocalLogs.forEach(log => {
+      if (log.is_synced) {
+        const localDate = getLocalDateString(log.timestamp);
+        if (localDate) {
+          const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
+          onlineSignatures.add(signature);
+        }
+      }
+    });
+
+    allLocalLogs.forEach(log => {
       const localDate = getLocalDateString(log.timestamp);
       if (!localDate) return;
       const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
-      
-      // Skip offline log if its signature is already in online logs
-      if (log.isOfflineQueue && onlineSignatures.has(signature)) {
+
+      // Skip unsynced log if its signature is already in online logs
+      if (!log.is_synced && onlineSignatures.has(signature)) {
         return;
       }
 
       if (!seen.has(signature)) {
         seen.add(signature);
-        finalLogs.push(log);
+        
+        let resolvedLog = { ...log };
+        if (!resolvedLog.name || resolvedLog.name === 'Karyawan' || resolvedLog.name.includes('#')) {
+          const emp = masterEmpMap.get(String(resolvedLog.employee_id)) || {};
+          resolvedLog.nik = emp.nik || resolvedLog.nik || '-';
+          resolvedLog.name = emp.name || resolvedLog.name || `Karyawan #${resolvedLog.employee_id}`;
+          resolvedLog.department = emp.department || resolvedLog.department || '-';
+          resolvedLog.afdeling = emp.afdeling || resolvedLog.afdeling || '-';
+        }
+        finalLogs.push(resolvedLog);
       }
     });
 

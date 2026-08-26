@@ -15,7 +15,13 @@ import {
   sqliteDeleteEmployeeBiometrics,
   sqliteCacheTodayAttendance,
   sqliteGetTodayAttendance,
-  sqliteClearTodayAttendanceCache
+  sqliteClearTodayAttendanceCache,
+  sqliteSaveAttendanceLog,
+  sqliteBulkSaveAttendanceLogs,
+  sqliteGetAttendanceLogs,
+  sqliteGetTodayAttendanceLogs,
+  sqliteDeleteAttendanceLog,
+  sqliteClearAttendanceLogs
 } from './services/sqliteService';
 
 /**
@@ -47,6 +53,14 @@ dexieDb.version(3).stores({
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
   employees_cache: 'id, nik, name, department, has_master_biometric',
   today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date'
+});
+
+dexieDb.version(4).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced'
 });
 
 /**
@@ -177,6 +191,78 @@ export const db = {
         await dexieDb.today_attendance_cache.clear();
       }
     }
+  },
+  attendance_logs: {
+    async put(log) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSaveAttendanceLog(log);
+      } else {
+        try {
+          await dexieDb.attendance_logs.put(log);
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs Put Error]:', e);
+        }
+      }
+    },
+    async bulkPut(logs) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteBulkSaveAttendanceLogs(logs);
+      } else {
+        try {
+          await dexieDb.attendance_logs.bulkPut(logs);
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs BulkPut Error]:', e);
+        }
+      }
+    },
+    async toArray() {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetAttendanceLogs();
+      } else {
+        try {
+          return await dexieDb.attendance_logs.orderBy('timestamp').reverse().toArray();
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs toArray Error]:', e);
+          return [];
+        }
+      }
+    },
+    async delete(id) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteDeleteAttendanceLog(id);
+      } else {
+        try {
+          await dexieDb.attendance_logs.delete(id);
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs Delete Error]:', e);
+        }
+      }
+    },
+    async getTodayLogs(empId, dateStr) {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetTodayAttendanceLogs(Number(empId), dateStr);
+      } else {
+        try {
+          const all = await dexieDb.attendance_logs.where('employee_id').equals(Number(empId)).toArray();
+          const filtered = all.filter(row => row.timestamp && row.timestamp.substring(0, 10) === dateStr);
+          return filtered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs getTodayLogs Error]:', e);
+          return [];
+        }
+      }
+    },
+    async clear() {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteClearAttendanceLogs();
+      } else {
+        try {
+          await dexieDb.attendance_logs.clear();
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs Clear Error]:', e);
+        }
+      }
+    }
   }
 };
 
@@ -295,6 +381,30 @@ export async function queueOfflineAttendance(logData) {
       const timestamp = result.timestamp || new Date().toISOString();
       const logLine = `[${timestamp}] [OFFLINE QUEUED] [${result.attendance_type || 'CHECK_IN'}] NIK: ${result.nik || '-'} - ${result.name || 'Karyawan'} (Loc: ${result.location || 'Mobile'}, Dist: ${result.euclidean_distance || 0})\n`;
       await writeToBackupStorage(logLine);
+
+      // Dual-write offline log to local_attendance_logs
+      try {
+        const offlineLogRecord = {
+          id: `offline_${result.id}`,
+          employee_id: result.employee_id,
+          nik: result.nik,
+          name: result.name,
+          department: result.department,
+          afdeling: logData.afdeling || null,
+          timestamp: result.timestamp,
+          location: result.location,
+          lat: result.lat,
+          lng: result.lng,
+          status: result.status,
+          attendance_type: result.attendance_type,
+          euclidean_distance: result.euclidean_distance,
+          is_synced: false,
+          created_at: result.created_at
+        };
+        await db.attendance_logs.put(offlineLogRecord);
+      } catch (dbErr) {
+        console.warn('[db.js] Failed to save queued offline log to attendance_logs:', dbErr);
+      }
     }
     return result;
   }
@@ -317,6 +427,18 @@ export async function queueOfflineAttendance(logData) {
     };
     const id = await dexieDb.attendance_sync_queue.add(queueItem);
     console.log(`[IndexedDB Queue] Attendance log queued offline with ID: ${id}`);
+
+    // Dual-write offline log to local_attendance_logs
+    try {
+      const offlineLogRecord = {
+        id: `offline_${id}`,
+        ...queueItem
+      };
+      await db.attendance_logs.put(offlineLogRecord);
+    } catch (dbErr) {
+      console.warn('[db.js] Failed to save queued offline log to attendance_logs:', dbErr);
+    }
+
     return { ...queueItem, id };
   } catch (err) {
     console.error('[IndexedDB Queue Add Error]:', err);
