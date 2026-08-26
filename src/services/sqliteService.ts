@@ -76,6 +76,16 @@ export async function initSQLite(): Promise<void> {
         is_synced INTEGER DEFAULT 0,
         created_at TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS local_today_attendance_cache (
+        employee_id INTEGER PRIMARY KEY,
+        has_checked_in INTEGER DEFAULT 0,
+        has_checked_out INTEGER DEFAULT 0,
+        checked_in INTEGER DEFAULT 0,
+        check_in_time TEXT,
+        check_out_time TEXT,
+        cached_date TEXT
+      );
     `;
 
     await dbConnection.execute(ddl);
@@ -399,4 +409,89 @@ export async function sqliteDeleteEmployeeBiometrics(employeeId: number): Promis
     console.error('[SQLite Service sqliteDeleteEmployeeBiometrics Error]:', err?.message || err);
   }
 }
+
+export async function sqliteCacheTodayAttendance(statusMap: any, cachedDate: string): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    // Clear old caches for different dates
+    await dbConnection.run(
+      `DELETE FROM local_today_attendance_cache WHERE cached_date != ?`,
+      [cachedDate]
+    );
+
+    // Bulk insert/replace using a transaction (executeSet)
+    const statements: any[] = [];
+    const keys = Object.keys(statusMap);
+    for (let i = 0; i < keys.length; i++) {
+      const empId = keys[i];
+      const status = statusMap[empId];
+      if (!status) continue;
+      
+      statements.push({
+        statement: `INSERT OR REPLACE INTO local_today_attendance_cache 
+                    (employee_id, has_checked_in, has_checked_out, checked_in, check_in_time, check_out_time, cached_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          parseInt(empId),
+          status.hasCheckedIn ? 1 : 0,
+          status.hasCheckedOut ? 1 : 0,
+          status.checked_in ? 1 : 0,
+          status.check_in_time || null,
+          status.check_out_time || null,
+          cachedDate
+        ]
+      });
+    }
+
+    if (statements.length > 0) {
+      await dbConnection.executeSet(statements);
+    }
+    console.log(`[SQLite Service] Cached today's attendance status for ${statements.length} employees in local database`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteCacheTodayAttendance Error]:', err?.message || err, err?.stack || '');
+    throw err;
+  }
+}
+
+/**
+ * Retrieves cached today's attendance status for a single employee from SQLite.
+ */
+export async function sqliteGetTodayAttendance(empId: number, cachedDate: string): Promise<any | null> {
+  if (!dbConnection) return null;
+  try {
+    const res = await dbConnection.query(
+      `SELECT * FROM local_today_attendance_cache WHERE employee_id = ? AND cached_date = ?`,
+      [empId, cachedDate]
+    );
+    const rows = res.values || [];
+    if (rows.length > 0) {
+      const row = rows[0];
+      return {
+        hasCheckedIn: row.has_checked_in === 1,
+        hasCheckedOut: row.has_checked_out === 1,
+        checked_in: row.checked_in === 1,
+        check_in_time: row.check_in_time,
+        check_out_time: row.check_out_time
+      };
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetTodayAttendance Error]:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Clears today's attendance status cache table.
+ */
+export async function sqliteClearTodayAttendanceCache(): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    await dbConnection.run(`DELETE FROM local_today_attendance_cache`, []);
+    console.log('[SQLite Service] Cleared local today attendance status cache');
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteClearTodayAttendanceCache Error]:', err?.message || err);
+  }
+}
+
 
