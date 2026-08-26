@@ -107,6 +107,21 @@ export async function initSQLite(): Promise<void> {
     `;
 
     await dbConnection.execute(ddl);
+
+    // Alter tables to add 'afdeling' if they don't exist (migrations)
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN afdeling TEXT;`);
+      console.log('[SQLite Service] Migrated local_attendance_queue: added afdeling column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN afdeling TEXT;`);
+      console.log('[SQLite Service] Migrated local_attendance_logs: added afdeling column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+
     console.log('[SQLite Service] SQLite tables verified and ready.');
   } catch (err: any) {
     console.error('[SQLite Service Init Error]:', err?.message || err);
@@ -250,13 +265,14 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
     
     await dbConnection.run(
       `INSERT INTO local_attendance_queue (
-        employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         logData.employee_id,
         logData.nik,
         logData.name,
         logData.department,
+        logData.afdeling || null,
         timestamp,
         logData.location || 'HP Mobile (Offline)',
         logData.lat || null,

@@ -1414,6 +1414,7 @@ export default function TabFaceVerification({
           nik: (targetEmp.nik || nikInput).trim() || null,
           name: targetEmp.name || null,
           department: targetEmp.department || null,
+          afdeling: targetEmp.afdeling || null,
           scan_descriptor: currentDescRef.current, // Send face embedding to the server
           location: `${locationStr} - GeoMesh Scanner`,
           attendance_type: attendanceTypeDash,
@@ -1454,6 +1455,7 @@ export default function TabFaceVerification({
             nik: (targetEmp.nik || nikInput).trim() || null,
             name: targetEmp.name || null,
             department: targetEmp.department || null,
+            afdeling: targetEmp.afdeling || null,
             location: `${locationStr} - GeoMesh Scanner (Direct Fallback)`,
             attendance_type: attendanceTypeDash,
             status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
@@ -1485,6 +1487,7 @@ export default function TabFaceVerification({
           nik: targetEmp.nik,
           name: targetEmp.name,
           department: targetEmp.department,
+          afdeling: targetEmp.afdeling || null,
           timestamp: recordTimestamp,
           location: `${locationStr} [OFFLINE DEXIE]`,
           lat: userLat,
