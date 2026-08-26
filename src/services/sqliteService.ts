@@ -86,6 +86,24 @@ export async function initSQLite(): Promise<void> {
         check_out_time TEXT,
         cached_date TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS local_attendance_logs (
+        id TEXT PRIMARY KEY,
+        employee_id INTEGER NOT NULL,
+        nik TEXT,
+        name TEXT,
+        department TEXT,
+        afdeling TEXT,
+        timestamp TEXT,
+        location TEXT,
+        lat REAL,
+        lng REAL,
+        status TEXT,
+        attendance_type TEXT,
+        euclidean_distance REAL,
+        is_synced INTEGER DEFAULT 0,
+        created_at TEXT
+      );
     `;
 
     await dbConnection.execute(ddl);
@@ -491,6 +509,174 @@ export async function sqliteClearTodayAttendanceCache(): Promise<void> {
     console.log('[SQLite Service] Cleared local today attendance status cache');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearTodayAttendanceCache Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Save a single attendance log to local SQLite.
+ */
+export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    await dbConnection.run(
+      `INSERT OR REPLACE INTO local_attendance_logs 
+      (id, employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        String(log.id),
+        Number(log.employee_id),
+        log.nik || null,
+        log.name || null,
+        log.department || null,
+        log.afdeling || null,
+        log.timestamp || null,
+        log.location || null,
+        log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
+        log.lng !== undefined && log.lng !== null ? Number(log.lng) : null,
+        log.status || null,
+        log.attendance_type || null,
+        log.euclidean_distance !== undefined && log.euclidean_distance !== null ? Number(log.euclidean_distance) : null,
+        log.is_synced ? 1 : 0,
+        log.created_at || null
+      ]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSaveAttendanceLog Error]:', err?.message || err, err?.stack || '');
+  }
+}
+
+/**
+ * Bulk save attendance logs to local SQLite.
+ */
+export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    const statements = logs.map(log => ({
+      statement: `INSERT OR REPLACE INTO local_attendance_logs 
+        (id, employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      values: [
+        String(log.id),
+        Number(log.employee_id),
+        log.nik || null,
+        log.name || null,
+        log.department || null,
+        log.afdeling || null,
+        log.timestamp || null,
+        log.location || null,
+        log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
+        log.lng !== undefined && log.lng !== null ? Number(log.lng) : null,
+        log.status || null,
+        log.attendance_type || null,
+        log.euclidean_distance !== undefined && log.euclidean_distance !== null ? Number(log.euclidean_distance) : null,
+        log.is_synced ? 1 : 0,
+        log.created_at || null
+      ]
+    }));
+    if (statements.length > 0) {
+      await dbConnection.executeSet(statements);
+    }
+    console.log(`[SQLite Service] Bulk saved ${logs.length} attendance logs to local SQLite`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteBulkSaveAttendanceLogs Error]:', err?.message || err, err?.stack || '');
+  }
+}
+
+/**
+ * Get all attendance logs from local SQLite.
+ */
+export async function sqliteGetAttendanceLogs(): Promise<any[]> {
+  if (!dbConnection) return [];
+  try {
+    const res = await dbConnection.query(
+      `SELECT * FROM local_attendance_logs ORDER BY timestamp DESC`
+    );
+    const rows = res.values || [];
+    return rows.map((row: any) => ({
+      id: row.id,
+      employee_id: row.employee_id,
+      nik: row.nik,
+      name: row.name,
+      department: row.department,
+      afdeling: row.afdeling,
+      timestamp: row.timestamp,
+      location: row.location,
+      lat: row.lat,
+      lng: row.lng,
+      status: row.status,
+      attendance_type: row.attendance_type,
+      euclidean_distance: row.euclidean_distance,
+      is_synced: row.is_synced === 1,
+      created_at: row.created_at
+    }));
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetAttendanceLogs Error]:', err?.message || err, err?.stack || '');
+    return [];
+  }
+}
+
+/**
+ * Get today's attendance logs for a single employee from SQLite.
+ */
+export async function sqliteGetTodayAttendanceLogs(empId: number, dateStr: string): Promise<any[]> {
+  if (!dbConnection) return [];
+  try {
+    const res = await dbConnection.query(
+      `SELECT * FROM local_attendance_logs 
+       WHERE employee_id = ? AND substr(timestamp, 1, 10) = ? 
+       ORDER BY timestamp ASC`,
+      [empId, dateStr]
+    );
+    const rows = res.values || [];
+    return rows.map((row: any) => ({
+      id: row.id,
+      employee_id: row.employee_id,
+      nik: row.nik,
+      name: row.name,
+      department: row.department,
+      afdeling: row.afdeling,
+      timestamp: row.timestamp,
+      location: row.location,
+      lat: row.lat,
+      lng: row.lng,
+      status: row.status,
+      attendance_type: row.attendance_type,
+      euclidean_distance: row.euclidean_distance,
+      is_synced: row.is_synced === 1,
+      created_at: row.created_at
+    }));
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetTodayAttendanceLogs Error]:', err?.message || err, err?.stack || '');
+    return [];
+  }
+}
+
+/**
+ * Delete a single local attendance log from SQLite.
+ */
+export async function sqliteDeleteAttendanceLog(id: string): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    await dbConnection.run(
+      `DELETE FROM local_attendance_logs WHERE id = ?`,
+      [id]
+    );
+    console.log(`[SQLite Service] Deleted local attendance log ID: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteDeleteAttendanceLog Error]:', err?.message || err, err?.stack || '');
+  }
+}
+
+/**
+ * Clear all cached attendance logs from SQLite.
+ */
+export async function sqliteClearAttendanceLogs(): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    await dbConnection.run(`DELETE FROM local_attendance_logs`, []);
+    console.log('[SQLite Service] Cleared all local attendance logs cache');
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteClearAttendanceLogs Error]:', err?.message || err);
   }
 }
 

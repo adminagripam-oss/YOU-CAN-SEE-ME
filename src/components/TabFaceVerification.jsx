@@ -845,166 +845,51 @@ export default function TabFaceVerification({
     }
   };
 
-  // Fetch attendance status (Multi-Tier: Express API -> Direct Supabase -> Dexie.js Queue + State Guard)
+  // Fetch attendance status (100% Local Database Backed - SQLite on Android, IndexedDB on Web)
   const fetchAttendanceStatus = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
-    let statusData = null;
 
-    // 1. Tier 1: Direct Supabase Cloud Query
-    if (!statusData) {
-      try {
-        const { data: logs, error } = await supabase
-          .from('attendance_logs')
-          .select('*')
-          .eq('employee_id', parseInt(empId))
-          .order('timestamp', { ascending: false });
+    let hasCheckedIn = false;
+    let hasCheckedOut = false;
+    let checkInTime = null;
+    let checkOutTime = null;
 
-        if (!error && logs) {
-          const now = new Date();
-          const isSameDay = (d1, d2) => {
-            if (!d1 || !d2) return false;
-            const date1 = new Date(d1);
-            const date2 = new Date(d2);
-            return (
-              date1.getFullYear() === date2.getFullYear() &&
-              date1.getMonth() === date2.getMonth() &&
-              date1.getDate() === date2.getDate()
-            );
-          };
-
-          const todayLogs = logs.filter((l) => {
-            const ts = l.timestamp || l.created_at;
-            return ts && isSameDay(ts, now);
-          });
-
-          const successLogs = todayLogs.filter((l) => !l.status?.includes('GAGAL') && !l.status?.includes('REJECT'));
-          const checkIns = successLogs.filter((l) => {
-            const t = (l.attendance_type || '').toUpperCase();
-            const loc = (l.location || '').toUpperCase();
-            const st = (l.status || '').toUpperCase();
-            const isOut = t.includes('CHECK_OUT') || t.includes('CHECK-OUT') || loc.includes('CHECK_OUT') || loc.includes('CHECK-OUT') || st.includes('CHECK_OUT') || st.includes('CHECK-OUT');
-            const isIn = t.includes('CHECK_IN') || t.includes('CHECK-IN') || loc.includes('CHECK_IN') || loc.includes('CHECK-IN') || st.includes('HADIR') || st.includes('CHECK_IN') || st.includes('CHECK-IN');
-            return isIn && !isOut;
-          });
-
-          const checkOuts = successLogs.filter((l) => {
-            const t = (l.attendance_type || '').toUpperCase();
-            const loc = (l.location || '').toUpperCase();
-            const st = (l.status || '').toUpperCase();
-            return (
-              t.includes('CHECK_OUT') ||
-              t.includes('CHECK-OUT') ||
-              loc.includes('CHECK_OUT') ||
-              loc.includes('CHECK-OUT') ||
-              st.includes('CHECK_OUT') ||
-              st.includes('CHECK-OUT')
-            );
-          });
-
-          const lastCheckIn = checkIns[0] || null;
-          const lastCheckOut = checkOuts[0] || null;
-          const isCheckedIn =
-            !!lastCheckIn &&
-            (!lastCheckOut ||
-              new Date(lastCheckIn.timestamp || lastCheckIn.created_at) >
-              new Date(lastCheckOut.timestamp || lastCheckOut.created_at));
-
-          statusData = {
-            hasCheckedIn: !!lastCheckIn,
-            hasCheckedOut: !!lastCheckOut,
-            checked_in: isCheckedIn,
-            check_in_time: lastCheckIn ? lastCheckIn.timestamp || lastCheckIn.created_at : null,
-            check_out_time: lastCheckOut ? lastCheckOut.timestamp || lastCheckOut.created_at : null,
-          };
-        }
-      } catch (err) {
-        console.warn('[FETCH ATTENDANCE STATUS SUPABASE WARN]:', err.message);
-      }
-    }
-
-    // 2. Tier 2: SQLite/IndexedDB Status Fallback (if offline or Supabase fails)
-    if (!statusData) {
-      try {
-        const getLocalDateString = (d) => {
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        };
-        const todayStr = getLocalDateString(new Date());
-        const cachedStatus = await db.today_attendance_cache.get(empId, todayStr);
-        if (cachedStatus) {
-          statusData = {
-            hasCheckedIn: cachedStatus.hasCheckedIn,
-            hasCheckedOut: cachedStatus.hasCheckedOut,
-            checked_in: cachedStatus.checked_in,
-            check_in_time: cachedStatus.check_in_time,
-            check_out_time: cachedStatus.check_out_time,
-          };
-          console.log(`[Local Database] Loaded offline fallback status for employee ${empId} from SQLite/IndexedDB:`, statusData);
-        }
-      } catch (cacheErr) {
-        console.warn('[Local Database] Failed to load status from database:', cacheErr);
-      }
-    }
-
-    // Determine base statuses
-    let hasCheckedIn = statusData?.hasCheckedIn ?? statusData?.checked_in ?? false;
-    let hasCheckedOut = statusData?.hasCheckedOut ?? false;
-    let checkInTime = statusData?.check_in_time || null;
-    let checkOutTime = statusData?.check_out_time || null;
-
-    // 3. Tier 3: Dexie.js (IndexedDB) Sync Queue Inspection (Offline Override Rule)
     try {
-      const now = new Date();
-      const isSameDay = (d1, d2) => {
-        if (!d1 || !d2) return false;
-        const date1 = new Date(d1);
-        const date2 = new Date(d2);
-        return (
-          date1.getFullYear() === date2.getFullYear() &&
-          date1.getMonth() === date2.getMonth() &&
-          date1.getDate() === date2.getDate()
-        );
+      const getLocalDateString = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       };
+      const todayStr = getLocalDateString(new Date());
+      const todayLogs = await db.attendance_logs.getTodayLogs(empId, todayStr);
 
-      const queuedLogs = await db.attendance_sync_queue.toArray();
-      const localEmpLogs = queuedLogs.filter((item) => {
-        const matchEmp = String(item.employee_id) === String(empId);
-        const ts = item.timestamp || item.created_at;
-        return matchEmp && ts && isSameDay(ts, now);
+      const checkIns = todayLogs.filter(log => log.attendance_type === 'CHECK-IN');
+      const checkOuts = todayLogs.filter(log => log.attendance_type === 'CHECK-OUT');
+
+      const lastCheckIn = checkIns[checkIns.length - 1] || null;
+      const lastCheckOut = checkOuts[checkOuts.length - 1] || null;
+
+      hasCheckedIn = checkIns.length > 0;
+      hasCheckedOut = checkOuts.length > 0;
+      checkInTime = lastCheckIn ? lastCheckIn.timestamp : null;
+      checkOutTime = lastCheckOut ? lastCheckOut.timestamp : null;
+
+      console.log(`[Local Database] Loaded today status for employee ${empId}:`, {
+        hasCheckedIn,
+        hasCheckedOut,
+        checkInTime,
+        checkOutTime
       });
-
-      const localCheckIn = localEmpLogs.find((item) => {
-        const type = (item.attendance_type || item.status || '').toUpperCase();
-        return type.includes('CHECK_IN') || type.includes('CHECK-IN') || type.includes('HADIR');
-      });
-
-      const localCheckOut = localEmpLogs.find((item) => {
-        const type = (item.attendance_type || item.status || '').toUpperCase();
-        return type.includes('CHECK_OUT') || type.includes('CHECK-OUT');
-      });
-
-      if (localCheckIn) {
-        hasCheckedIn = true;
-        if (!checkInTime) checkInTime = localCheckIn.timestamp || localCheckIn.created_at;
-      }
-
-      if (localCheckOut) {
-        hasCheckedOut = true;
-        hasCheckedIn = true;
-        if (!checkOutTime) checkOutTime = localCheckOut.timestamp || localCheckOut.created_at;
-      }
-    } catch (dexieErr) {
-      console.warn('[DEXIE CHECK QUEUE WARN]:', dexieErr.message);
+    } catch (err) {
+      console.warn('[Local Database] Failed to fetch employee attendance status:', err);
     }
 
-    // 4. State Guard: Prevent state revert if state is already checkedIn
     setAttendanceStatus((prev) => {
       const isCurrentlyCheckedIn = prev.checkedIn && !prev.checkOutTime;
       const targetCheckedIn = isCurrentlyCheckedIn
-        ? true
-        : ((hasCheckedIn || prev.checkedIn) && !hasCheckedOut && !checkOutTime && !prev.checkOutTime);
+        ? !hasCheckedOut
+        : (hasCheckedIn && !hasCheckedOut);
 
       return {
         checkedIn: targetCheckedIn,
@@ -1621,6 +1506,33 @@ export default function TabFaceVerification({
     // 3. JANGAN update Toast/State sebelum Database Benar-Benar Sukses
     if (isSuccess) {
       showToast('Absensi Berhasil', successMsg, 'success');
+
+      // Dual-write online log locally for immediate state update
+      if (navigator.onLine) {
+        try {
+          const onlineLogRecord = {
+            id: 'online_' + new Date(recordTimestamp).getTime(),
+            employee_id: targetEmp.id,
+            nik: targetEmp.nik || nikInput,
+            name: targetEmp.name,
+            department: targetEmp.department,
+            afdeling: targetEmp.afdeling || null,
+            timestamp: recordTimestamp,
+            location: `${locationStr} - GeoMesh Scanner`,
+            lat: userLat,
+            lng: userLng,
+            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+            attendance_type: attendanceTypeDash,
+            euclidean_distance: euclideanDist,
+            is_synced: true,
+            created_at: recordTimestamp
+          };
+          await db.attendance_logs.put(onlineLogRecord);
+          console.log('[Local Database] Saved online log locally:', onlineLogRecord);
+        } catch (dbErr) {
+          console.warn('[Local Database] Failed to write online log locally:', dbErr);
+        }
+      }
 
       setAttendanceStatus((prev) => ({
         checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),

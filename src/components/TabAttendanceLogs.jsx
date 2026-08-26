@@ -197,10 +197,14 @@ export default function TabAttendanceLogs({
             const offlineIds = idsToDelete.filter(id => String(id).startsWith('offline_'));
             const onlineIds = idsToDelete.filter(id => !String(id).startsWith('offline_'));
 
+            const { db } = await import('../db');
+
             if (offlineIds.length > 0) {
-              const { db } = await import('../db');
               for (const offlineId of offlineIds) {
-                await db.attendance_sync_queue.delete(offlineId);
+                // Strip the 'offline_' prefix to get actual queue ID
+                const rawQueueId = offlineId.replace('offline_', '');
+                await db.attendance_sync_queue.delete(rawQueueId);
+                await db.attendance_logs.delete(offlineId);
               }
             }
 
@@ -212,6 +216,11 @@ export default function TabAttendanceLogs({
 
               if (sbErr) {
                 throw sbErr;
+              }
+
+              // Also delete from local logs cache table
+              for (const onlineId of onlineIds) {
+                await db.attendance_logs.delete(String(onlineId));
               }
             }
 
@@ -248,6 +257,7 @@ export default function TabAttendanceLogs({
   const saveEdit = async () => {
     try {
       let success = true;
+      const { db } = await import('../db');
 
       // Update inLog if it exists and checkIn changed
       if (editData.inLog && editData.editCheckIn) {
@@ -264,7 +274,21 @@ export default function TabAttendanceLogs({
           status: newStatus
         }).eq('id', editData.inLog.id);
 
-        if (error) success = false;
+        if (!error) {
+          try {
+            const localLogs = await db.attendance_logs.toArray();
+            const found = localLogs.find(l => String(l.id) === String(editData.inLog.id));
+            if (found) {
+              found.timestamp = oldDate.toISOString();
+              found.status = newStatus;
+              await db.attendance_logs.put(found);
+            }
+          } catch (dbErr) {
+            console.warn('[Local Database] Failed to update edited inLog locally:', dbErr);
+          }
+        } else {
+          success = false;
+        }
       }
 
       // Update outLog if it exists and checkOut changed
@@ -281,7 +305,21 @@ export default function TabAttendanceLogs({
           status: newStatus
         }).eq('id', editData.outLog.id);
 
-        if (error) success = false;
+        if (!error) {
+          try {
+            const localLogs = await db.attendance_logs.toArray();
+            const found = localLogs.find(l => String(l.id) === String(editData.outLog.id));
+            if (found) {
+              found.timestamp = oldDate.toISOString();
+              found.status = newStatus;
+              await db.attendance_logs.put(found);
+            }
+          } catch (dbErr) {
+            console.warn('[Local Database] Failed to update edited outLog locally:', dbErr);
+          }
+        } else {
+          success = false;
+        }
       }
 
       if (success) {
