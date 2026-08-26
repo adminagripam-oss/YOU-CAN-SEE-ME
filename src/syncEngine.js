@@ -70,8 +70,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     try {
       for (let i = 0; i < pendingLogs.length; i++) {
         const oldId = pendingLogs[i].id;
-        // Delete the temporary offline log from the logs table
-        await db.attendance_logs.delete(String(oldId));
+        // Delete the temporary offline log from the logs table using correct prefix
+        await db.attendance_logs.delete('offline_' + oldId);
       }
       
       if (data && data.length > 0) {
