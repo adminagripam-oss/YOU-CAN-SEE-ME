@@ -50,7 +50,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
         attendance_type: log.attendance_type || 'CHECK_IN',
         nik: log.nik || null,
         name: log.name || null,
-        department: log.department || null
+        department: log.department || null,
+        afdeling: log.afdeling || null
       };
     });
 
