@@ -129,18 +129,32 @@ function AppContent() {
         if (!error && data) {
           let descData = [];
           try {
-            const { data: d } = await supabase.from('master_descriptors').select('employee_id');
-            descData = d || [];
+            const empIds = data.map(e => e.id);
+            if (empIds.length > 0) {
+              const { data: d, error: descErr } = await supabase
+                .from('master_descriptors')
+                .select('employee_id, descriptor_json, geometric_descriptor_json')
+                .in('employee_id', empIds);
+              if (!descErr && d) {
+                descData = d;
+              }
+            }
           } catch (e) {
             console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
           }
-          const registeredIds = new Set(descData.map(d => String(d.employee_id)));
+          
+          const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
 
-          empData = data.map(emp => ({
-            ...emp,
-            has_master_biometric: emp.has_master_biometric === true || registeredIds.has(String(emp.id))
-          }));
-          console.log('[SUPABASE DIRECT] Fetched and resolved biometrics for', empData.length, 'employees directly from cloud');
+          empData = data.map(emp => {
+            const biometrics = descMap.get(String(emp.id));
+            return {
+              ...emp,
+              has_master_biometric: emp.has_master_biometric === true || !!biometrics,
+              descriptor_json: biometrics ? biometrics.descriptor_json : null,
+              geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
+            };
+          });
+          console.log('[SUPABASE DIRECT] Fetched and resolved biometrics bulk for', empData.length, 'employees directly from cloud');
         }
       } catch (err) {
         console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err.message);
