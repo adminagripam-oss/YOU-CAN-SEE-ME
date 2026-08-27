@@ -175,7 +175,8 @@ Sistem secara cerdas membedakan status absensi hari ini:
 - Penyimpanan ke Supabase DB (`master_descriptors`) dan caching otomatis ke SQLite/IndexedDB HP (`user_master`).
 
 ### FR-4: Manajemen Data Karyawan (CRUD)
-- Registrasi karyawan baru dengan NIK, Nama, dan Departemen.
+- Registrasi karyawan baru dengan NIK, Nama, Departemen, Afdeling, dan Nama Kebun.
+- **Lock Kebun Otomatis**: Untuk pengguna dengan peran `estate_admin`, input field **Nama Kebun** otomatis terisi (pre-filled) dengan nama kebun terdaftarnya dan terkunci (disabled / read-only). Field ini juga dipertahankan agar tidak ter-reset setelah submit data karyawan berhasil.
 - Update data karyawan via modal dialog edit (`PUT /api/employees/:id`).
 - Penghapusan data karyawan (`DELETE /api/employees/:id`) secara *cascade* menghapus master biometrik dan log absensinya di Supabase DB.
 
@@ -220,6 +221,7 @@ CREATE TABLE IF NOT EXISTS public.admin_auth (
     role VARCHAR(30) DEFAULT 'estate_admin', -- 'headoffice_admin', 'regional_admin', 'estate_admin'
     region VARCHAR(50),
     kebun VARCHAR(100),
+    nik VARCHAR(50),                         -- Admin NIK (opsional, dari CSV pemetaan)
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
