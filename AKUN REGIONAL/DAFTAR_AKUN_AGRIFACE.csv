@@ -1,0 +1,33 @@
+Kategori;Nama Scope;Username;Password;Role;Region;Kebun
+Head Office;Nasional;admin.hq;tanamanhead;headoffice_admin;;
+Regional;Sumut 2;admin.sumut2;tanamansumut2;regional_admin;Sumut 2;
+Regional;Riau 1;admin.riau1;tanamanriau1;regional_admin;Riau 1;
+Regional;Kalbar 1A;admin.kalbar1a;tanamankalbar1a;regional_admin;Kalbar 1A;
+Regional;Kalbar 1B;admin.kalbar1b;tanamankalbar1b;regional_admin;Kalbar 1B;
+Kebun;Bukit Harapan I;admin.bukitharapani;tanamanbukitharapani;estate_admin;Sumut 2;Bukit Harapan I
+Kebun;Bukit Harapan II;admin.bukitharapanii;tanamanbukitharapanii;estate_admin;Sumut 2;Bukit Harapan II
+Kebun;Parsub;admin.parsub;tanamanparsub;estate_admin;Sumut 2;Parsub
+Kebun;Patogu Janji;admin.patogujanji;tanamanpatogujanji;estate_admin;Sumut 2;Patogu Janji
+Kebun;Panca Agro Lestari (Pal);admin.pancaagrolestaripal;tanamanpancaagrolestaripal;estate_admin;Riau 1;Panca Agro Lestari (Pal)
+Kebun;Wana Jingga Timur (Wjt);admin.wanajinggatimurwjt;tanamanwanajinggatimurwjt;estate_admin;Riau 1;Wana Jingga Timur (Wjt)
+Kebun;Duta Palma Nusantara (Dpn) I;admin.dutapalmanusantaradpni;tanamandutapalmanusantaradpni;estate_admin;Riau 1;Duta Palma Nusantara (Dpn) I
+Kebun;Duta Palma Nusantara (Dpn) II;admin.dutapalmanusantaradpnii;tanamandutapalmanusantaradpnii;estate_admin;Riau 1;Duta Palma Nusantara (Dpn) II
+Kebun;Duta Palma Nusantara (Dpn) III;admin.dutapalmanusantaradpniii;tanamandutapalmanusantaradpniii;estate_admin;Riau 1;Duta Palma Nusantara (Dpn) III
+Kebun;Eluan Mahkota (EMA) - KT;admin.eluanmahkotaemakt;tanamaneluanmahkotaemakt;estate_admin;Riau 1;Eluan Mahkota (EMA) - KT
+Kebun;Johan Sentosa;admin.johansentosa;tanamanjohansentosa;estate_admin;Riau 1;Johan Sentosa
+Kebun;Palma Inti Lestari (PIL);admin.palmaintilestaripil;tanamanpalmaintilestaripil;estate_admin;Riau 1;Palma Inti Lestari (PIL)
+Kebun;Bukit Jago Indah (BJI);admin.bukitjagoindahbji;tanamanbukitjagoindahbji;estate_admin;Kalbar 1A;Bukit Jago Indah (BJI)
+Kebun;Kaliau Mas Perkasa A (KMP A);admin.kaliaumasperkasaakmpa;tanamankaliaumasperkasaakmpa;estate_admin;Kalbar 1A;Kaliau Mas Perkasa A (KMP A)
+Kebun;Kaliau Mas Perkasa B (KMP B);admin.kaliaumasperkasabkmpb;tanamankaliaumasperkasabkmpb;estate_admin;Kalbar 1A;Kaliau Mas Perkasa B (KMP B)
+Kebun;Teluk Keramat (TKR);admin.telukkeramattkr;tanamantelukkeramattkr;estate_admin;Kalbar 1A;Teluk Keramat (TKR)
+Kebun;Wana Hijau Semesta I (WHS I);admin.wanahijausemestaiwhsi;tanamanwanahijausemestaiwhsi;estate_admin;Kalbar 1A;Wana Hijau Semesta I (WHS I)
+Kebun;Wana Hijau Semesta II (L1);admin.wanahijausemestaiil1;tanamanwanahijausemestaiil1;estate_admin;Kalbar 1A;Wana Hijau Semesta II (L1)
+Kebun;Wana Hijau Semesta II (L2);admin.wanahijausemestaiil2;tanamanwanahijausemestaiil2;estate_admin;Kalbar 1A;Wana Hijau Semesta II (L2)
+Kebun;Wana Hijau Semesta II (WHS II);admin.wanahijausemestaiiwhsii;tanamanwanahijausemestaiiwhsii;estate_admin;Kalbar 1A;Wana Hijau Semesta II (WHS II)
+Kebun;Wana Hijau Semesta III (WHS III);admin.wanahijausemestaiiiwhsiii;tanamanwanahijausemestaiiiwhsiii;estate_admin;Kalbar 1A;Wana Hijau Semesta III (WHS III)
+Kebun;Wana Hijau Semesta IV;admin.wanahijausemestaiv;tanamanwanahijausemestaiv;estate_admin;Kalbar 1A;Wana Hijau Semesta IV
+Kebun;Mitra Wawasan (MWS);admin.mitrawawasanmws;tanamanmitrawawasanmws;estate_admin;Kalbar 1B;Mitra Wawasan (MWS)
+Kebun;Persada Alam (PA);admin.persadaalampa;tanamanpersadaalampa;estate_admin;Kalbar 1B;Persada Alam (PA)
+Kebun;Darmex - I;admin.darmexi;tanamandarmexi;estate_admin;Kalbar 1B;Darmex - I
+Kebun;Darmex - II;admin.darmexii;tanamandarmexii;estate_admin;Kalbar 1B;Darmex - II
+Kebun;Darmex - X;admin.darmexx;tanamandarmexx;estate_admin;Kalbar 1B;Darmex - X

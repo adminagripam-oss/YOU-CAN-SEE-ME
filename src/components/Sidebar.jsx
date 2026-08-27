@@ -3,8 +3,10 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ isOpen, onClose }) {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const navigate = useNavigate();
+
+  const isEstateAdmin = !user || user.role === 'estate_admin';
 
   return (
     <>
@@ -29,25 +31,29 @@ export default function Sidebar({ isOpen, onClose }) {
             </NavLink>
           )}
 
-          <NavLink
-            to="/absensi"
-            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            onClick={() => window.innerWidth < 768 && onClose && onClose()}
-          >
-            <i className="fa-solid fa-camera-retro"></i>
-            <span>Scanner Absensi</span>
-          </NavLink>
+          {isEstateAdmin && (
+            <NavLink
+              to="/absensi"
+              className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+              onClick={() => window.innerWidth < 768 && onClose && onClose()}
+            >
+              <i className="fa-solid fa-camera-retro"></i>
+              <span>Scanner Absensi</span>
+            </NavLink>
+          )}
 
           {isAuthenticated && (
             <>
-              <NavLink
-                to="/karyawan"
-                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-                onClick={() => window.innerWidth < 768 && onClose && onClose()}
-              >
-                <i className="fa-solid fa-user-plus"></i>
-                <span>Input Karyawan</span>
-              </NavLink>
+              {isEstateAdmin && (
+                <NavLink
+                  to="/karyawan"
+                  className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+                  onClick={() => window.innerWidth < 768 && onClose && onClose()}
+                >
+                  <i className="fa-solid fa-user-plus"></i>
+                  <span>Input Karyawan</span>
+                </NavLink>
+              )}
 
               <NavLink
                 to="/daftar-karyawan"

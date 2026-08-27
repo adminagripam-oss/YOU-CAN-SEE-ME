@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
+import { db } from '../db';
+
+// Helper function to hash a string to SHA-256 for local offline credential matching
+async function hashPassword(password) {
+  const msgBuffer = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 const AuthContext = createContext(null);
 
@@ -38,15 +47,39 @@ export function AuthProvider({ children }) {
     try {
       const { username, password } = credentials;
       
-      const { data: isValid, error } = await supabase.rpc('verify_admin_login', {
+      const { data, error } = await supabase.rpc('verify_admin_login', {
         p_username: username,
         p_password: password
       });
 
       if (error) throw error;
 
-      if (isValid) {
-        const adminUser = { id: 'admin-01', username, role: 'admin', name: 'Administrator' };
+      const result = data && data[0];
+      if (result && result.is_valid) {
+        const localHash = await hashPassword(password);
+        const adminUser = {
+          id: 'admin-' + username,
+          username,
+          role: result.u_role || 'estate_admin',
+          region: result.u_region || null,
+          kebun: result.u_kebun || null,
+          name: result.u_name || 'Administrator'
+        };
+
+        // Cache credentials locally for offline usage
+        try {
+          await db.local_admins.put({
+            username,
+            password_hash: localHash,
+            role: adminUser.role,
+            region: adminUser.region,
+            kebun: adminUser.kebun,
+            name: adminUser.name
+          });
+        } catch (dbErr) {
+          console.warn('[Offline Cache Error] Gagal menyimpan login lokal:', dbErr);
+        }
+
         setUser(adminUser);
         localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
         return { success: true, user: adminUser, message: 'Login Berhasil' };
@@ -56,13 +89,43 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.error('[AUTH LOGIN ERROR]:', err);
       // Fallback local login if offline
+      try {
+        const cachedAdmin = await db.local_admins.get(credentials.username);
+        if (cachedAdmin) {
+          const enteredHash = await hashPassword(credentials.password);
+          if (enteredHash === cachedAdmin.password_hash) {
+            const adminUser = {
+              id: 'admin-' + credentials.username,
+              username: credentials.username,
+              role: cachedAdmin.role,
+              region: cachedAdmin.region,
+              kebun: cachedAdmin.kebun,
+              name: cachedAdmin.name + ' (Offline)'
+            };
+            setUser(adminUser);
+            localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
+            return { success: true, user: adminUser, message: 'Login Mode Offline Berhasil' };
+          }
+        }
+      } catch (localErr) {
+        console.error('[OFFLINE AUTH ERROR]:', localErr);
+      }
+
+      // Hardcoded default fallback (failsafe)
       if (credentials.username === 'admin' && credentials.password === 'tanaman') {
-        const adminUser = { id: 'admin-01', username: 'admin', role: 'admin', name: 'Administrator (Offline)' };
+        const adminUser = {
+          id: 'admin-01',
+          username: 'admin',
+          role: 'headoffice_admin',
+          region: null,
+          kebun: null,
+          name: 'Administrator (Offline Failsafe)'
+        };
         setUser(adminUser);
         localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
-        return { success: true, user: adminUser, message: 'Login Mode Offline' };
+        return { success: true, user: adminUser, message: 'Login Mode Offline Failsafe' };
       }
-      return { success: false, message: 'Akun tidak ditemukan atau koneksi bermasalah.' };
+      return { success: false, message: 'Akun tidak ditemukan secara offline atau koneksi bermasalah.' };
     }
   };
 

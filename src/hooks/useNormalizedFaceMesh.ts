@@ -4,8 +4,8 @@ import { useEffect, useRef, useCallback } from 'react';
 // TYPES & INTERFACES
 // ─────────────────────────────────────────────────────────────────────────
 
-export type Point3D = 
-  | [number, number, number?] 
+export type Point3D =
+  | [number, number, number?]
   | { x: number; y: number; z?: number };
 
 export interface BoundingBox {
@@ -577,7 +577,7 @@ export function useNormalizedFaceMesh({
           // Fix for Android WebView: Explicitly set muted and playsinline on the DOM node
           video.muted = true;
           video.setAttribute('playsinline', 'true');
-          
+
           // Play stream safely
           await video.play().catch((e) => console.warn('[useNormalizedFaceMesh] AutoPlay failed:', e));
         }

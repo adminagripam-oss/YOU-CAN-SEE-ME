@@ -164,7 +164,9 @@ export default function TabAttendanceLogs({
       const q = searchQuery.toLowerCase();
       return (
         log.name.toLowerCase().includes(q) ||
-        log.nik.toLowerCase().includes(q)
+        log.nik.toLowerCase().includes(q) ||
+        (log.afdeling || '').toLowerCase().includes(q) ||
+        (log.department || '').toLowerCase().includes(q)
       );
     });
   }, [groupedLogs, searchQuery]);
@@ -718,17 +720,17 @@ export default function TabAttendanceLogs({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>{log.name}</span>
                       {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) && (
-                        <span 
-                          style={{ 
-                            fontSize: '0.65rem', 
-                            background: 'var(--accent-warning)', 
-                            color: '#fff', 
-                            padding: '2px 6px', 
-                            borderRadius: '4px', 
+                        <span
+                          style={{
+                            fontSize: '0.65rem',
+                            background: 'var(--accent-warning)',
+                            color: '#fff',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
                             fontWeight: 'bold',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '3px' 
+                            gap: '3px'
                           }}
                           title="Data absensi disimpan lokal dan akan disinkronkan saat online"
                         >

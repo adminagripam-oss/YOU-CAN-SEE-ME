@@ -6,7 +6,7 @@ import { API_BASE_URL, fetchWithTimeout } from './config';
 import { supabase } from './supabaseClient';
 import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
@@ -26,6 +26,7 @@ import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
 
 function AppContent() {
+  const { user } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -103,16 +104,27 @@ function AppContent() {
 
   // Fetch Employees (2-Tier Fallback: Direct Supabase -> IndexedDB Cache)
   const fetchEmployees = useCallback(async () => {
+    // Tunggu admin user terotentikasi
+    const savedAdmin = localStorage.getItem('logged_in_admin');
+    if (!savedAdmin) return;
+    const adminObj = JSON.parse(savedAdmin);
+
     let empData = null;
     let dataSource = 'supabase';
 
     // Tier 1: Direct Supabase Cloud Database Query (HTTPS)
     if (!empData) {
       try {
-        const { data, error } = await supabase
-          .from('employees')
-          .select('*')
-          .order('created_at', { ascending: false });
+        let query = supabase.from('employees').select('*');
+
+        // Saring berdasarkan role
+        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+          query = query.eq('nama_kebun', adminObj.kebun);
+        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+          query = query.eq('region', adminObj.region);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && data) {
           let descData = [];
@@ -141,8 +153,15 @@ function AppContent() {
       try {
         const cached = await db.employees_cache.toArray();
         if (cached) {
-          empData = cached;
-          console.log(`[${Capacitor.isNativePlatform() ? 'SQLITE DATABASE' : 'INDEXEDDB CACHE'}] Loaded`, cached.length, 'cached employees offline');
+          // Saring secara lokal di tablet offline
+          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+            empData = cached.filter(e => e.nama_kebun === adminObj.kebun);
+          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+            empData = cached.filter(e => e.region === adminObj.region);
+          } else {
+            empData = cached;
+          }
+          console.log(`[${Capacitor.isNativePlatform() ? 'SQLITE DATABASE' : 'INDEXEDDB CACHE'}] Loaded`, empData.length, 'cached employees offline');
         }
       } catch (err) {
         console.error(`[FETCH EMPLOYEES ${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} ERROR]:`, err.message);
@@ -197,9 +216,23 @@ function AppContent() {
 
     // Step 1: Fetch latest online logs from Supabase and cache them in local database
     try {
-      const { data: rawLogs, error } = await supabase
-        .from('attendance_logs')
-        .select('*')
+      let query = supabase.from('attendance_logs').select('*');
+
+      // Saring log online berdasarkan karyawan yang berada di lingkup admin aktif
+      const savedAdmin = localStorage.getItem('logged_in_admin');
+      if (savedAdmin) {
+        const adminObj = JSON.parse(savedAdmin);
+        if (adminObj.role !== 'headoffice_admin') {
+          const empIds = localEmployees.map(e => e.id);
+          if (empIds.length > 0) {
+            query = query.in('employee_id', empIds);
+          } else {
+            query = query.eq('employee_id', -1); // query kosong jika tidak ada karyawan
+          }
+        }
+      }
+
+      const { data: rawLogs, error } = await query
         .order('timestamp', { ascending: false });
 
       if (!error && rawLogs) {
@@ -264,7 +297,19 @@ function AppContent() {
     // Step 2: Query all logs from local database
     let allLocalLogs = [];
     try {
-      allLocalLogs = await db.attendance_logs.toArray();
+      const rawLocal = await db.attendance_logs.toArray();
+      const savedAdmin = localStorage.getItem('logged_in_admin');
+      if (savedAdmin) {
+        const adminObj = JSON.parse(savedAdmin);
+        if (adminObj.role !== 'headoffice_admin') {
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)));
+        } else {
+          allLocalLogs = rawLocal;
+        }
+      } else {
+        allLocalLogs = rawLocal;
+      }
     } catch (e) {
       console.warn('[Local Database] Failed to load attendance logs:', e);
     }
