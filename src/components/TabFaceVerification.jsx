@@ -826,7 +826,7 @@ export default function TabFaceVerification({
         masterVectorRef.current = null;
       }
 
-      // Auto-cache into IndexedDB if retrieved from Cloud/API
+      // Auto-cache into IndexedDB/SQLite if retrieved from Cloud/API
       if (vec && !cached) {
         const empObj = employees.find((it) => String(it.id) === String(empId));
         await cacheUserMasterVector({
@@ -834,6 +834,11 @@ export default function TabFaceVerification({
           nik: empObj?.nik || '',
           name: empObj?.name || '',
           department: empObj?.department || '',
+          afdeling: empObj?.afdeling || null,
+          nama_kebun: empObj?.nama_kebun || null,
+          status_tk: empObj?.status_tk || null,
+          jabatan: empObj?.jabatan || null,
+          status_perkawinan: empObj?.status_perkawinan || null,
           descriptor_json: masterVectorRef.current,
         });
       }
