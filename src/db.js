@@ -21,7 +21,9 @@ import {
   sqliteGetAttendanceLogs,
   sqliteGetTodayAttendanceLogs,
   sqliteDeleteAttendanceLog,
-  sqliteClearAttendanceLogs
+  sqliteClearAttendanceLogs,
+  sqliteSaveAdmin,
+  sqliteGetAdmin
 } from './services/sqliteService';
 
 /**
@@ -61,6 +63,15 @@ dexieDb.version(4).stores({
   employees_cache: 'id, nik, name, department, has_master_biometric',
   today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
   attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced'
+});
+
+dexieDb.version(5).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, last_login'
 });
 
 /**
@@ -260,6 +271,31 @@ export const db = {
           await dexieDb.attendance_logs.clear();
         } catch (e) {
           console.warn('[Dexie Attendance Logs Clear Error]:', e);
+        }
+      }
+    }
+  },
+  local_admins: {
+    async get(username) {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetAdmin(username);
+      } else {
+        try {
+          return await dexieDb.local_admins.get(username);
+        } catch (e) {
+          console.warn('[Dexie Local Admins Get Error]:', e);
+          return null;
+        }
+      }
+    },
+    async put(admin) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSaveAdmin(admin);
+      } else {
+        try {
+          await dexieDb.local_admins.put(admin);
+        } catch (e) {
+          console.warn('[Dexie Local Admins Put Error]:', e);
         }
       }
     }

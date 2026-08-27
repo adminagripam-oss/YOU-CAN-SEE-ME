@@ -161,8 +161,8 @@ export default function TabEmployeeManagement({
             human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat upload foto
           }
           const result = await human.detect(img);
-          
-        if (result.face && result.face.length > 0 && result.face[0].embedding) {
+
+          if (result.face && result.face.length > 0 && result.face[0].embedding) {
             const newVec = Array.from(result.face[0].embedding);
             // Cek duplikasi untuk upload foto juga
             try {

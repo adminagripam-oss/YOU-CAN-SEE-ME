@@ -21,7 +21,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy,
       }),
-      () => {},
+      () => { },
       { enableHighAccuracy: true, maximumAge: 10000 }
     );
   };
@@ -68,7 +68,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
   const requestGpsPermission = () => {
     if (!navigator.geolocation) return;
     setGpsPermission('checking');
-    
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGpsPermission('granted');
@@ -147,8 +147,8 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
           background: isChecking
             ? 'rgba(99,102,241,0.12)'
             : isDenied
-            ? 'rgba(239,68,68,0.12)'
-            : 'rgba(245,158,11,0.12)',
+              ? 'rgba(239,68,68,0.12)'
+              : 'rgba(245,158,11,0.12)',
           border: `2px solid ${isChecking ? '#6366f1' : isDenied ? '#ef4444' : '#f59e0b'}`,
           display: 'flex',
           alignItems: 'center',
@@ -167,19 +167,19 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
             {isChecking
               ? '🌐 Mendeteksi Lokasi GPS...'
               : isDenied
-              ? '📍 Izin Lokasi Ditolak'
-              : isUnavailable
-              ? '📍 GPS Tidak Tersedia'
-              : '📍 Aktifkan Lokasi untuk Absen'}
+                ? '📍 Izin Lokasi Ditolak'
+                : isUnavailable
+                  ? '📍 GPS Tidak Tersedia'
+                  : '📍 Aktifkan Lokasi untuk Absen'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '340px', lineHeight: 1.6, margin: '0 auto' }}>
             {isChecking
               ? 'Harap tunggu, sistem sedang memeriksa izin lokasi perangkat Anda...'
               : isDenied
-              ? 'Izin lokasi telah ditolak. Buka Pengaturan Browser → Izin Lokasi → Izinkan, lalu muat ulang halaman.'
-              : isUnavailable
-              ? 'Perangkat ini tidak mendukung fitur GPS. Absensi tidak dapat dilakukan.'
-              : 'Fitur absensi biometrik memerlukan izin lokasi GPS untuk merekam koordinat kehadiran Anda.'}
+                ? 'Izin lokasi telah ditolak. Buka Pengaturan Browser → Izin Lokasi → Izinkan, lalu muat ulang halaman.'
+                : isUnavailable
+                  ? 'Perangkat ini tidak mendukung fitur GPS. Absensi tidak dapat dilakukan.'
+                  : 'Fitur absensi biometrik memerlukan izin lokasi GPS untuk merekam koordinat kehadiran Anda.'}
           </p>
         </div>
 

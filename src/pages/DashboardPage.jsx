@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
@@ -14,6 +14,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   })();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedSegment, setSelectedSegment] = useState(null);
+  const [kebunSearch, setKebunSearch] = useState('');
 
   const totalEmployees = employees.length || 0;
 
@@ -23,6 +24,52 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     const logDateStr = new Date(l.timestamp).toISOString().split('T')[0];
     return logDateStr === selectedDate;
   });
+
+  const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
+
+  // Grouping data by kebun (for Regional & Head Office dashboards)
+  const kebunSummary = useMemo(() => {
+    const uniqueKebuns = [...new Set(employees.map(e => e.nama_kebun).filter(Boolean))];
+    
+    return uniqueKebuns.map(kebunName => {
+      const kebunEmployees = employees.filter(e => e.nama_kebun === kebunName);
+      const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
+
+      // Hitung HK Hadir (TK Hadir) hari ini
+      const kebunFilteredLogs = filteredLogs.filter(l => {
+        const empIdStr = String(l.employee_id);
+        const isVerified = !(l.status?.toUpperCase().includes('GAGAL') || l.status?.toUpperCase().includes('REJECT'));
+        return kebunEmpIds.has(empIdStr) && isVerified;
+      });
+      
+      const uniqueHadirIds = new Set(kebunFilteredLogs.map(l => String(l.employee_id)));
+      const hadirCount = uniqueHadirIds.size;
+      const totalCount = kebunEmployees.length || 1;
+      const percent = ((hadirCount / totalCount) * 100).toFixed(1);
+
+      const firstEmp = kebunEmployees[0];
+
+      return {
+        nama_kebun: kebunName,
+        regional: firstEmp?.regional || firstEmp?.region || '-',
+        distrik: firstEmp?.distrik || '-',
+        totalEmployees: kebunEmployees.length,
+        hadirCount,
+        percentage: percent
+      };
+    }).sort((a, b) => b.hadirCount - a.hadirCount);
+  }, [employees, filteredLogs]);
+
+  const filteredKebunSummary = useMemo(() => {
+    return kebunSummary.filter(k => {
+      const q = kebunSearch.toLowerCase();
+      return (
+        k.nama_kebun.toLowerCase().includes(q) ||
+        k.regional.toLowerCase().includes(q) ||
+        k.distrik.toLowerCase().includes(q)
+      );
+    });
+  }, [kebunSummary, kebunSearch]);
 
   // Calculate 100% DYNAMIC real-time attendance counts from filteredLogs
   // Count unique verified employee check-ins for the selectedDate
@@ -394,87 +441,167 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         </div>
       </div>
 
-      {/* 3. DYNAMIC LOGS TABLE FOR SELECTED DATE */}
-      <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
-            Log Absensi ({selectedDate})
-          </h3>
-          <Link to="/logs" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
-            <i className="fa-solid fa-list-ul"></i> Lihat Semua Log
-          </Link>
+      {/* 3. DYNAMIC LOGS OR KEBUN HK SUMMARY TABLE FOR SELECTED DATE */}
+      {isReadOnlyMonitor ? (
+        <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+              Ringkasan HK (Hari Kerja) Per Kebun ({selectedDate})
+            </h3>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <i className="fa-solid fa-magnifying-glass" style={{ color: 'var(--text-muted)' }}></i>
+              <input
+                type="text"
+                placeholder="Cari Kebun, Distrik, Regional..."
+                value={kebunSearch}
+                onChange={(e) => setKebunSearch(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-main)',
+                  fontSize: '0.8rem',
+                  outline: 'none'
+                }}
+              />
+            </div>
+          </div>
+
+          {filteredKebunSummary.length === 0 ? (
+            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              <p>Tidak ada data kebun yang cocok untuk tanggal <strong>{selectedDate}</strong>.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>NAMA KEBUN</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>REGIONAL</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>DISTRIK</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>TOTAL TK</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>HK HADIR</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>% KEHADIRAN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredKebunSummary.map((k, idx) => {
+                    const pctNum = parseFloat(k.percentage);
+                    const isGood = pctNum >= 85;
+                    const isWarn = pctNum < 85 && pctNum >= 50;
+
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '12px 12px', fontWeight: 800, color: 'var(--text-main)' }}>{k.nama_kebun}</td>
+                        <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.regional}</td>
+                        <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.distrik}</td>
+                        <td style={{ padding: '12px 12px', color: 'var(--text-main)', textAlign: 'right', fontWeight: 700 }}>{k.totalEmployees} Orang</td>
+                        <td style={{ padding: '12px 12px', color: '#15803d', textAlign: 'right', fontWeight: 800 }}>{k.hadirCount} HK</td>
+                        <td style={{ padding: '12px 12px', textAlign: 'right' }}>
+                          <span
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 800,
+                              background: isGood ? 'rgba(21, 128, 61, 0.12)' : isWarn ? 'rgba(180, 83, 9, 0.12)' : 'rgba(185, 28, 28, 0.12)',
+                              color: isGood ? '#15803d' : isWarn ? '#b45309' : '#b91c1c',
+                              border: isGood ? '1px solid rgba(21, 128, 61, 0.25)' : isWarn ? '1px solid rgba(180, 83, 9, 0.25)' : '1px solid rgba(185, 28, 28, 0.25)'
+                            }}
+                          >
+                            {k.percentage}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-
-        {filteredLogs.length === 0 ? (
-          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            <i className="fa-solid fa-calendar-xmark" style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}></i>
-            <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{selectedDate}</strong>.</p>
+      ) : (
+        <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+              Log Absensi ({selectedDate})
+            </h3>
+            <Link to="/logs" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
+              <i className="fa-solid fa-list-ul"></i> Lihat Semua Log
+            </Link>
           </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
-                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>NIK</th>
-                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>WAKTU ABSEN</th>
-                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>STATUS</th>
-                  <th style={{ padding: '8px 12px', fontWeight: 700 }}>AFDELING / KEBUN</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLogs.slice(0, 10).map((l, idx) => {
-                  const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
-                  const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
-                  const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
 
-                  // Prioritas: ambil dari data master karyawan (empMatch), lalu fallback ke field log
-                  const afdeling = empMatch?.afdeling || l.afdeling || '';
-                  const namaKebun = empMatch?.nama_kebun || l.nama_kebun || '';
-                  const displayAfdeling =
-                    afdeling && namaKebun
-                      ? `Afd. ${afdeling} – ${namaKebun}`
-                      : afdeling
-                      ? `Afd. ${afdeling}`
-                      : namaKebun
-                      ? namaKebun
-                      : l.department || empMatch?.department || 'Kebun / Operational';
+          {filteredLogs.length === 0 ? (
+            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              <i className="fa-solid fa-calendar-xmark" style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}></i>
+              <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{selectedDate}</strong>.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>NIK</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>WAKTU ABSEN</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>STATUS</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>AFDELING / KEBUN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLogs.slice(0, 10).map((l, idx) => {
+                    const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
+                    const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
+                    const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
 
-                  const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
+                    const afdeling = empMatch?.afdeling || l.afdeling || '';
+                    const namaKebun = empMatch?.nama_kebun || l.nama_kebun || '';
+                    const displayAfdeling =
+                      afdeling && namaKebun
+                        ? `Afd. ${afdeling} – ${namaKebun}`
+                        : afdeling
+                        ? `Afd. ${afdeling}`
+                        : namaKebun
+                        ? namaKebun
+                        : l.department || empMatch?.department || 'Kebun / Operational';
 
-                  return (
-                    <tr key={l.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 700 }}>{displayName}</td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayNik}</td>
-                      <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                        {l.timestamp
-                          ? new Date(l.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
-                          : '-'}
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <span
-                          style={{
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            background: isFail ? 'rgba(239, 68, 68, 0.12)' : 'rgba(21, 128, 61, 0.12)',
-                            color: isFail ? '#ef4444' : '#15803d',
-                            border: isFail ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(21, 128, 61, 0.25)'
-                          }}
-                        >
-                          {l.status || 'Hadir'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayAfdeling}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                    const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
+
+                    return (
+                      <tr key={l.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 700 }}>{displayName}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayNik}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>
+                          {l.timestamp
+                            ? new Date(l.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                            : '-'}
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              background: isFail ? 'rgba(239, 68, 68, 0.12)' : 'rgba(21, 128, 61, 0.12)',
+                              color: isFail ? '#ef4444' : '#15803d',
+                              border: isFail ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(21, 128, 61, 0.25)'
+                            }}
+                          >
+                            {l.status || 'Hadir'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayAfdeling}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

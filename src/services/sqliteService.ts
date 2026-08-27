@@ -104,11 +104,22 @@ export async function initSQLite(): Promise<void> {
         is_synced INTEGER DEFAULT 0,
         created_at TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS local_admins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT,
+        region TEXT,
+        kebun TEXT,
+        name TEXT,
+        last_login TEXT
+      );
     `;
 
     await dbConnection.execute(ddl);
 
-    // Alter tables to add 'afdeling' if they don't exist (migrations)
+    // Alter tables to add 'afdeling' / 'region' if they don't exist (migrations)
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN afdeling TEXT;`);
       console.log('[SQLite Service] Migrated local_attendance_queue: added afdeling column');
@@ -118,6 +129,12 @@ export async function initSQLite(): Promise<void> {
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN afdeling TEXT;`);
       console.log('[SQLite Service] Migrated local_attendance_logs: added afdeling column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN region TEXT;`);
+      console.log('[SQLite Service] Migrated local_employees: added region column');
     } catch (e) {
       // Column might already exist, ignore error
     }
@@ -694,6 +711,56 @@ export async function sqliteClearAttendanceLogs(): Promise<void> {
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAttendanceLogs Error]:', err?.message || err);
   }
+}
+
+/**
+ * Cache an admin user credentials locally for offline login
+ */
+export async function sqliteSaveAdmin(admin: {
+  username: string;
+  password_hash: string;
+  role: string;
+  region: string;
+  kebun: string;
+  name: string;
+}): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    const sql = `
+      INSERT OR REPLACE INTO local_admins (username, password_hash, role, region, kebun, name, last_login)
+      VALUES (?, ?, ?, ?, ?, ?, ?);
+    `;
+    const params = [
+      admin.username,
+      admin.password_hash,
+      admin.role,
+      admin.region,
+      admin.kebun,
+      admin.name,
+      new Date().toISOString()
+    ];
+    await dbConnection.run(sql, params);
+    console.log(`[SQLite Service] Cached offline credentials for admin: ${admin.username}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSaveAdmin Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Retrieve cached admin details for offline login verification
+ */
+export async function sqliteGetAdmin(username: string): Promise<any | null> {
+  if (!dbConnection) return null;
+  try {
+    const sql = `SELECT * FROM local_admins WHERE username = ? LIMIT 1;`;
+    const res = await dbConnection.query(sql, [username]);
+    if (res.values && res.values.length > 0) {
+      return res.values[0];
+    }
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetAdmin Error]:', err?.message || err);
+  }
+  return null;
 }
 
 
