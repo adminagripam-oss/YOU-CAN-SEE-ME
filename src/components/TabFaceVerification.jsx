@@ -1108,7 +1108,7 @@ export default function TabFaceVerification({
 
     if (currentDescRef.current && !isMatchedRef.current) {
       let rawPct = 0;
-      const threshold = 80.0;
+      const threshold = 55.0;
 
       // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
       // Buka DevTools Console → tab Console untuk membaca log ini.
