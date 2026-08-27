@@ -58,6 +58,8 @@ Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Of
 - **State Management & Auth Context**: React Context API (`AuthProvider` & `useAuth` hook) yang mendukung verifikasi sesi otomatis `/api/auth/me`.
 - **Design System & Styling**: Custom CSS Tokens dengan dukungan **Light Mode** & **Dark Mode** (`localStorage.getItem('app-theme')`), Glassmorphism UI, Font Google Inter, Iconography Lucide-React & FontAwesome 6.4.0.
 - **Feedback Components**: Shadcn UI Toast System (`ShadcnToast.jsx`) dan Dynamic Modal Dialog (`ConfirmModal.jsx`).
+  - **Opaque Dark Mode Background**: Di dark mode, background toast diubah dari semi-transparan menjadi warna solid (opaque) (Success: `#062f21`, Error: `#3f1010`, Info: `#111333`) dengan border solid sesuai warna status.
+  - **Minimalis Mobile Size**: Pada layar HP ($\le 600\text{px}$), ukuran kotak toast diminimalisir (maks. width 290px, padding `8px 12px`, dan font kecil) untuk estetika premium dan ringkas.
 - **Biometric Library**: `@vladmandic/face-api` v1.7.15 (Model ResNet-34 Deep Neural Network, SSD MobileNet V1 Face Detector, Tiny Face Detector, 68 Landmark Points Predictor, 128-dimensional Float32 Descriptor Extractor).
 - **Offline Storage**: Dexie.js v4.4.4 wrapper IndexedDB untuk caching master vector, cache data karyawan, dan antrean absensi offline.
 
