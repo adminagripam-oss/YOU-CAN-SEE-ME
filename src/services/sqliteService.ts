@@ -113,6 +113,7 @@ export async function initSQLite(): Promise<void> {
         region TEXT,
         kebun TEXT,
         name TEXT,
+        nik TEXT,
         last_login TEXT
       );
     `;
@@ -135,6 +136,12 @@ export async function initSQLite(): Promise<void> {
     try {
       await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN region TEXT;`);
       console.log('[SQLite Service] Migrated local_employees: added region column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_admins ADD COLUMN nik TEXT;`);
+      console.log('[SQLite Service] Migrated local_admins: added nik column');
     } catch (e) {
       // Column might already exist, ignore error
     }
@@ -723,12 +730,13 @@ export async function sqliteSaveAdmin(admin: {
   region: string;
   kebun: string;
   name: string;
+  nik?: string;
 }): Promise<void> {
   if (!dbConnection) return;
   try {
     const sql = `
-      INSERT OR REPLACE INTO local_admins (username, password_hash, role, region, kebun, name, last_login)
-      VALUES (?, ?, ?, ?, ?, ?, ?);
+      INSERT OR REPLACE INTO local_admins (username, password_hash, role, region, kebun, name, nik, last_login)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const params = [
       admin.username,
@@ -737,10 +745,11 @@ export async function sqliteSaveAdmin(admin: {
       admin.region,
       admin.kebun,
       admin.name,
+      admin.nik || null,
       new Date().toISOString()
     ];
     await dbConnection.run(sql, params);
-    console.log(`[SQLite Service] Cached offline credentials for admin: ${admin.username}`);
+    console.log(`[SQLite Service] Cached offline credentials with NIK for admin: ${admin.username}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSaveAdmin Error]:', err?.message || err);
   }

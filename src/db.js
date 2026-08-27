@@ -74,6 +74,15 @@ dexieDb.version(5).stores({
   local_admins: 'username, password_hash, role, region, kebun, name, last_login'
 });
 
+dexieDb.version(6).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login'
+});
+
 /**
  * Unified Database Wrapper Object (mimics Dexie.js structure for direct table access)
  */

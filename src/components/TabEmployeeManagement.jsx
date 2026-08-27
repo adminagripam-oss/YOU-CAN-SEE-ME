@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
+import { useAuth } from '../context/AuthContext';
 
 
 
@@ -14,11 +15,20 @@ export default function TabEmployeeManagement({
   refreshEmployees,
   openConfirmModal,
 }) {
+  const { user } = useAuth();
+
   // Form State
   const [empNik, setEmpNik] = useState('');
   const [empName, setEmpName] = useState('');
   const [empAfdeling, setEmpAfdeling] = useState('');
   const [empNamaKebun, setEmpNamaKebun] = useState('');
+
+  // Prefill kebun name for estate admins
+  useEffect(() => {
+    if (user && user.role === 'estate_admin' && user.kebun) {
+      setEmpNamaKebun(user.kebun);
+    }
+  }, [user]);
   const [empStatusTk, setEmpStatusTk] = useState('');
   const [empStatusTkCustom, setEmpStatusTkCustom] = useState('');
   const [empJabatan, setEmpJabatan] = useState('');
@@ -317,7 +327,7 @@ export default function TabEmployeeManagement({
       setEmpNik('');
       setEmpName('');
       setEmpAfdeling('');
-      setEmpNamaKebun('');
+      setEmpNamaKebun(user?.role === 'estate_admin' && user?.kebun ? user.kebun : '');
       setEmpStatusTk('');
       setEmpStatusTkCustom('');
       setEmpJabatan('');
@@ -389,6 +399,7 @@ export default function TabEmployeeManagement({
               placeholder="Contoh: Kebun Sawit Utama"
               value={empNamaKebun}
               onChange={(e) => setEmpNamaKebun(e.target.value)}
+              disabled={user?.role === 'estate_admin' && !!user?.kebun}
             />
           </div>
 

@@ -63,7 +63,8 @@ export function AuthProvider({ children }) {
           role: result.u_role || 'estate_admin',
           region: result.u_region || null,
           kebun: result.u_kebun || null,
-          name: result.u_name || 'Administrator'
+          name: result.u_name || 'Administrator',
+          nik: result.u_nik || null
         };
 
         // Cache credentials locally for offline usage
@@ -74,7 +75,8 @@ export function AuthProvider({ children }) {
             role: adminUser.role,
             region: adminUser.region,
             kebun: adminUser.kebun,
-            name: adminUser.name
+            name: adminUser.name,
+            nik: adminUser.nik
           });
         } catch (dbErr) {
           console.warn('[Offline Cache Error] Gagal menyimpan login lokal:', dbErr);
@@ -100,7 +102,8 @@ export function AuthProvider({ children }) {
               role: cachedAdmin.role,
               region: cachedAdmin.region,
               kebun: cachedAdmin.kebun,
-              name: cachedAdmin.name + ' (Offline)'
+              name: cachedAdmin.name + ' (Offline)',
+              nik: cachedAdmin.nik || null
             };
             setUser(adminUser);
             localStorage.setItem('logged_in_admin', JSON.stringify(adminUser));
