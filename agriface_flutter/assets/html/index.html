@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AgriFace Biometric Extraction Engine</title>
+  <style>
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: monospace;
+      margin: 0;
+      padding: 10px;
+    }
+    #status {
+      color: #0f0;
+    }
+  </style>
+</head>
+<body>
+  <div>AgriFace Engine: <span id="status">Loading...</span></div>
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <script type="module">
+    // Load Human library from local assets
+    import { Human } from '../js/human.esm.js';
+
+    const humanConfig = {
+      modelBasePath: '../models',
+      env: {
+        WEBGL_FORCE_F16_TEXTURES: true,
+      },
+      face: {
+        enabled: true,
+        detector: {
+          enabled: true,
+          rotation: true,
+          maxDetected: 1,
+          skipFrames: 0,
+          minConfidence: 0.15,
+        },
+        mesh: { enabled: true },
+        iris: { enabled: false },
+        description: { enabled: true },
+        emotion: { enabled: false },
+        liveness: { enabled: false },
+        antispoof: { enabled: false },
+        age: { enabled: false },
+        gender: { enabled: false },
+      },
+      body: { enabled: false },
+      hand: { enabled: false },
+      object: { enabled: false },
+      gesture: { enabled: false },
+      segmentation: { enabled: false },
+      backend: 'webgl',
+      warmup: 'none',
+    };
+
+    let humanInstance = null;
+
+    async function initHuman() {
+      try {
+        humanInstance = new Human(humanConfig);
+        
+        // Force F16 textures
+        humanInstance.env.WEBGL_FORCE_F16_TEXTURES = true;
+        if (humanInstance.tf && humanInstance.tf.env) {
+          humanInstance.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        }
+
+        document.getElementById('status').innerText = 'Initializing models...';
+        await humanInstance.load();
+        
+        document.getElementById('status').innerText = 'Engine Ready';
+        console.log('[AgriFace JS Engine] initialized successfully.');
+        
+        // Call Flutter Native callback to notify ready state
+        if (window.flutter_inappwebview) {
+          window.flutter_inappwebview.callHandler('onEngineReady');
+        }
+      } catch (err) {
+        document.getElementById('status').innerText = 'Error: ' + err.message;
+        console.error('[AgriFace JS Engine Init Error]:', err);
+      }
+    }
+
+    // Expose embedding extraction to window
+    window.extractEmbedding = async function(base64Image) {
+      if (!humanInstance) {
+        throw new Error('Human engine is not initialized yet.');
+      }
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = async () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+
+          try {
+            const result = await humanInstance.detect(canvas);
+            const face = result?.face?.[0] ?? null;
+
+            if (face && face.embedding) {
+              const embeddingArray = Array.from(face.embedding);
+              resolve(JSON.stringify(embeddingArray));
+            } else {
+              resolve(JSON.stringify([])); // No face or embedding
+            }
+          } catch (e) {
+            reject(new Error('Detection failed: ' + e.message));
+          }
+        };
+        img.onerror = () => {
+          reject(new Error('Failed to load base64 image.'));
+        };
+        img.src = 'data:image/jpeg;base64,' + base64Image;
+      });
+    };
+
+    initHuman();
+  </script>
+</body>
+</html>
