@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AgriFaceTheme {
-  // Theme Color Palette
-  static const Color darkBg = Color(0xFF0F172A);
-  static const Color darkCard = Color(0xFF1E293B);
-  static const Color accentCyan = Color(0xFF06B6D4);
+  // Theme Color Palette aligned with Capacitor WebView Dark Mode
+  static const Color darkBg = Color(0xFF0F0F0F); // Pitch Black
+  static const Color darkCard = Color(0xFF1E1E1E); // Dark Gray
+  static const Color accentCyan = Color(0xFF6366F1); // Indigo (Primary Accent)
+  static const Color accentSecondary = Color(0xFF38BDF8); // Light Cyan
   static const Color accentEmerald = Color(0xFF10B981);
   static const Color accentRed = Color(0xFFEF4444);
-  static const Color textMain = Color(0xFFF8FAFC);
-  static const Color textMuted = Color(0xFF94A3B8);
+  static const Color textMain = Color(0xFFFFFFFF);
+  static const Color textMuted = Color(0xFFCBD5E1);
 
   static ThemeData get darkTheme {
     return ThemeData(
