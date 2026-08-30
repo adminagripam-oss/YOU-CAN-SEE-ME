@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -17,14 +17,71 @@ import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
+import { useAuth } from '../context/AuthContext';
 
 export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
 
   // Filters State
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatusTk, setFilterStatusTk] = useState('');
   const [filterStatusPerkawinan, setFilterStatusPerkawinan] = useState('');
+  const [filterKebun, setFilterKebun] = useState('');
+
+  // List of all kebuns from regional CSV data
+  const allKebunsFromCSV = useMemo(() => [
+    'Bukit Harapan I',
+    'Bukit Harapan II',
+    'Parsub',
+    'Patogu Janji',
+    'Panca Agro Lestari (Pal)',
+    'Wana Jingga Timur (Wjt)',
+    'Duta Palma Nusantara (Dpn) I',
+    'Duta Palma Nusantara (Dpn) II',
+    'Duta Palma Nusantara (Dpn) III',
+    'Eluan Mahkota (EMA) - KT',
+    'Johan Sentosa',
+    'Palma Inti Lestari (PIL)',
+    'Bukit Jago Indah (BJI)',
+    'Kaliau Mas Perkasa A (KMP A)',
+    'Kaliau Mas Perkasa B (KMP B)',
+    'Teluk Keramat (TKR)',
+    'Wana Hijau Semesta I (WHS I)',
+    'Wana Hijau Semesta II (L1)',
+    'Wana Hijau Semesta II (L2)',
+    'Wana Hijau Semesta II (WHS II)',
+    'Wana Hijau Semesta III (WHS III)',
+    'Wana Hijau Semesta IV',
+    'Mitra Wawasan (MWS)',
+    'Persada Alam (PA)',
+    'Darmex - I',
+    'Darmex - II',
+    'Darmex - X'
+  ], []);
+
+  // Compute allowed kebuns based on logged-in admin's role & region
+  const availableKebuns = useMemo(() => {
+    const dynamicKebuns = [...new Set(employees.map(e => e.nama_kebun).filter(Boolean))];
+    if (user?.role === 'headoffice_admin') {
+      const merged = [...new Set([...dynamicKebuns, ...allKebunsFromCSV])];
+      merged.sort();
+      return merged;
+    } else if (user?.role === 'regional_admin') {
+      const regionKebuns = {
+        'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
+        'Riau 1': ['Panca Agro Lestari (Pal)', 'Wana Jingga Timur (Wjt)', 'Duta Palma Nusantara (Dpn) I', 'Duta Palma Nusantara (Dpn) II', 'Duta Palma Nusantara (Dpn) III', 'Eluan Mahkota (EMA) - KT', 'Johan Sentosa', 'Palma Inti Lestari (PIL)'],
+        'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
+        'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
+      };
+      const allowed = regionKebuns[user.region] || [];
+      const merged = [...new Set([...dynamicKebuns, ...allowed])];
+      merged.sort();
+      return merged;
+    }
+    dynamicKebuns.sort();
+    return dynamicKebuns;
+  }, [employees, user, allKebunsFromCSV]);
   // Edit Modal State
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState({ id: '', nik: '', name: '', department: '', afdeling: '', nama_kebun: '', status_tk: '', jabatan: '', status_perkawinan: '' });
@@ -520,8 +577,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       
     const matchesStatusTk = filterStatusTk ? emp.status_tk === filterStatusTk : true;
     const matchesStatusPerkawinan = filterStatusPerkawinan ? emp.status_perkawinan === filterStatusPerkawinan : true;
+    const matchesKebun = filterKebun ? emp.nama_kebun === filterKebun : true;
 
-    return matchesSearch && matchesStatusTk && matchesStatusPerkawinan;
+    return matchesSearch && matchesStatusTk && matchesStatusPerkawinan && matchesKebun;
   });
 
   // ---------------------------------
@@ -869,6 +927,19 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
               style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
             />
             
+            {user?.role !== 'estate_admin' && (
+              <select 
+                value={filterKebun} 
+                onChange={(e) => setFilterKebun(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+              >
+                <option value="" style={{ color: '#000' }}>Filter Kebun (Semua)</option>
+                {availableKebuns.map(k => (
+                  <option key={k} value={k} style={{ color: '#000' }}>{k}</option>
+                ))}
+              </select>
+            )}
+
             <select 
               value={filterStatusTk} 
               onChange={(e) => setFilterStatusTk(e.target.value)}

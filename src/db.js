@@ -74,13 +74,14 @@ dexieDb.version(5).stores({
   local_admins: 'username, password_hash, role, region, kebun, name, last_login'
 });
 
-dexieDb.version(6).stores({
+dexieDb.version(7).stores({
   user_master: '++id, employee_id, nik, name, department, updated_at',
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
   employees_cache: 'id, nik, name, department, has_master_biometric',
   today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
   attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
-  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login'
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced'
 });
 
 /**
@@ -305,6 +306,46 @@ export const db = {
           await dexieDb.local_admins.put(admin);
         } catch (e) {
           console.warn('[Dexie Local Admins Put Error]:', e);
+        }
+      }
+    }
+  },
+  attendance_requests: {
+    async put(req) {
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          await dexieDb.attendance_requests.put(req);
+        } catch (e) {
+          console.warn('[Dexie Attendance Requests Put Error]:', e);
+        }
+      }
+    },
+    async toArray() {
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          return await dexieDb.attendance_requests.toArray();
+        } catch (e) {
+          console.warn('[Dexie Attendance Requests toArray Error]:', e);
+          return [];
+        }
+      }
+      return [];
+    },
+    async delete(id) {
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          await dexieDb.attendance_requests.delete(id);
+        } catch (e) {
+          console.warn('[Dexie Attendance Requests Delete Error]:', e);
+        }
+      }
+    },
+    async clear() {
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          await dexieDb.attendance_requests.clear();
+        } catch (e) {
+          console.warn('[Dexie Attendance Requests Clear Error]:', e);
         }
       }
     }

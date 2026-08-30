@@ -15,24 +15,98 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [kebunSearch, setKebunSearch] = useState('');
+  const [selectedKebun, setSelectedKebun] = useState('All');
 
-  const totalEmployees = employees.length || 0;
+  // List of all kebuns from regional CSV data
+  const allKebunsFromCSV = useMemo(() => [
+    'Bukit Harapan I',
+    'Bukit Harapan II',
+    'Parsub',
+    'Patogu Janji',
+    'Panca Agro Lestari (Pal)',
+    'Wana Jingga Timur (Wjt)',
+    'Duta Palma Nusantara (Dpn) I',
+    'Duta Palma Nusantara (Dpn) II',
+    'Duta Palma Nusantara (Dpn) III',
+    'Eluan Mahkota (EMA) - KT',
+    'Johan Sentosa',
+    'Palma Inti Lestari (PIL)',
+    'Bukit Jago Indah (BJI)',
+    'Kaliau Mas Perkasa A (KMP A)',
+    'Kaliau Mas Perkasa B (KMP B)',
+    'Teluk Keramat (TKR)',
+    'Wana Hijau Semesta I (WHS I)',
+    'Wana Hijau Semesta II (L1)',
+    'Wana Hijau Semesta II (L2)',
+    'Wana Hijau Semesta II (WHS II)',
+    'Wana Hijau Semesta III (WHS III)',
+    'Wana Hijau Semesta IV',
+    'Mitra Wawasan (MWS)',
+    'Persada Alam (PA)',
+    'Darmex - I',
+    'Darmex - II',
+    'Darmex - X'
+  ], []);
 
-  // Filter logs dynamically based on selectedDate
-  const filteredLogs = logs.filter((l) => {
-    if (!l.timestamp) return false;
-    const logDateStr = new Date(l.timestamp).toISOString().split('T')[0];
-    return logDateStr === selectedDate;
-  });
+  // Compute allowed kebuns based on logged-in admin's role & region
+  const availableKebuns = useMemo(() => {
+    const dynamicKebuns = [...new Set(employees.map(e => e.nama_kebun).filter(Boolean))];
+    if (user?.role === 'headoffice_admin') {
+      const merged = [...new Set([...dynamicKebuns, ...allKebunsFromCSV])];
+      merged.sort();
+      return merged;
+    } else if (user?.role === 'regional_admin') {
+      const regionKebuns = {
+        'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
+        'Riau 1': ['Panca Agro Lestari (Pal)', 'Wana Jingga Timur (Wjt)', 'Duta Palma Nusantara (Dpn) I', 'Duta Palma Nusantara (Dpn) II', 'Duta Palma Nusantara (Dpn) III', 'Eluan Mahkota (EMA) - KT', 'Johan Sentosa', 'Palma Inti Lestari (PIL)'],
+        'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
+        'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
+      };
+      const allowed = regionKebuns[user.region] || [];
+      const merged = [...new Set([...dynamicKebuns, ...allowed])];
+      merged.sort();
+      return merged;
+    }
+    dynamicKebuns.sort();
+    return dynamicKebuns;
+  }, [employees, user, allKebunsFromCSV]);
+
+  // Filter employees based on selected kebun
+  const filteredEmployees = useMemo(() => {
+    if (!selectedKebun || selectedKebun === 'All') return employees;
+    return employees.filter(e => e.nama_kebun === selectedKebun);
+  }, [employees, selectedKebun]);
+
+  const totalEmployees = filteredEmployees.length || 0;
+
+  // Filter logs dynamically based on selectedDate and selectedKebun
+  const filteredLogs = useMemo(() => {
+    const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
+    const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
+
+    return logs.filter((l) => {
+      if (!l.timestamp) return false;
+      const logDateStr = new Date(l.timestamp).toISOString().split('T')[0];
+      if (logDateStr !== selectedDate) return false;
+
+      // Filter by selected kebun
+      if (selectedKebun && selectedKebun !== 'All') {
+        const empIdStr = String(l.employee_id);
+        const nikStr = String(l.nik);
+        return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
+      }
+      return true;
+    });
+  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
 
   const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
 
   // Grouping data by kebun (for Regional & Head Office dashboards)
   const kebunSummary = useMemo(() => {
-    const uniqueKebuns = [...new Set(employees.map(e => e.nama_kebun).filter(Boolean))];
+    const uniqueKebuns = [...new Set(filteredEmployees.map(e => e.nama_kebun).filter(Boolean))];
     
     return uniqueKebuns.map(kebunName => {
-      const kebunEmployees = employees.filter(e => e.nama_kebun === kebunName);
+      const kebunEmployees = filteredEmployees.filter(e => e.nama_kebun === kebunName);
       const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
 
       // Hitung HK Hadir (TK Hadir) hari ini
@@ -58,7 +132,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         percentage: percent
       };
     }).sort((a, b) => b.hadirCount - a.hadirCount);
-  }, [employees, filteredLogs]);
+  }, [filteredEmployees, filteredLogs]);
 
   const filteredKebunSummary = useMemo(() => {
     return kebunSummary.filter(k => {
@@ -140,11 +214,40 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
       {/* DATE FILTER HEADER BAR - DYNAMIC REAL-TIME BINDING */}
       <div className="glass-card" style={{ padding: '0.9rem 1.25rem', marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <i className="fa-solid fa-calendar-days" style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}></i>
-          <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-            Navigasi Tanggal Absensi:
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <i className="fa-solid fa-calendar-days" style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}></i>
+            <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+              Navigasi Tanggal Absensi:
+            </span>
+          </div>
+
+          {/* DYNAMIC KEBUN FILTER SELECTOR */}
+          {user?.role !== 'estate_admin' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-muted)' }}>Kebun:</span>
+              <select
+                value={selectedKebun}
+                onChange={(e) => setSelectedKebun(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-main)',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="All">Semua Kebun</option>
+                {availableKebuns.map(k => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Unified Tab Navigation Group */}
