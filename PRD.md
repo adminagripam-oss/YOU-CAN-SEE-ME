@@ -187,6 +187,16 @@ Sistem secara cerdas membedakan status absensi hari ini:
 - Log absensi disimpan ke antrean IndexedDB (`db.attendance_sync_queue`).
 - Event listener `online` dan timer interval 20 detik secara otomatis memicu `syncPendingAttendanceLogs()` untuk mengirim antrean batch ke endpoint `POST /api/attendance/sync`.
 
+### FR-6: Alur Persetujuan (Approval Requests Workflow) & Tree Routing
+- **Alur Otoritas Edit/Hapus**: 
+  - Akun Head Office (`admin.hq` / `headoffice_admin`) mempertahankan wewenang edit dan hapus langsung.
+  - Akun Regional (`regional_admin`) dan Kebun (`estate_admin`) yang melakukan pengeditan atau penghapusan log absensi dialihkan untuk membuat pengajuan request persetujuan (`attendance_requests`).
+  - Request ini disimpan secara offline di local Dexie `db.attendance_requests` dengan flag `is_synced: false` jika koneksi terputus, dan disinkronkan secara otomatis ketika online.
+  - Akun Head Office mengelola permohonan melalui tab panel "Persetujuan Edit/Hapus" di halaman Logs untuk menyetujui atau menolaknya.
+- **Tree Routing & Layout Outlets**:
+  - Routing diatur menggunakan React Router v6+ Data API (`createBrowserRouter` & `<RouterProvider>`) untuk struktur bersarang (nested layout) yang lebih modular dan aman.
+  - Shared layout (`DashboardLayout`) dan pengaman otentikasi (`ProtectedRoute` / `PublicRoute`) menggunakan komponen `<Outlet />` bawaan.
+
 ---
 
 ## 6. Ringkasan REST API & RPC Backend Specification
@@ -282,6 +292,21 @@ CREATE TABLE IF NOT EXISTS public.attendance_logs (
     ha_output DOUBLE PRECISION DEFAULT 0.0 -- Output Luas Area Panen (Hektare)
 );
 
+-- 6. Tabel Request Edit & Hapus Absensi (Approval Queue)
+CREATE TABLE IF NOT EXISTS public.attendance_requests (
+    id VARCHAR(100) PRIMARY KEY,
+    request_type VARCHAR(20) NOT NULL, -- 'EDIT' atau 'DELETE'
+    log_id VARCHAR(100) NOT NULL,
+    nik VARCHAR(50),
+    name VARCHAR(150),
+    nama_kebun VARCHAR(100),
+    requested_by VARCHAR(100) NOT NULL,
+    requested_at TIMESTAMPTZ DEFAULT NOW(),
+    status VARCHAR(20) DEFAULT 'PENDING', -- 'PENDING', 'APPROVED', 'REJECTED'
+    old_value JSONB,
+    new_value JSONB
+);
+
 -- Indeks Performa untuk Query O(1) & Analytics Afdeling
 CREATE INDEX IF NOT EXISTS idx_employees_nik ON public.employees(nik);
 CREATE INDEX IF NOT EXISTS idx_master_emp_id ON public.master_descriptors(employee_id);
@@ -292,8 +317,8 @@ CREATE INDEX IF NOT EXISTS idx_attendance_afdeling ON public.attendance_logs(keb
 ### 7.2 Skema Local IndexedDB (Dexie.js Engine)
 
 ```javascript
-// Database Name: FaceAttendanceOfflineDB (Dexie.js v2)
-db.version(2).stores({
+// Database Name: FaceAttendanceOfflineDB (Dexie.js v7)
+db.version(7).stores({
   // Cache Master Biometrik HP (128-d & 40-d GFV)
   user_master: '++id, employee_id, nik, name, department, updated_at',
   
@@ -301,7 +326,10 @@ db.version(2).stores({
   attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
   
   // Cache Daftar Karyawan
-  employees_cache: 'id, nik, name, department, has_master_biometric'
+  employees_cache: 'id, nik, name, department, has_master_biometric',
+  
+  // Antrean Request Approval Offline
+  attendance_requests: 'id, request_type, log_id, status, is_synced'
 });
 ```
 

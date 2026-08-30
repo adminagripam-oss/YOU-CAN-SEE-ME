@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { human, loadHumanWithFallback } from './humanSingleton';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
@@ -254,7 +254,7 @@ function AppContent() {
         if (empIds.length > 0) {
           const { data: empData } = await supabase
             .from('employees')
-            .select('id, nik, name, department, afdeling')
+            .select('id, nik, name, department, afdeling, nama_kebun')
             .in('id', empIds);
           if (empData) {
             empData.forEach(e => {
@@ -276,6 +276,7 @@ function AppContent() {
             name: emp.name || log.name || `Karyawan #${log.employee_id}`,
             department: emp.department || log.department || '-',
             afdeling: emp.afdeling || log.afdeling || '-',
+            nama_kebun: emp.nama_kebun || log.nama_kebun || '-',
             timestamp: log.timestamp,
             location: log.location,
             lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
@@ -373,6 +374,7 @@ function AppContent() {
           resolvedLog.name = emp.name || resolvedLog.name || `Karyawan #${resolvedLog.employee_id}`;
           resolvedLog.department = emp.department || resolvedLog.department || '-';
           resolvedLog.afdeling = emp.afdeling || resolvedLog.afdeling || '-';
+          resolvedLog.nama_kebun = emp.nama_kebun || resolvedLog.nama_kebun || '-';
         }
         finalLogs.push(resolvedLog);
       }
@@ -560,73 +562,62 @@ function AppContent() {
     };
   }, [dbReady, fetchEmployees, fetchLogs]);
 
-  return (
-    <>
-      <ShadcnToast toasts={toasts} />
-      <ConfirmModal
-        isOpen={confirmModalConfig.isOpen}
-        title={confirmModalConfig.title}
-        message={confirmModalConfig.message}
-        confirmText={confirmModalConfig.confirmText}
-        onConfirm={confirmModalConfig.onConfirm}
-        onCancel={closeConfirmModal}
-      />
-
-      <Routes>
-        {/* PUBLIC ROUTES (Auth Layout) */}
-        <Route element={<PublicRoute />}>
-          <Route element={<AuthLayout theme={theme} toggleTheme={toggleTheme} />}>
-            <Route
-              path="/login"
-              element={
-                <LoginPage
-                  employees={employees}
-                  showToast={showToast}
-                  theme={theme}
-                  toggleTheme={toggleTheme}
-                  refreshEmployees={fetchEmployees}
-                />
+  const router = useMemo(() => {
+    return createBrowserRouter([
+      {
+        path: "/",
+        element: (
+          <>
+            <div className={`app-container ${theme}-theme`} style={{ display: 'none' }}></div>
+            {toasts.length > 0 && <ShadcnToast toasts={toasts} />}
+            <ConfirmModal
+              isOpen={confirmModalConfig.isOpen}
+              title={confirmModalConfig.title}
+              message={confirmModalConfig.message}
+              confirmText={confirmModalConfig.confirmText}
+              onConfirm={confirmModalConfig.onConfirm}
+              onCancel={closeConfirmModal}
+            />
+            <Outlet />
+          </>
+        ),
+        children: [
+          // PUBLIC ROUTES (Auth Layout)
+          {
+            element: <PublicRoute />,
+            children: [
+              {
+                element: <AuthLayout theme={theme} toggleTheme={toggleTheme} />,
+                children: [
+                  {
+                    path: "login",
+                    element: (
+                      <LoginPage
+                        employees={employees}
+                        showToast={showToast}
+                        theme={theme}
+                        toggleTheme={toggleTheme}
+                        refreshEmployees={fetchEmployees}
+                      />
+                    )
+                  }
+                ]
               }
-            />
-          </Route>
-        </Route>
-
-        <Route path="/analytics" element={<EnterpriseAnalyticsPage employees={employees} logs={logs} />} />
-        
-        {/* Halaman Uji Coba Order Form (Bisa diakses tanpa login) */}
-        <Route path="/order-form" element={<OfflineOrderForm />} />
-
-        {/* PUBLIC ROUTES DENGAN DASHBOARD LAYOUT (Tanpa Login) */}
-        <Route
-          element={
-            <DashboardLayout
-              isOnline={isOnline}
-              unsyncedCount={unsyncedCount}
-              isSyncing={isSyncing}
-              onManualSync={handleManualSync}
-              theme={theme}
-              toggleTheme={toggleTheme}
-            />
-          }
-        >
-          <Route
-            path="/absensi"
-            element={
-              <AbsensiPage
-                employees={employees}
-                modelsLoaded={modelsLoaded}
-                modelStatusText={modelStatusText}
-                showToast={showToast}
-                refreshLogs={fetchLogs}
-              />
-            }
-          />
-        </Route>
-
-        {/* PROTECTED ROUTES (Hanya Admin) */}
-        <Route element={<ProtectedRoute />}>
-          <Route
-            element={
+            ]
+          },
+          // Analytics Page
+          {
+            path: "analytics",
+            element: <EnterpriseAnalyticsPage employees={employees} logs={logs} />
+          },
+          // Order Form Page
+          {
+            path: "order-form",
+            element: <OfflineOrderForm />
+          },
+          // PUBLIC ROUTES DENGAN DASHBOARD LAYOUT (Tanpa Login)
+          {
+            element: (
               <DashboardLayout
                 isOnline={isOnline}
                 unsyncedCount={unsyncedCount}
@@ -635,72 +626,112 @@ function AppContent() {
                 theme={theme}
                 toggleTheme={toggleTheme}
               />
-            }
-          >
-            <Route
-              path="/dashboard"
-              element={
-                <DashboardPage
-                  employees={employees}
-                  logs={logs}
-                  modelsLoaded={modelsLoaded}
-                />
+            ),
+            children: [
+              {
+                path: "absensi",
+                element: (
+                  <AbsensiPage
+                    employees={employees}
+                    modelsLoaded={modelsLoaded}
+                    modelStatusText={modelStatusText}
+                    showToast={showToast}
+                    refreshLogs={fetchLogs}
+                  />
+                )
               }
-            />
+            ]
+          },
+          // PROTECTED ROUTES (Hanya Admin)
+          {
+            element: <ProtectedRoute />,
+            children: [
+              {
+                element: (
+                  <DashboardLayout
+                    isOnline={isOnline}
+                    unsyncedCount={unsyncedCount}
+                    isSyncing={isSyncing}
+                    onManualSync={handleManualSync}
+                    theme={theme}
+                    toggleTheme={toggleTheme}
+                  />
+                ),
+                children: [
+                  {
+                    path: "dashboard",
+                    element: (
+                      <DashboardPage
+                        employees={employees}
+                        logs={logs}
+                        modelsLoaded={modelsLoaded}
+                      />
+                    )
+                  },
+                  {
+                    path: "karyawan",
+                    element: (
+                      <KaryawanPage
+                        employees={employees}
+                        modelsLoaded={modelsLoaded}
+                        showToast={showToast}
+                        refreshEmployees={fetchEmployees}
+                        openConfirmModal={openConfirmModal}
+                      />
+                    )
+                  },
+                  {
+                    path: "daftar-karyawan",
+                    element: (
+                      <DaftarKaryawanPage
+                        employees={employees}
+                        modelsLoaded={modelsLoaded}
+                        showToast={showToast}
+                        refreshEmployees={fetchEmployees}
+                        refreshLogs={fetchLogs}
+                        openConfirmModal={openConfirmModal}
+                      />
+                    )
+                  },
+                  {
+                    path: "logs",
+                    element: (
+                      <LogsPage
+                        logs={logs}
+                        refreshLogs={fetchLogs}
+                        showToast={showToast}
+                        openConfirmModal={openConfirmModal}
+                      />
+                    )
+                  }
+                ]
+              }
+            ]
+          },
+          // Fallbacks
+          {
+            path: "",
+            element: <Navigate to="/login" replace />
+          },
+          {
+            path: "*",
+            element: <Navigate to="/absensi" replace />
+          }
+        ]
+      }
+    ]);
+  }, [
+    theme, toasts, confirmModalConfig, employees, modelsLoaded, modelStatusText,
+    isOnline, unsyncedCount, isSyncing, logs, fetchEmployees, fetchLogs, handleManualSync, openConfirmModal
+  ]);
 
-            <Route
-              path="/karyawan"
-              element={
-                <KaryawanPage
-                  employees={employees}
-                  modelsLoaded={modelsLoaded}
-                  showToast={showToast}
-                  refreshEmployees={fetchEmployees}
-                  openConfirmModal={openConfirmModal}
-                />
-              }
-            />
-            <Route
-              path="/daftar-karyawan"
-              element={
-                <DaftarKaryawanPage
-                  employees={employees}
-                  modelsLoaded={modelsLoaded}
-                  showToast={showToast}
-                  refreshEmployees={fetchEmployees}
-                  refreshLogs={fetchLogs}
-                  openConfirmModal={openConfirmModal}
-                />
-              }
-            />
-            <Route
-              path="/logs"
-              element={
-                <LogsPage
-                  logs={logs}
-                  refreshLogs={fetchLogs}
-                  showToast={showToast}
-                  openConfirmModal={openConfirmModal}
-                />
-              }
-            />
-          </Route>
-        </Route>
-
-        {/* Fallback Index Route */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/absensi" replace />} />
-      </Routes>
-    </>
-  );
+  return <RouterProvider router={router} />;
 }
 
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <AppContent />
     </AuthProvider>
   );
 }

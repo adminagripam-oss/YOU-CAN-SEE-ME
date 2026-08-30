@@ -49,11 +49,15 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
             type="button"
             className="btn"
             style={{
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
+              background: 'var(--bg-input)',
+              color: 'var(--text-main)',
+              border: '1px solid var(--border-color)',
               padding: '10px 16px',
               fontSize: '0.85rem',
               width: 'auto',
+              borderRadius: 'var(--radius-md)',
+              fontWeight: 600,
+              cursor: 'pointer',
             }}
             onClick={onCancel}
           >
@@ -70,6 +74,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
               border: 'none',
               borderRadius: 'var(--radius-md)',
               fontWeight: 700,
+              cursor: 'pointer',
             }}
             onClick={onConfirm}
           >

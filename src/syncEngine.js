@@ -129,12 +129,67 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 }
 
 /**
+ * Executes Auto-Sync of offline admin approval requests to Supabase
+ */
+export async function syncPendingAttendanceRequests() {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { db } = await import('./db');
+    const allReqs = await db.attendance_requests.toArray();
+    const unsyncedReqs = allReqs.filter(r => !r.is_synced);
+
+    if (unsyncedReqs.length === 0) return { count: 0 };
+
+    console.log(`[Auto-Sync Requests] Attempting to sync ${unsyncedReqs.length} pending offline admin requests...`);
+
+    const reqsToInsert = unsyncedReqs.map(r => ({
+      id: r.id,
+      request_type: r.request_type,
+      log_id: r.log_id,
+      nik: r.nik || null,
+      name: r.name || null,
+      nama_kebun: r.nama_kebun || null,
+      requested_by: r.requested_by,
+      status: r.status || 'PENDING',
+      old_value: r.old_value || null,
+      new_value: r.new_value || null
+    }));
+
+    const { error } = await supabase
+      .from('attendance_requests')
+      .insert(reqsToInsert);
+
+    if (error) {
+      if (error.message.includes('relation "public.attendance_requests" does not exist')) {
+        console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
+        return { count: 0 };
+      }
+      throw error;
+    }
+
+    // Mark as synced locally
+    for (const r of unsyncedReqs) {
+      await db.attendance_requests.put({ ...r, is_synced: true });
+    }
+
+    console.log(`[Auto-Sync Requests Success] Successfully synced ${unsyncedReqs.length} admin requests!`);
+    return { count: unsyncedReqs.length };
+  } catch (err) {
+    console.error('[Sync Engine Requests Error]:', err.message || err);
+    return { count: 0 };
+  }
+}
+
+/**
  * Setup Realtime Online Network Listener for Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
   const handleOnline = () => {
     console.log('[Network Status] Device is ONLINE. Triggering Auto-Sync...');
     syncPendingAttendanceLogs(showToast, onSyncComplete);
+    syncPendingAttendanceRequests();
   };
 
   let networkListener = null;
@@ -144,6 +199,7 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
       if (status.connected) {
         console.log('[Network Status] Device is ONLINE (Native). Triggering Auto-Sync...');
         syncPendingAttendanceLogs(showToast, onSyncComplete);
+        syncPendingAttendanceRequests();
       }
     }).then(handle => {
       networkListener = handle;
@@ -157,6 +213,7 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
     const isOnline = await checkOnline();
     if (isOnline) {
       syncPendingAttendanceLogs(showToast, onSyncComplete);
+      syncPendingAttendanceRequests();
     }
   }, 20000);
 

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { API_BASE_URL } from '../config';
+import { useAuth } from '../context/AuthContext';
 import {
   Table,
   TableBody,
@@ -70,10 +71,206 @@ export default function TabAttendanceLogs({
   openConfirmModal,
   refreshLogs,
 }) {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('logs'); // 'logs' | 'requests'
+  const [approvalRequests, setApprovalRequests] = useState([]);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
+
+  // Fetch pending approval requests from Supabase
+  const fetchApprovalRequests = async () => {
+    try {
+      setIsLoadingRequests(true);
+      const { data, error } = await supabase
+        .from('attendance_requests')
+        .select('*')
+        .order('requested_at', { ascending: false });
+
+      if (!error && data) {
+        setApprovalRequests(data);
+        // Sync cache locally
+        const { db } = await import('../db');
+        for (const req of data) {
+          await db.attendance_requests.put({ ...req, is_synced: true });
+        }
+      } else {
+        // Fallback to local IndexedDB if table is offline/not found
+        const { db } = await import('../db');
+        const localReqs = await db.attendance_requests.toArray();
+        setApprovalRequests(localReqs);
+      }
+    } catch (err) {
+      console.error('[Fetch Requests Exception]:', err);
+      try {
+        const { db } = await import('../db');
+        const localReqs = await db.attendance_requests.toArray();
+        setApprovalRequests(localReqs);
+      } catch (_) {}
+    } finally {
+      setIsLoadingRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === 'headoffice_admin') {
+      fetchApprovalRequests();
+    }
+  }, [user, activeTab]);
+
+  const handleApproveRequest = async (req) => {
+    openConfirmModal({
+      title: 'Setujui Permohonan?',
+      message: `Apakah Anda yakin ingin menyetujui permohonan ${req.request_type} dari ${req.requested_by} untuk karyawan ${req.name}?`,
+      confirmText: 'Setujui',
+      onConfirm: async () => {
+        try {
+          const { db } = await import('../db');
+          let opSuccess = true;
+
+          // 1. Execute actual log deletion or modification
+          if (req.request_type === 'DELETE') {
+            const inLogId = req.old_value?.inLogId;
+            const outLogId = req.old_value?.outLogId;
+            const idsToDelete = [inLogId, outLogId].filter(Boolean);
+
+            if (idsToDelete.length > 0) {
+              const { error: sbErr } = await supabase
+                .from('attendance_logs')
+                .delete()
+                .in('id', idsToDelete);
+
+              if (sbErr) {
+                opSuccess = false;
+                throw sbErr;
+              }
+
+              for (const onlineId of idsToDelete) {
+                await db.attendance_logs.delete(String(onlineId));
+              }
+            }
+          } else if (req.request_type === 'EDIT') {
+            const newVal = req.new_value || {};
+            
+            if (newVal.inLogId && newVal.checkIn) {
+              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.inLogId).single();
+              if (logData) {
+                const oldDate = new Date(logData.timestamp);
+                const [hours, minutes, seconds] = newVal.checkIn.split(':');
+                oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+
+                let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
+                newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
+
+                const { error } = await supabase.from('attendance_logs').update({
+                  timestamp: oldDate.toISOString(),
+                  status: newStatus
+                }).eq('id', newVal.inLogId);
+
+                if (!error) {
+                  const localLogs = await db.attendance_logs.toArray();
+                  const found = localLogs.find(l => String(l.id) === String(newVal.inLogId));
+                  if (found) {
+                    found.timestamp = oldDate.toISOString();
+                    found.status = newStatus;
+                    await db.attendance_logs.put(found);
+                  }
+                } else {
+                  opSuccess = false;
+                }
+              }
+            }
+
+            if (newVal.outLogId && newVal.checkOut) {
+              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.outLogId).single();
+              if (logData) {
+                const oldDate = new Date(logData.timestamp);
+                const [hours, minutes, seconds] = newVal.checkOut.split(':');
+                oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+
+                let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
+                newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
+
+                const { error } = await supabase.from('attendance_logs').update({
+                  timestamp: oldDate.toISOString(),
+                  status: newStatus
+                }).eq('id', newVal.outLogId);
+
+                if (!error) {
+                  const localLogs = await db.attendance_logs.toArray();
+                  const found = localLogs.find(l => String(l.id) === String(newVal.outLogId));
+                  if (found) {
+                    found.timestamp = oldDate.toISOString();
+                    found.status = newStatus;
+                    await db.attendance_logs.put(found);
+                  }
+                } else {
+                  opSuccess = false;
+                }
+              }
+            }
+          }
+
+          if (opSuccess) {
+            // 2. Mark request as APPROVED
+            const { error: reqErr } = await supabase
+              .from('attendance_requests')
+              .update({ status: 'APPROVED' })
+              .eq('id', req.id);
+
+            if (!reqErr) {
+              await db.attendance_requests.put({ ...req, status: 'APPROVED' });
+            } else {
+              // offline approval status update fallback
+              await db.attendance_requests.put({ ...req, status: 'APPROVED', is_synced: false });
+            }
+            
+            showToast('Disetujui', 'Permohonan absensi berhasil disetujui.', 'success');
+            fetchApprovalRequests();
+            if (refreshLogs) refreshLogs();
+            if (onRefreshLogs) onRefreshLogs();
+          } else {
+            showToast('Gagal Eksekusi', 'Gagal memproses data log absensi.', 'error');
+          }
+        } catch (err) {
+          console.error('[APPROVE ERROR]:', err);
+          showToast('Error', err.message, 'error');
+        }
+      }
+    });
+  };
+
+  const handleRejectRequest = async (req) => {
+    openConfirmModal({
+      title: 'Tolak Permohonan?',
+      message: `Apakah Anda yakin ingin menolak permohonan dari ${req.requested_by}?`,
+      confirmText: 'Tolak',
+      confirmBg: 'var(--accent-error)',
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from('attendance_requests')
+            .update({ status: 'REJECTED' })
+            .eq('id', req.id);
+
+          const { db } = await import('../db');
+          if (!error) {
+            await db.attendance_requests.put({ ...req, status: 'REJECTED' });
+          } else {
+            await db.attendance_requests.put({ ...req, status: 'REJECTED', is_synced: false });
+          }
+          
+          showToast('Ditolak', 'Permohonan absensi berhasil ditolak.', 'success');
+          fetchApprovalRequests();
+        } catch (err) {
+          showToast('Error', err.message, 'error');
+        }
+      }
+    });
+  };
 
   // Reset local deleted buffer when logs change from parent
   useEffect(() => {
@@ -173,6 +370,64 @@ export default function TabAttendanceLogs({
 
 
   const handleDeleteGroup = (group) => {
+    const isHQ = user?.role === 'headoffice_admin';
+
+    if (!isHQ) {
+      openConfirmModal({
+        title: 'Ajukan Hapus Absensi?',
+        message: `Anda tidak memiliki hak akses untuk menghapus secara langsung. Ajukan permohonan hapus absensi ${group.name} pada ${group.displayDate} ke Head Office?`,
+        confirmText: 'Ajukan Hapus',
+        onConfirm: async () => {
+          try {
+            const reqPayload = {
+              id: crypto.randomUUID ? crypto.randomUUID() : 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+              request_type: 'DELETE',
+              log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
+              nik: group.nik,
+              name: group.name,
+              nama_kebun: group.nama_kebun || user?.kebun || '-',
+              requested_by: user?.username || 'unknown_admin',
+              status: 'PENDING',
+              old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
+            };
+
+            const { error } = await supabase.from('attendance_requests').insert(reqPayload);
+            
+            const { db } = await import('../db');
+            if (error) {
+              console.warn('[Supabase] Gagal menyimpan request ke awan, menyimpan lokal:', error.message);
+              await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+              showToast('Request Disimpan Lokal', 'Permohonan penghapusan disimpan secara offline.', 'warning');
+            } else {
+              await db.attendance_requests.put({ ...reqPayload, is_synced: true });
+              showToast('Request Terkirim', 'Permohonan penghapusan berhasil diajukan ke Head Office.', 'success');
+            }
+          } catch (err) {
+            console.error('[DELETE REQUEST ERROR]:', err);
+            try {
+              const { db } = await import('../db');
+              const fallbackPayload = {
+                id: 'req_' + Date.now(),
+                request_type: 'DELETE',
+                log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
+                nik: group.nik,
+                name: group.name,
+                nama_kebun: group.nama_kebun || user?.kebun || '-',
+                requested_by: user?.username || 'unknown_admin',
+                status: 'PENDING',
+                is_synced: false
+              };
+              await db.attendance_requests.put(fallbackPayload);
+              showToast('Request Disimpan Lokal', 'Permohonan penghapusan disimpan secara offline.', 'warning');
+            } catch (dexieErr) {
+              showToast('Gagal Mengajukan', `Error: ${err.message}`, 'error');
+            }
+          }
+        }
+      });
+      return;
+    }
+
     openConfirmModal({
       title: 'Hapus Riwayat Absensi?',
       message: `Apakah Anda yakin ingin menghapus catatan absensi ${group.name} pada ${group.displayDate}? Data Check-In dan Check-Out (jika ada) akan dihapus secara permanen.`,
@@ -257,6 +512,57 @@ export default function TabAttendanceLogs({
   };
 
   const saveEdit = async () => {
+    const isHQ = user?.role === 'headoffice_admin';
+
+    if (!isHQ) {
+      try {
+        const inLogId = editData.inLog?.id || null;
+        const outLogId = editData.outLog?.id || null;
+        
+        const reqPayload = {
+          id: crypto.randomUUID ? crypto.randomUUID() : 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+          request_type: 'EDIT',
+          log_id: inLogId || outLogId || 'group_' + editData.id,
+          nik: editData.nik,
+          name: editData.name,
+          nama_kebun: editData.nama_kebun || user?.kebun || '-',
+          requested_by: user?.username || 'unknown_admin',
+          status: 'PENDING',
+          old_value: { 
+            checkIn: editData.checkIn, 
+            checkOut: editData.checkOut, 
+            keterangan: editData.keterangan,
+            inLogId,
+            outLogId
+          },
+          new_value: { 
+            checkIn: editData.editCheckIn, 
+            checkOut: editData.editCheckOut, 
+            keterangan: editData.editKeterangan,
+            inLogId,
+            outLogId
+          }
+        };
+
+        const { error } = await supabase.from('attendance_requests').insert(reqPayload);
+        
+        const { db } = await import('../db');
+        if (error) {
+          console.warn('[Supabase] Gagal menyimpan request edit ke awan, menyimpan lokal:', error.message);
+          await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+          showToast('Request Disimpan Lokal', 'Permohonan perubahan disimpan secara offline.', 'warning');
+        } else {
+          await db.attendance_requests.put({ ...reqPayload, is_synced: true });
+          showToast('Request Terkirim', 'Permohonan perubahan berhasil diajukan ke Head Office.', 'success');
+        }
+        setIsEditModalOpen(false);
+      } catch (err) {
+        console.error('[EDIT REQUEST ERROR]:', err);
+        showToast('Error', `Gagal mengajukan permohonan edit: ${err.message}`, 'error');
+      }
+      return;
+    }
+
     try {
       let success = true;
       const { db } = await import('../db');
@@ -340,12 +646,13 @@ export default function TabAttendanceLogs({
   const exportToCSV = () => {
     if (filteredLogs.length === 0) return showToast('Kosong', 'Tidak ada data untuk diekspor', 'info');
 
-    const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
+    const headers = ['Tanggal', 'NIK', 'Nama Karyawan', 'Nama Kebun', 'Afdeling', 'Check In', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
 
     const rows = filteredLogs.map(row => [
       row.displayDate,
       row.nik,
       row.name,
+      row.nama_kebun || '-',
       row.afdeling,
       row.checkIn,
       row.checkOut,
@@ -443,12 +750,13 @@ export default function TabAttendanceLogs({
 
   // EXPORT PDF
   const exportToPDF = () => {
-    const headers = ['Tanggal', 'Check In', 'NIK', 'Nama Karyawan', 'Afdeling', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
+    const headers = ['Tanggal', 'Check In', 'NIK', 'Nama Karyawan', 'Nama Kebun', 'Afdeling', 'Check Out', 'Durasi', 'Keterangan', 'Lokasi'];
     const rows = filteredLogs.map(row => [
       row.displayDate,
       row.checkIn,
       row.nik,
       row.name,
+      row.nama_kebun || '-',
       row.afdeling,
       row.checkOut,
       row.durasi ? formatDurasi(row.durasi) : '-',
@@ -673,6 +981,52 @@ export default function TabAttendanceLogs({
           </div>
         </div>
 
+        {/* HQ ADMIN TABS */}
+        {user?.role === 'headoffice_admin' && (
+          <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }} className="no-print">
+            <button
+              onClick={() => setActiveTab('logs')}
+              style={{
+                background: activeTab === 'logs' ? 'var(--accent-primary)' : 'transparent',
+                color: activeTab === 'logs' ? '#fff' : 'var(--text-muted)',
+                border: activeTab === 'logs' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                padding: '6px 16px',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              Riwayat Log Absensi
+            </button>
+            <button
+              onClick={() => setActiveTab('requests')}
+              style={{
+                background: activeTab === 'requests' ? 'var(--accent-primary)' : 'transparent',
+                color: activeTab === 'requests' ? '#fff' : 'var(--text-muted)',
+                border: activeTab === 'requests' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                padding: '6px 16px',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              Persetujuan Edit/Hapus
+              {approvalRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.7rem', padding: '1px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
+                  {approvalRequests.filter(r => r.status === 'PENDING').length}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Search Bar */}
         <div className="no-print" style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <Search size={18} color="var(--text-muted)" />
@@ -686,131 +1040,259 @@ export default function TabAttendanceLogs({
         </div>
       </div>
 
-      {/* Table */}
-      <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
-        <Table className="freeze-table-header">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Tanggal</TableHead>
-              <TableHead>Check In</TableHead>
-              <TableHead>NIK</TableHead>
-              <TableHead>Nama Karyawan</TableHead>
-              <TableHead>Afdeling</TableHead>
-              <TableHead>Check Out</TableHead>
-              <TableHead>Durasi</TableHead>
-              <TableHead>Keterangan</TableHead>
-              <TableHead>Lokasi</TableHead>
-              <TableHead className="no-print">Aksi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredLogs.length === 0 ? (
+      {/* Table & Requests Tabs conditional rendering */}
+      {activeTab === 'logs' ? (
+        <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
+          <Table className="freeze-table-header">
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={10} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-                  Belum ada log absensi yang tercatat.
-                </TableCell>
+                <TableHead>Tanggal</TableHead>
+                <TableHead>Check In</TableHead>
+                <TableHead>NIK</TableHead>
+                <TableHead>Nama Karyawan</TableHead>
+                <TableHead>Nama Kebun</TableHead>
+                <TableHead>Afdeling</TableHead>
+                <TableHead>Check Out</TableHead>
+                <TableHead>Durasi</TableHead>
+                <TableHead>Keterangan</TableHead>
+                <TableHead>Lokasi</TableHead>
+                <TableHead className="no-print">Aksi</TableHead>
               </TableRow>
-            ) : (
-              filteredLogs.map((log) => (
-                <TableRow key={log.id}>
-                  <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
-                  <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
-                  <TableCell className="nik-cell">{log.nik}</TableCell>
-                  <TableCell>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>{log.name}</span>
-                      {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) && (
-                        <span
-                          style={{
-                            fontSize: '0.65rem',
-                            background: 'var(--accent-warning)',
-                            color: '#fff',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontWeight: 'bold',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px'
-                          }}
-                          title="Data absensi disimpan lokal dan akan disinkronkan saat online"
-                        >
-                          <CloudOff size={11} /> Offline
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
-                  <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
-                  <TableCell>
-                    {log.durasi ? (
-                      <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
-                    ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
-                      <span className="durasi-badge checkin" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Sedang Bekerja</span>
-                    ) : '-'}
-                  </TableCell>
-                  <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
-                  <TableCell style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
-                    {(() => {
-                      const gps = parseLokasiGPS(log.lokasi);
-                      if (gps) {
-                        const mapsUrl = `https://www.google.com/maps?q=${gps.lat},${gps.lng}`;
-                        return (
-                          <a
-                            href={mapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={log.lokasi}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                              color: '#10b981',
-                              textDecoration: 'none',
-                              fontWeight: 600,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                            }}
-                          >
-                            <MapPin size={13} style={{ flexShrink: 0 }} />
-                            {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}
-                            {gps.accuracy && (
-                              <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
-                                &nbsp;±{gps.accuracy.toFixed(0)}m
-                              </span>
-                            )}
-                          </a>
-                        );
-                      }
-                      return (
-                        <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
-                          {log.lokasi || '-'}
-                        </span>
-                      );
-                    })()}
-                  </TableCell>
-                  <TableCell className="no-print">
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) ? (
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Menunggu Sinkronisasi</span>
-                      ) : (
-                        <>
-                          <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
-                            <Edit2 size={14} />
-                          </button>
-                          <button className="btn-action delete" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleDeleteGroup(log)} title="Hapus">
-                            <Trash2 size={14} />
-                          </button>
-                        </>
-                      )}
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {filteredLogs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={11} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                    Belum ada log absensi yang tercatat.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                filteredLogs.map((log) => (
+                  <TableRow key={log.id}>
+                    <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
+                    <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
+                    <TableCell className="nik-cell">{log.nik}</TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{log.name}</span>
+                        {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) && (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              background: 'var(--accent-warning)',
+                              color: '#fff',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontWeight: 'bold',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Data absensi disimpan lokal dan akan disinkronkan saat online"
+                          >
+                            <CloudOff size={11} /> Offline
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
+                    <TableCell style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
+                    <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
+                    <TableCell>
+                      {log.durasi ? (
+                        <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
+                      ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
+                        <span className="durasi-badge checkin" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Sedang Bekerja</span>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
+                    <TableCell style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
+                      {(() => {
+                        const gps = parseLokasiGPS(log.lokasi);
+                        if (gps) {
+                          const mapsUrl = `https://www.google.com/maps?q=${gps.lat},${gps.lng}`;
+                          return (
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={log.lokasi}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                color: '#10b981',
+                                textDecoration: 'none',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              <MapPin size={13} style={{ flexShrink: 0 }} />
+                              {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}
+                              {gps.accuracy && (
+                                <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.72rem' }}>
+                                  &nbsp;±{gps.accuracy.toFixed(0)}m
+                                </span>
+                              )}
+                            </a>
+                          );
+                        }
+                        return (
+                          <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                            {log.lokasi || '-'}
+                          </span>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell className="no-print">
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) ? (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Menunggu Sinkronisasi</span>
+                        ) : (
+                          <>
+                            <button className="btn-action edit" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleOpenEdit(log)} title="Edit">
+                              <Edit2 size={14} />
+                            </button>
+                            <button className="btn-action delete" style={{ padding: '6px', minWidth: 'auto' }} onClick={() => handleDeleteGroup(log)} title="Hapus">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        /* PERSETUJUAN REQUESTS TABLE */
+        <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
+          {isLoadingRequests ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Memuat data request persetujuan...
+            </div>
+          ) : (
+            <Table className="freeze-table-header">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tipe Request</TableHead>
+                  <TableHead>Nama Karyawan</TableHead>
+                  <TableHead>Kebun</TableHead>
+                  <TableHead>Pemohon</TableHead>
+                  <TableHead>Waktu Request</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Detail Perubahan</TableHead>
+                  <TableHead className="no-print">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {approvalRequests.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                      Tidak ada permohonan persetujuan terdaftar.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  approvalRequests.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell>
+                        <span 
+                          style={{
+                            fontSize: '0.7rem',
+                            background: req.request_type === 'DELETE' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                            color: req.request_type === 'DELETE' ? '#ef4444' : '#38bdf8',
+                            border: req.request_type === 'DELETE' ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(56, 189, 248, 0.25)',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontWeight: 700
+                          }}
+                        >
+                          {req.request_type}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div style={{ fontWeight: 600 }}>{req.name}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>NIK: {req.nik}</div>
+                      </TableCell>
+                      <TableCell style={{ color: 'var(--text-muted)' }}>{req.nama_kebun || '-'}</TableCell>
+                      <TableCell style={{ fontWeight: 600 }}>{req.requested_by}</TableCell>
+                      <TableCell style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {req.requested_at ? new Date(req.requested_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <span 
+                          style={{
+                            fontSize: '0.7rem',
+                            background: req.status === 'APPROVED' ? 'rgba(21, 128, 61, 0.12)' : req.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                            color: req.status === 'APPROVED' ? '#15803d' : req.status === 'REJECTED' ? '#ef4444' : '#f59e0b',
+                            border: req.status === 'APPROVED' ? '1px solid rgba(21, 128, 61, 0.25)' : req.status === 'REJECTED' ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(245, 158, 11, 0.25)',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontWeight: 700
+                          }}
+                        >
+                          {req.status}
+                        </span>
+                      </TableCell>
+                      <TableCell style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'normal', wordBreak: 'break-word', color: 'var(--text-main)', textAlign: 'left' }}>
+                        {req.request_type === 'DELETE' ? (
+                          <span style={{ color: '#ef4444' }}>
+                            Hapus absensi tanggal: <strong>{req.old_value?.date || '-'}</strong>
+                          </span>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {req.old_value?.checkIn !== req.new_value?.checkIn && (
+                              <div>
+                                Check-In: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.checkIn || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-cyan)' }}>{req.new_value?.checkIn || '-'}</strong>
+                              </div>
+                            )}
+                            {req.old_value?.checkOut !== req.new_value?.checkOut && (
+                              <div>
+                                Check-Out: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.checkOut || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-primary)' }}>{req.new_value?.checkOut || '-'}</strong>
+                              </div>
+                            )}
+                            {req.old_value?.keterangan !== req.new_value?.keterangan && (
+                              <div>
+                                Keterangan: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.keterangan || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-success)' }}>{req.new_value?.keterangan || '-'}</strong>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="no-print">
+                        {req.status === 'PENDING' ? (
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button 
+                              className="btn btn-primary" 
+                              onClick={() => handleApproveRequest(req)}
+                              style={{ padding: '6px 10px', fontSize: '0.72rem', width: 'auto', background: '#15803d', border: 'none', color: '#fff', fontWeight: 'bold' }}
+                            >
+                              Setujui
+                            </button>
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => handleRejectRequest(req)}
+                              style={{ padding: '6px 10px', fontSize: '0.72rem', width: 'auto', background: '#b91c1c', border: 'none', color: '#fff', fontWeight: 'bold' }}
+                            >
+                              Tolak
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Selesai</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      )}
 
       {/* EDIT MODAL */}
       {isEditModalOpen && editData && (
