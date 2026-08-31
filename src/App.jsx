@@ -172,7 +172,12 @@ function AppContent() {
           console.log('[SUPABASE DIRECT] Fetched and resolved biometrics bulk for', empData.length, 'employees directly from cloud');
         }
       } catch (err) {
-        console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err.message);
+        const isOfflineErr = err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError');
+        if (isOfflineErr) {
+          console.log('[OFFLINE MODE] Supabase Cloud tidak terjangkau (Offline) — Menggunakan database lokal.');
+        } else {
+          console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err?.message || err);
+        }
         dataSource = 'indexeddb';
       }
     }
@@ -315,7 +320,12 @@ function AppContent() {
         .order('timestamp', { ascending: false });
 
       if (error) {
-        console.warn('[DEBUG fetchLogs] Supabase error:', error.message);
+        const isOfflineErr = error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError');
+        if (isOfflineErr) {
+          console.log('[OFFLINE MODE] Log Cloud Supabase tidak terjangkau (Offline).');
+        } else {
+          console.warn('[DEBUG fetchLogs] Supabase error:', error.message);
+        }
       } else {
         console.log('[DEBUG fetchLogs] Supabase rawLogs fetched count:', rawLogs ? rawLogs.length : 0);
       }
