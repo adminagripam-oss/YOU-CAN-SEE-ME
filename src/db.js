@@ -23,7 +23,10 @@ import {
   sqliteDeleteAttendanceLog,
   sqliteClearAttendanceLogs,
   sqliteSaveAdmin,
-  sqliteGetAdmin
+  sqliteGetAdmin,
+  sqliteSavePendingEmployee,
+  sqliteGetPendingEmployees,
+  sqliteRemovePendingEmployee
 } from './services/sqliteService';
 
 /**
@@ -82,6 +85,17 @@ dexieDb.version(7).stores({
   attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
   local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
   attendance_requests: 'id, request_type, log_id, status, is_synced'
+});
+
+dexieDb.version(8).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric, is_synced',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced',
+  employee_sync_queue: 'id, nik, name, is_synced, created_at'
 });
 
 /**
@@ -330,6 +344,48 @@ export const db = {
           await dexieDb.local_admins.put(admin);
         } catch (e) {
           console.warn('[Dexie Local Admins Put Error]:', e);
+        }
+      }
+    }
+  },
+  employee_sync_queue: {
+    async add(empData) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSavePendingEmployee(empData);
+      } else {
+        try {
+          await dexieDb.employee_sync_queue.put(empData);
+          await dexieDb.employees_cache.put({
+            ...empData,
+            kebun: empData.nama_kebun,
+            has_master_biometric: !!empData.descriptor_json,
+            is_synced: false
+          });
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue Add Error]:', e);
+        }
+      }
+    },
+    async toArray() {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetPendingEmployees();
+      } else {
+        try {
+          return await dexieDb.employee_sync_queue.toArray();
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue toArray Error]:', e);
+          return [];
+        }
+      }
+    },
+    async delete(id) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteRemovePendingEmployee(id);
+      } else {
+        try {
+          await dexieDb.employee_sync_queue.delete(String(id));
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue Delete Error]:', e);
         }
       }
     }

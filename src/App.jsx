@@ -202,6 +202,30 @@ function AppContent() {
       }
     }
 
+    // Merge pending unsynced offline registered employees if any exist
+    try {
+      const pendingEmps = await db.employee_sync_queue.toArray();
+      if (pendingEmps && pendingEmps.length > 0) {
+        const empMap = new Map((empData || []).map(e => [String(e.id), e]));
+        for (const p of pendingEmps) {
+          if (!empMap.has(String(p.id))) {
+            const matchesKebun = adminObj.role !== 'estate_admin' || !adminObj.kebun || p.nama_kebun === adminObj.kebun;
+            if (matchesKebun) {
+              empMap.set(String(p.id), {
+                ...p,
+                kebun: p.nama_kebun,
+                has_master_biometric: p.has_master_biometric !== false && (!!p.descriptor_json || !!p.descriptor),
+                is_synced: false
+              });
+            }
+          }
+        }
+        empData = Array.from(empMap.values());
+      }
+    } catch (queueErr) {
+      console.warn('[FETCH EMPLOYEES QUEUE MERGE WARN]:', queueErr);
+    }
+
     if (empData) {
       setEmployees(empData);
 

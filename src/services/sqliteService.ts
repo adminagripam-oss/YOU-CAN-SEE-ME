@@ -118,6 +118,22 @@ export async function initSQLite(): Promise<void> {
         nik TEXT,
         last_login TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS local_employee_sync_queue (
+        id TEXT PRIMARY KEY,
+        nik TEXT,
+        name TEXT,
+        department TEXT,
+        afdeling TEXT,
+        nama_kebun TEXT,
+        status_tk TEXT,
+        jabatan TEXT,
+        status_perkawinan TEXT,
+        descriptor_json TEXT,
+        geometric_descriptor_json TEXT,
+        is_synced INTEGER DEFAULT 0,
+        created_at TEXT
+      );
     `;
 
     await dbConnection.execute(ddl);
@@ -149,6 +165,12 @@ export async function initSQLite(): Promise<void> {
     try {
       await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN region TEXT;`);
       console.log('[SQLite Service] Migrated local_employees: added region column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN is_synced INTEGER DEFAULT 1;`);
+      console.log('[SQLite Service] Migrated local_employees: added is_synced column');
     } catch (e) {
       // Column might already exist, ignore error
     }
@@ -808,6 +830,84 @@ export async function sqliteGetAdmin(username: string): Promise<any | null> {
     console.error('[SQLite Service sqliteGetAdmin Error]:', err?.message || err);
   }
   return null;
+}
+
+/**
+ * Save an offline registered employee to pending sync queue
+ */
+export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    const sql = `
+      INSERT OR REPLACE INTO local_employee_sync_queue 
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, descriptor_json, geometric_descriptor_json, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?);
+    `;
+    const params = [
+      String(empData.id),
+      empData.nik,
+      empData.name,
+      empData.department || empData.jabatan || null,
+      empData.afdeling || null,
+      empData.nama_kebun || null,
+      empData.status_tk || null,
+      empData.jabatan || null,
+      empData.status_perkawinan || null,
+      empData.descriptor_json ? (typeof empData.descriptor_json === 'string' ? empData.descriptor_json : JSON.stringify(empData.descriptor_json)) : null,
+      empData.geometric_descriptor_json ? (typeof empData.geometric_descriptor_json === 'string' ? empData.geometric_descriptor_json : JSON.stringify(empData.geometric_descriptor_json)) : null,
+      empData.created_at || new Date().toISOString()
+    ];
+    await dbConnection.run(sql, params);
+
+    // Also insert to local_employees so they show up offline immediately
+    await dbConnection.run(
+      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, is_synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      [
+        empData.id,
+        empData.nik,
+        empData.name,
+        empData.department || empData.jabatan || null,
+        empData.afdeling || null,
+        empData.nama_kebun || null,
+        empData.status_tk || null,
+        empData.jabatan || null,
+        empData.status_perkawinan || null,
+        empData.descriptor_json ? 1 : 0
+      ]
+    );
+
+    console.log(`[SQLite Service] Saved pending offline employee: ${empData.name} (${empData.id})`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSavePendingEmployee Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Retrieve all unsynced pending employees
+ */
+export async function sqliteGetPendingEmployees(): Promise<any[]> {
+  if (!dbConnection) return [];
+  try {
+    const res = await dbConnection.query(`SELECT * FROM local_employee_sync_queue WHERE is_synced = 0`);
+    return res.values || [];
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetPendingEmployees Error]:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Remove a synced employee from pending queue
+ */
+export async function sqliteRemovePendingEmployee(id: string | number): Promise<void> {
+  if (!dbConnection) return;
+  try {
+    await dbConnection.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
+    console.log(`[SQLite Service] Removed pending employee from queue: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteRemovePendingEmployee Error]:', err?.message || err);
+  }
 }
 
 
