@@ -278,15 +278,16 @@ export async function sqliteCacheGeometricVector(employeeId: number, gfv: any): 
 /**
  * Retrieves cached master vectors and employee info from SQLite.
  */
-export async function sqliteGetCachedUserMasterVector(employeeId: number): Promise<any | null> {
+export async function sqliteGetCachedUserMasterVector(employeeId: number | string): Promise<any | null> {
   if (!dbConnection) return null;
   try {
+    const empIdStr = String(employeeId);
     const res = await dbConnection.query(
       `SELECT md.*, e.nik, e.name, e.department, e.afdeling, e.nama_kebun, e.status_tk, e.jabatan, e.status_perkawinan
        FROM local_master_descriptors md
-       LEFT JOIN local_employees e ON md.employee_id = e.id
-       WHERE md.employee_id = ?`,
-      [employeeId]
+       LEFT JOIN local_employees e ON CAST(md.employee_id AS TEXT) = CAST(e.id AS TEXT)
+       WHERE CAST(md.employee_id AS TEXT) = ? OR md.employee_id = ?`,
+      [empIdStr, employeeId]
     );
 
     if (!res.values || res.values.length === 0) return null;
@@ -716,14 +717,15 @@ export async function sqliteGetAttendanceLogs(): Promise<any[]> {
 /**
  * Get today's attendance logs for a single employee from SQLite.
  */
-export async function sqliteGetTodayAttendanceLogs(empId: number, dateStr: string): Promise<any[]> {
+export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateStr: string): Promise<any[]> {
   if (!dbConnection) return [];
   try {
+    const empIdStr = String(empId);
     const res = await dbConnection.query(
       `SELECT * FROM local_attendance_logs 
-       WHERE employee_id = ? AND substr(timestamp, 1, 10) = ? 
+       WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ? 
        ORDER BY timestamp ASC`,
-      [empId, dateStr]
+      [empIdStr, empId, dateStr]
     );
     const rows = res.values || [];
     return rows.map((row: any) => ({

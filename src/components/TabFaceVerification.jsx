@@ -719,12 +719,7 @@ export default function TabFaceVerification({
   const loadMasterVectors = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
 
-    // Pastikan empId selalu integer untuk kompatibilitas query Supabase (INTEGER column)
-    const empIdInt = parseInt(empId, 10);
-    if (isNaN(empIdInt)) {
-      console.warn('[LOAD MASTER VECTORS] empId tidak valid:', empId);
-      return;
-    }
+    const empIdKey = empId;
 
     try {
       let vec = null;
@@ -739,54 +734,57 @@ export default function TabFaceVerification({
         return Array.isArray(parsed) && parsed.length === 1024;
       };
 
-      // ── Tier 1: Local IndexedDB Cache ─────────────────────────────────
-      const cached = await getCachedUserMasterVector(empIdInt);
+      // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
+      const cached = await getCachedUserMasterVector(empIdKey);
       if (cached) {
         const tempVec = cached.descriptor_json || cached.face_vector;
         if (isValidVector(tempVec)) {
           vec = tempVec;
-          console.log('[LOAD MASTER T1-INDEXEDDB] Cache hit valid 1024-dim, employee:', empIdInt);
+          console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid 1024-dim, employee:', empIdKey);
         } else {
-          console.warn('[LOAD MASTER T1-INDEXEDDB] Cache hit invalid (panjang bukan 1024), lanjut ke Supabase, employee:', empIdInt);
+          console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (panjang bukan 1024), employee:', empIdKey);
         }
       }
 
       // ── Tier 2: Supabase Direct — tabel master_descriptors ───────────
       if (!vec) {
-        try {
-          const { data: masterData, error: masterErr } = await supabase
-            .from('master_descriptors')
-            .select('descriptor_json')
-            .eq('employee_id', empIdInt)
-            .maybeSingle();
+        const empIdInt = parseInt(empIdKey, 10);
+        if (!isNaN(empIdInt)) {
+          try {
+            const { data: masterData, error: masterErr } = await supabase
+              .from('master_descriptors')
+              .select('descriptor_json')
+              .eq('employee_id', empIdInt)
+              .maybeSingle();
 
-          if (masterErr) {
-            console.warn('[LOAD MASTER T2-SUPABASE WARN]:', masterErr.message);
-          } else if (masterData?.descriptor_json) {
-            const tempVec = masterData.descriptor_json;
-            if (isValidVector(tempVec)) {
-              vec = tempVec;
-              console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
+            if (masterErr) {
+              console.warn('[LOAD MASTER T2-SUPABASE WARN]:', masterErr.message);
+            } else if (masterData?.descriptor_json) {
+              const tempVec = masterData.descriptor_json;
+              if (isValidVector(tempVec)) {
+                vec = tempVec;
+                console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
+              } else {
+                console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid (panjang bukan 1024)');
+              }
             } else {
-              console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid (panjang bukan 1024)');
+              console.warn('[LOAD MASTER T2-SUPABASE] Tidak ada data untuk employee_id:', empIdInt);
             }
-          } else {
-            console.warn('[LOAD MASTER T2-SUPABASE] Tidak ada data untuk employee_id:', empIdInt);
+          } catch (e) {
+            console.warn('[LOAD MASTER T2-SUPABASE WARN]:', e.message);
           }
-        } catch (e) {
-          console.warn('[LOAD MASTER T2-SUPABASE WARN]:', e.message);
         }
       }
 
       // ── Tier 4: Fallback ke props employees (kolom legacy) ────────────
       if (!vec) {
-        const empObj = employees.find((it) => String(it.id) === String(empIdInt));
+        const empObj = employees.find((it) => String(it.id) === String(empIdKey));
         const tempVec = empObj?.face_vector || empObj?.descriptor_json || empObj?.facial_descriptor;
         if (isValidVector(tempVec)) {
           vec = tempVec;
           console.log('[LOAD MASTER T4-PROPS] Vektor ditemukan valid di employees props');
         } else {
-          console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid 1024-dim di props. Employee ID:', empIdInt);
+          console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid 1024-dim di props. Employee ID:', empIdKey);
         }
       }
 
