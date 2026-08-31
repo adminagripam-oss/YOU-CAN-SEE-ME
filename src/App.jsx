@@ -159,6 +159,8 @@ function AppContent() {
             
             return {
               ...emp,
+              nama_kebun: emp.kebun || emp.nama_kebun || '',
+              kebun: emp.kebun || emp.nama_kebun || '',
               has_master_biometric: emp.has_master_biometric === true || !!biometrics || !!localMaster,
               descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
               geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null

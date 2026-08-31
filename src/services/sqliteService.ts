@@ -442,6 +442,7 @@ export async function sqliteGetEmployeesCache(): Promise<any[]> {
     const rows = res.values || [];
     return rows.map(row => ({
       ...row,
+      kebun: row.nama_kebun,
       has_master_biometric: row.has_master_biometric === 1
     }));
   } catch (err: any) {
