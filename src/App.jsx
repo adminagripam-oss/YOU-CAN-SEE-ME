@@ -348,6 +348,47 @@ function AppContent() {
       console.warn('[Local Database] Failed to load attendance logs:', e);
     }
 
+    // Load unsynced offline queue logs
+    let unsyncedQueue = [];
+    try {
+      const rawQueue = await db.attendance_sync_queue.toArray();
+      const savedAdmin = localStorage.getItem('logged_in_admin');
+      if (savedAdmin) {
+        const adminObj = JSON.parse(savedAdmin);
+        if (adminObj.role !== 'headoffice_admin') {
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          unsyncedQueue = rawQueue.filter(q => empIds.has(String(q.employee_id)));
+        } else {
+          unsyncedQueue = rawQueue;
+        }
+      } else {
+        unsyncedQueue = rawQueue;
+      }
+    } catch (e) {
+      console.warn('[Local Database] Failed to load unsynced queue logs:', e);
+    }
+
+    const mappedQueue = unsyncedQueue.map(q => ({
+      id: 'offline_' + q.id,
+      employee_id: q.employee_id,
+      nik: q.nik || '-',
+      name: q.name || '-',
+      department: q.department || '-',
+      afdeling: q.afdeling || '-',
+      nama_kebun: q.nama_kebun || '-',
+      timestamp: q.timestamp,
+      location: q.location || '[OFFLINE] Antrean Absensi',
+      lat: q.lat,
+      lng: q.lng,
+      status: q.status || 'Hadir',
+      attendance_type: normalizeType(q.attendance_type),
+      euclidean_distance: q.euclidean_distance,
+      is_synced: false,
+      created_at: q.created_at || q.timestamp
+    }));
+
+    const mergedLocalLogs = [...allLocalLogs, ...mappedQueue];
+
     // Step 3: De-duplicate and resolve metadata
     const getLocalDateString = (ts) => {
       if (!ts) return '';
@@ -363,7 +404,7 @@ function AppContent() {
     const seen = new Set();
     const onlineSignatures = new Set();
 
-    allLocalLogs.forEach(log => {
+    mergedLocalLogs.forEach(log => {
       if (log.is_synced) {
         const localDate = getLocalDateString(log.timestamp);
         if (localDate) {
@@ -373,7 +414,7 @@ function AppContent() {
       }
     });
 
-    allLocalLogs.forEach(log => {
+    mergedLocalLogs.forEach(log => {
       const localDate = getLocalDateString(log.timestamp);
       if (!localDate) return;
       const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
