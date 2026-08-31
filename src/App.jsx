@@ -793,7 +793,6 @@ function AppContent() {
           if (isOnline) {
             for (const log of newAutoCheckOuts) {
               const payload = {
-                id: log.id,
                 employee_id: log.employee_id,
                 nik: log.nik,
                 name: log.name,
@@ -807,10 +806,23 @@ function AppContent() {
                 status: log.status,
                 attendance_type: log.attendance_type
               };
-              const { error } = await supabase.from('attendance_logs').insert(payload);
-              if (!error) {
-                log.is_synced = true;
-                await db.attendance_logs.put(log);
+              const { data: insertedData, error } = await supabase
+                .from('attendance_logs')
+                .insert(payload)
+                .select();
+              
+              if (!error && insertedData && insertedData.length > 0) {
+                // Delete the temporary log from local DB
+                await db.attendance_logs.delete(log.id);
+                // Insert the official log with the real numeric ID
+                const officialLog = {
+                  ...log,
+                  id: String(insertedData[0].id),
+                  is_synced: true
+                };
+                await db.attendance_logs.put(officialLog);
+              } else if (error) {
+                console.warn('[Auto Check-Out Sync Error]:', error.message);
               }
             }
           }
