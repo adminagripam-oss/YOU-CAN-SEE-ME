@@ -177,7 +177,7 @@ export const db = {
         try {
           // Clear older dates in Dexie
           await dexieDb.today_attendance_cache.where('cached_date').notEqual(cachedDate).delete();
-          
+
           const records = [];
           const keys = Object.keys(statusMap);
           for (let i = 0; i < keys.length; i++) {
