@@ -575,7 +575,7 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
     await dbConnection.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
       (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
         Number(log.employee_id),
@@ -609,7 +609,7 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
     const statements = logs.map(log => ({
       statement: `INSERT OR REPLACE INTO local_attendance_logs 
         (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       values: [
         String(log.id),
         Number(log.employee_id),
