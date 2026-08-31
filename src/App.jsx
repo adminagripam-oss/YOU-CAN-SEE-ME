@@ -607,8 +607,14 @@ function AppContent() {
   useEffect(() => {
     if (!dbReady) return;
 
-    fetchEmployees();
-    fetchLogs();
+    if (user) {
+      console.log('[App Startup] Logged in admin changed. Fetching fresh employees and logs...');
+      fetchEmployees();
+      fetchLogs();
+    } else {
+      setEmployees([]);
+      setLogs([]);
+    }
 
     async function loadHumanModels() {
       try {
@@ -619,13 +625,13 @@ function AppContent() {
         console.log('[App] Model AI berhasil dimuat, backend:', window.__humanBackend || 'webgl');
       } catch (err) {
         console.error('[MODEL LOAD ERROR]:', err);
-        setModelStatusText('\u274c Gagal memuat model AI: ' + err.message);
+        setModelStatusText('❌ Gagal memuat model AI: ' + err.message);
         // Jangan set modelsLoaded = true — model benar-benar belum siap
       }
     }
 
     loadHumanModels();
-  }, [dbReady, fetchEmployees, fetchLogs]);
+  }, [dbReady, user, fetchEmployees, fetchLogs]);
 
   // Auto Check-out for previous days' orphaned check-ins
   useEffect(() => {
