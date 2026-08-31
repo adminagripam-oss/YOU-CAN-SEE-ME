@@ -53,44 +53,218 @@ class _LogsScreenState extends State<LogsScreen> {
 
     final role = user['role'] ?? 'estate_admin';
     final kebun = user['kebun'];
+    final region = user['region'];
 
+    bool isOnline = false;
+
+    // ─── Cek Koneksi Internet ───────────────────────────────────────────────
     try {
       final onlineCheck = await http
-          .head(Uri.parse('https://qrtvawixmlekbitvfuav.supabase.co'))
-          .timeout(const Duration(seconds: 3));
+          .head(Uri.parse('${AuthProvider.supabaseUrl}'))
+          .timeout(const Duration(seconds: 4));
+      isOnline = onlineCheck.statusCode >= 200 && onlineCheck.statusCode < 400;
+    } catch (_) {
+      isOnline = false;
+    }
 
-      if (onlineCheck.statusCode >= 200 && onlineCheck.statusCode < 400) {
-        // Fetch last 100 logs from Supabase
-        String url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs?select=*&order=timestamp.desc&limit=100';
-        if (role == 'estate_admin' && kebun != null) {
-          // Inner join / filter in Supabase. For simplicity we can query directly
+    if (!isOnline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📡 Offline — menampilkan data lokal'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      await _loadLogs();
+      return;
+    }
+
+    // ─── STEP 1: UPLOAD data offline queue ke Supabase ─────────────────────
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('☁️ Mengunggah data offline ke server...'),
+          backgroundColor: Color(0xFF1A6B5A),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    final db = DatabaseHelper.instance;
+    int uploadedCount = 0;
+    int failedCount = 0;
+
+    try {
+      final unsyncedQueue = await db.getUnsyncedQueue();
+      debugPrint('[Refresh] Ditemukan ${unsyncedQueue.length} item offline yang perlu diupload.');
+
+      for (final item in unsyncedQueue) {
+        try {
+          final payload = {
+            'employee_id': item['employee_id'],
+            'nik': item['nik'],
+            'name': item['name'],
+            'department': item['department'],
+            'afdeling': item['afdeling'],
+            'timestamp': item['timestamp'],
+            'location': item['location'],
+            'latitude': item['lat'],
+            'longitude': item['lng'],
+            'status': item['status'],
+            'attendance_type': item['attendance_type'],
+            'euclidean_distance': item['euclidean_distance'],
+          };
+
+          final uploadRes = await http.post(
+            Uri.parse('${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'),
+            headers: {
+              'apikey': AuthProvider.supabaseAnonKey,
+              'Authorization': 'Bearer ${AuthProvider.supabaseAnonKey}',
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation',
+            },
+            body: jsonEncode(payload),
+          ).timeout(const Duration(seconds: 10));
+
+          if (uploadRes.statusCode == 201 || uploadRes.statusCode == 200) {
+            // Tandai sudah di-sync di queue
+            final queueId = item['id'] as int;
+            await db.markQueueItemSynced(queueId, '');
+
+            // Simpan juga ke local_attendance_logs sebagai catatan permanen
+            try {
+              final List<dynamic> uploaded = jsonDecode(uploadRes.body);
+              if (uploaded.isNotEmpty) {
+                await db.saveAttendanceLog({...uploaded[0], 'is_synced': 1});
+              }
+            } catch (_) {}
+
+            uploadedCount++;
+            debugPrint('[Refresh] Upload berhasil untuk item queue id=${item['id']}');
+          } else {
+            failedCount++;
+            debugPrint('[Refresh] Upload gagal (${uploadRes.statusCode}): ${uploadRes.body}');
+          }
+        } catch (itemErr) {
+          failedCount++;
+          debugPrint('[Refresh] Upload error item queue id=${item['id']}: $itemErr');
         }
+      }
+    } catch (uploadErr) {
+      debugPrint('[Refresh] Error upload phase: $uploadErr');
+    }
 
-        final res = await http.get(
-          Uri.parse(url),
+    // ─── STEP 2: DOWNLOAD log terbaru dari Supabase ─────────────────────────
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            uploadedCount > 0
+                ? '✅ $uploadedCount data offline terupload. Mengunduh data terbaru...'
+                : '🔄 Mengunduh data terbaru dari server...',
+          ),
+          backgroundColor: const Color(0xFF1A3D5A),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    try {
+      // Bangun URL query dengan filter sesuai role
+      String url;
+      if (role == 'estate_admin' && kebun != null) {
+        // Ambil dulu employee_id yang bekerja di kebun ini
+        final empRes = await http.get(
+          Uri.parse(
+              '${AuthProvider.supabaseUrl}/rest/v1/employees?select=id&nama_kebun=eq.${Uri.encodeQueryComponent(kebun)}&limit=500'),
           headers: {
             'apikey': AuthProvider.supabaseAnonKey,
             'Authorization': 'Bearer ${AuthProvider.supabaseAnonKey}',
-            'Content-Type': 'application/json',
           },
-        );
+        ).timeout(const Duration(seconds: 8));
 
-        if (res.statusCode == 200) {
-          final List<dynamic> data = jsonDecode(res.body);
-          final serverLogs = data.map((it) => it as Map<String, dynamic>).toList();
-
-          final db = DatabaseHelper.instance;
-          // Bulk save to local SQLite logs
-          await db.bulkSaveAttendanceLogs(
-            serverLogs.map((log) => {...log, 'is_synced': 1}).toList(),
-          );
+        if (empRes.statusCode == 200) {
+          final List<dynamic> emps = jsonDecode(empRes.body);
+          if (emps.isNotEmpty) {
+            final ids = emps.map((e) => e['id'].toString()).join(',');
+            url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+                '?select=*&employee_id=in.($ids)&order=timestamp.desc&limit=500';
+          } else {
+            url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+                '?select=*&employee_id=eq.-1&order=timestamp.desc&limit=1';
+          }
+        } else {
+          url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+              '?select=*&order=timestamp.desc&limit=100';
         }
+      } else if (role == 'regional_admin' && region != null) {
+        // Ambil employee_id dari semua kebun di region ini
+        final empRes = await http.get(
+          Uri.parse(
+              '${AuthProvider.supabaseUrl}/rest/v1/employees?select=id&region=eq.${Uri.encodeQueryComponent(region)}&limit=1000'),
+          headers: {
+            'apikey': AuthProvider.supabaseAnonKey,
+            'Authorization': 'Bearer ${AuthProvider.supabaseAnonKey}',
+          },
+        ).timeout(const Duration(seconds: 8));
+
+        if (empRes.statusCode == 200) {
+          final List<dynamic> emps = jsonDecode(empRes.body);
+          if (emps.isNotEmpty) {
+            final ids = emps.map((e) => e['id'].toString()).join(',');
+            url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+                '?select=*&employee_id=in.($ids)&order=timestamp.desc&limit=500';
+          } else {
+            url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+                '?select=*&order=timestamp.desc&limit=200';
+          }
+        } else {
+          url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+              '?select=*&order=timestamp.desc&limit=200';
+        }
+      } else {
+        // headoffice_admin: ambil semua
+        url = '${AuthProvider.supabaseUrl}/rest/v1/attendance_logs'
+            '?select=*&order=timestamp.desc&limit=1000';
       }
-    } catch (e) {
-      debugPrint('[ONLINE LOGS REFRESH ERROR]: $e');
+
+      final res = await http.get(
+        Uri.parse(url),
+        headers: {
+          'apikey': AuthProvider.supabaseAnonKey,
+          'Authorization': 'Bearer ${AuthProvider.supabaseAnonKey}',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(res.body);
+        final serverLogs = data.map((it) => it as Map<String, dynamic>).toList();
+
+        // Hapus cache lama yang sudah sync, simpan yang baru
+        await db.bulkSaveAttendanceLogs(
+          serverLogs.map((log) => {...log, 'is_synced': 1}).toList(),
+        );
+        debugPrint('[Refresh] ${serverLogs.length} log berhasil diunduh dari Supabase.');
+      }
+    } catch (downloadErr) {
+      debugPrint('[Refresh] Error download phase: $downloadErr');
     }
 
+    // ─── STEP 3: Muat ulang UI dari SQLite lokal ────────────────────────────
     await _loadLogs();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Sinkronisasi selesai'),
+          backgroundColor: Color(0xFF1A6B2A),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   @override
