@@ -237,6 +237,8 @@ function AppContent() {
     // Map of employees by ID
     const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
 
+    console.log('[DEBUG fetchLogs] localEmployees loaded:', localEmployees.length, localEmployees.map(e => ({ id: e.id, name: e.name })));
+
     // Step 1: Fetch latest online logs from Supabase and cache them in local database
     try {
       let query = supabase.from('attendance_logs').select('*');
@@ -245,8 +247,10 @@ function AppContent() {
       const savedAdmin = localStorage.getItem('logged_in_admin');
       if (savedAdmin) {
         const adminObj = JSON.parse(savedAdmin);
+        console.log('[DEBUG fetchLogs] adminObj:', { role: adminObj.role, kebun: adminObj.kebun });
         if (adminObj.role !== 'headoffice_admin') {
           const empIds = localEmployees.map(e => e.id);
+          console.log('[DEBUG fetchLogs] filtering query for empIds:', empIds);
           if (empIds.length > 0) {
             query = query.in('employee_id', empIds);
           } else {
@@ -257,6 +261,12 @@ function AppContent() {
 
       const { data: rawLogs, error } = await query
         .order('timestamp', { ascending: false });
+
+      if (error) {
+        console.warn('[DEBUG fetchLogs] Supabase error:', error.message);
+      } else {
+        console.log('[DEBUG fetchLogs] Supabase rawLogs fetched count:', rawLogs ? rawLogs.length : 0);
+      }
 
       if (!error && rawLogs) {
         const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
