@@ -299,11 +299,11 @@ export const db = {
     },
     async getTodayLogs(empId, dateStr) {
       if (Capacitor.isNativePlatform()) {
-        return await sqliteGetTodayAttendanceLogs(Number(empId), dateStr);
+        return await sqliteGetTodayAttendanceLogs(empId, dateStr);
       } else {
         try {
-          const all = await dexieDb.attendance_logs.where('employee_id').equals(Number(empId)).toArray();
-          const filtered = all.filter(row => row.timestamp && row.timestamp.substring(0, 10) === dateStr);
+          const all = await dexieDb.attendance_logs.toArray();
+          const filtered = all.filter(row => String(row.employee_id) === String(empId) && row.timestamp && row.timestamp.substring(0, 10) === dateStr);
           return filtered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         } catch (e) {
           console.warn('[Dexie Attendance Logs getTodayLogs Error]:', e);
