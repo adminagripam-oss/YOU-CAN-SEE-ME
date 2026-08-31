@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-rou
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
-import { db, getUnsyncedLogs, cacheUserMasterVector } from './db';
+import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors } from './db';
 import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
@@ -128,16 +128,23 @@ function AppContent() {
 
         if (!error && data) {
           let descData = [];
+          let allMasters = [];
           try {
-            const empIds = data.map(e => e.id);
-            if (empIds.length > 0) {
+            allMasters = await getAllMasterVectors();
+            const cachedEmpIds = new Set(allMasters.map(m => String(m.employee_id)));
+            const missingEmpIds = data.filter(e => e.has_master_biometric && !cachedEmpIds.has(String(e.id))).map(e => e.id);
+
+            if (missingEmpIds.length > 0) {
+              console.log(`[Sync Pull] Mengunduh biometrics untuk ${missingEmpIds.length} karyawan baru/belum ter-cache dari cloud...`);
               const { data: d, error: descErr } = await supabase
                 .from('master_descriptors')
                 .select('employee_id, descriptor_json, geometric_descriptor_json')
-                .in('employee_id', empIds);
+                .in('employee_id', missingEmpIds);
               if (!descErr && d) {
                 descData = d;
               }
+            } else {
+              console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal (0 byte diunduh).');
             }
           } catch (e) {
             console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
@@ -147,10 +154,12 @@ function AppContent() {
 
           empData = data.map(emp => {
             const biometrics = descMap.get(String(emp.id));
+            const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
+            
             return {
               ...emp,
-              has_master_biometric: emp.has_master_biometric === true || !!biometrics,
-              descriptor_json: biometrics ? biometrics.descriptor_json : null,
+              has_master_biometric: emp.has_master_biometric === true || !!biometrics || !!localMaster,
+              descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
               geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
             };
           });
@@ -395,13 +404,44 @@ function AppContent() {
     }
   }, []);
 
-  // Manual Trigger Auto-Sync
+  // Manual Trigger Auto-Sync (Bidirectional: Push local logs & requests + Pull cloud employees & logs)
   const handleManualSync = async () => {
+    if (!isOnline) {
+      showToast('Gagal Sinkronisasi', 'Aplikasi berada dalam mode luring (offline). Silakan hubungkan ke internet.', 'error');
+      return;
+    }
+
     setIsSyncing(true);
-    await syncPendingAttendanceLogs(showToast, () => {
-      fetchLogs();
+    showToast('Sinkronisasi Dimulai', 'Mengirim data offline dan memuat ulang data terbaru dari cloud...', 'info');
+    
+    // 1. Push pending offline logs
+    await syncPendingAttendanceLogs(showToast, async () => {
       refreshUnsyncedCount();
     });
+
+    // 2. Push pending offline requests (edit/hapus)
+    try {
+      const { syncPendingRequests } = await import('./syncEngine');
+      await syncPendingRequests();
+    } catch (e) {
+      console.warn('[Manual Sync Requests Error]:', e);
+    }
+
+    // 3. Pull fresh employees & missing biometrics descriptors
+    try {
+      await fetchEmployees();
+    } catch (e) {
+      console.warn('[Manual Sync Pull Employees Error]:', e);
+    }
+
+    // 4. Pull fresh attendance logs
+    try {
+      await fetchLogs();
+    } catch (e) {
+      console.warn('[Manual Sync Pull Logs Error]:', e);
+    }
+
+    showToast('Sinkronisasi Selesai', 'Data berhasil diselaraskan secara penuh dengan cloud.', 'success');
     setIsSyncing(false);
   };
 
