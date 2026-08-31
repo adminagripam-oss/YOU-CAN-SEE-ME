@@ -404,6 +404,38 @@ function AppContent() {
     }
   }, []);
 
+  // Count active employees today who haven't checked out yet
+  const pendingCheckOutsCount = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('sv-SE');
+    const todayLogs = logs.filter(l => {
+      if (!l.timestamp) return false;
+      return new Date(l.timestamp).toLocaleDateString('sv-SE') === todayStr;
+    });
+    
+    const checkIns = new Set(todayLogs.filter(l => l.attendance_type === 'CHECK-IN').map(l => l.employee_id));
+    const checkOuts = new Set(todayLogs.filter(l => l.attendance_type === 'CHECK-OUT').map(l => l.employee_id));
+    
+    let count = 0;
+    checkIns.forEach(id => {
+      if (!checkOuts.has(id)) {
+        count++;
+      }
+    });
+    return count;
+  }, [logs]);
+
+  // Track if current time is past standard shift end (17:00)
+  const [isPastShiftEnd, setIsPastShiftEnd] = useState(() => {
+    return new Date().getHours() >= 17;
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIsPastShiftEnd(new Date().getHours() >= 17);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Manual Trigger Auto-Sync (Bidirectional: Push local logs & requests + Pull cloud employees & logs)
   const handleManualSync = async () => {
     if (!isOnline) {
@@ -544,6 +576,101 @@ function AppContent() {
     loadHumanModels();
   }, [dbReady, fetchEmployees, fetchLogs]);
 
+  // Auto Check-out for previous days' orphaned check-ins
+  useEffect(() => {
+    if (!dbReady) return;
+    
+    const autoFlagOrphanedLogs = async () => {
+      try {
+        const localLogs = await db.attendance_logs.toArray();
+        const checkIns = localLogs.filter(l => l.attendance_type === 'CHECK-IN');
+        const checkOuts = localLogs.filter(l => l.attendance_type === 'CHECK-OUT');
+        
+        const checkOutKeys = new Set(checkOuts.map(l => {
+          const d = new Date(l.timestamp);
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          return `${l.employee_id}_${dateStr}`;
+        }));
+
+        const todayStr = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
+        
+        const newAutoCheckOuts = [];
+        
+        for (const ci of checkIns) {
+          const ciDate = new Date(ci.timestamp);
+          const dateStr = `${ciDate.getFullYear()}-${String(ciDate.getMonth() + 1).padStart(2, '0')}-${String(ciDate.getDate()).padStart(2, '0')}`;
+          const key = `${ci.employee_id}_${dateStr}`;
+          
+          // Jika log check-in berasal dari HARI SEBELUMNYA dan tidak memiliki check-out
+          if (dateStr < todayStr && !checkOutKeys.has(key)) {
+            // Buat log check-out otomatis pukul 17:00 pada tanggal tersebut
+            const defaultTime = new Date(ci.timestamp);
+            defaultTime.setHours(17, 0, 0, 0); // 17:00 default
+            
+            const newLog = {
+              id: 'auto_out_' + ci.id + '_' + Date.now(),
+              employee_id: ci.employee_id,
+              nik: ci.nik,
+              name: ci.name,
+              department: ci.department,
+              afdeling: ci.afdeling,
+              nama_kebun: ci.nama_kebun,
+              timestamp: defaultTime.toISOString(),
+              location: '[SISTEM] Lupa Check-out',
+              lat: ci.lat,
+              lng: ci.lng,
+              status: 'LUPA_CHECKOUT',
+              attendance_type: 'CHECK-OUT',
+              is_synced: false
+            };
+            
+            newAutoCheckOuts.push(newLog);
+          }
+        }
+        
+        if (newAutoCheckOuts.length > 0) {
+          console.log(`[Auto Check-Out] Menemukan ${newAutoCheckOuts.length} absensi tanpa check-out dari hari sebelumnya. Membuat check-out otomatis.`);
+          await db.attendance_logs.bulkPut(newAutoCheckOuts);
+          
+          // Jika online, sinkronkan ke Supabase
+          if (isOnline) {
+            for (const log of newAutoCheckOuts) {
+              const payload = {
+                id: log.id,
+                employee_id: log.employee_id,
+                nik: log.nik,
+                name: log.name,
+                department: log.department,
+                afdeling: log.afdeling,
+                nama_kebun: log.nama_kebun,
+                timestamp: log.timestamp,
+                location: log.location,
+                latitude: log.lat,
+                longitude: log.lng,
+                status: log.status,
+                attendance_type: log.attendance_type
+              };
+              const { error } = await supabase.from('attendance_logs').insert(payload);
+              if (!error) {
+                log.is_synced = true;
+                await db.attendance_logs.put(log);
+              }
+            }
+          }
+          
+          // Muat ulang log ke UI
+          fetchLogs();
+        }
+      } catch (err) {
+        console.warn('[Auto Check-Out Error]:', err);
+      }
+    };
+    
+    // Tunggu sebentar setelah startup agar data employees cache & log awal termuat
+    const timer = setTimeout(autoFlagOrphanedLogs, 2000);
+    return () => clearTimeout(timer);
+  }, [dbReady, isOnline, fetchLogs]);
+
   // ─── Supabase Realtime Sync + Polling Fallback ───────────────────────────
   // Mendengarkan perubahan data dari device lain secara real-time.
   // Berlaku HANYA saat online — tidak mempengaruhi sistem offline.
@@ -665,6 +792,8 @@ function AppContent() {
                 onManualSync={handleManualSync}
                 theme={theme}
                 toggleTheme={toggleTheme}
+                pendingCheckOutsCount={pendingCheckOutsCount}
+                isPastShiftEnd={isPastShiftEnd}
               />
             ),
             children: [
@@ -695,6 +824,8 @@ function AppContent() {
                     onManualSync={handleManualSync}
                     theme={theme}
                     toggleTheme={toggleTheme}
+                    pendingCheckOutsCount={pendingCheckOutsCount}
+                    isPastShiftEnd={isPastShiftEnd}
                   />
                 ),
                 children: [

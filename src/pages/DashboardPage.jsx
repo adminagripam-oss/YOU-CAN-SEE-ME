@@ -160,6 +160,12 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const izinCount = filteredLogs.filter((l) => l.status === 'Izin').length;
   const sakitCount = filteredLogs.filter((l) => l.status === 'Sakit').length;
   
+  // Count Lupa Check-out
+  const lupaCheckoutCount = filteredLogs.filter(l => {
+    const statusLower = (l.status || '').toLowerCase();
+    return statusLower.includes('lupa_checkout') || statusLower.includes('lupa check-out');
+  }).length;
+  
   // Mangkir = Total Employees - (Hadir + Izin + Sakit)
   const mangkirCount = totalEmployees > 0 ? Math.max(totalEmployees - verifiedCount - izinCount - sakitCount, 0) : 0;
 
@@ -169,11 +175,13 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const izinRatio = izinCount / totalCountForCalc;
   const sakitRatio = sakitCount / totalCountForCalc;
   const mangkirRatio = mangkirCount / totalCountForCalc;
+  const lupaCheckoutRatio = lupaCheckoutCount / totalCountForCalc;
 
   const hadirPct = (hadirRatio * 100).toFixed(1).replace('.', ',');
   const izinPct = (izinRatio * 100).toFixed(1).replace('.', ',');
   const sakitPct = (sakitRatio * 100).toFixed(1).replace('.', ',');
   const mangkirPct = (mangkirRatio * 100).toFixed(1).replace('.', ',');
+  const lupaCheckoutPct = (lupaCheckoutRatio * 100).toFixed(1).replace('.', ',');
 
   // Donut SVG circumference calculation (2 * PI * r=35 = 219.91)
   const C = 219.91;
@@ -425,6 +433,20 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
             {mangkirCount}
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Tanpa Keterangan</div>
+        </div>
+
+        {/* KPI 6: Lupa Check-out */}
+        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Lupa Check-out</span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f97316', background: 'rgba(249, 115, 22, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(249, 115, 22, 0.25)' }}>
+              {lupaCheckoutPct}%
+            </span>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#f97316', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+            {lupaCheckoutCount}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Butuh Koreksi</div>
         </div>
       </div>
 
