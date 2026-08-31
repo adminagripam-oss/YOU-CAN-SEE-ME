@@ -15,7 +15,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('logged_in_employee');
+    const saved = localStorage.getItem('logged_in_admin');
     return saved ? JSON.parse(saved) : null;
   });
   const [loading, setLoading] = useState(true);

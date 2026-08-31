@@ -3,7 +3,7 @@ import TabFaceVerification from '../components/TabFaceVerification';
 import { useAuth } from '../context/AuthContext';
 import { MapPin, MapPinOff, Navigation } from 'lucide-react';
 
-export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, showToast, refreshLogs }) {
+export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, showToast, refreshLogs, refreshEmployees }) {
   const { user } = useAuth();
 
   // ── GPS Permission Gate (dijalankan saat halaman Absensi dibuka) ───────────
@@ -239,6 +239,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
       onVerificationSuccess={refreshLogs}
       gpsPermission={gpsPermission}
       liveCoords={liveCoords}
+      onRefreshEmployees={refreshEmployees}
     />
   );
 }
