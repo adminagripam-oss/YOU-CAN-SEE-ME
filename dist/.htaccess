@@ -1,0 +1,14 @@
+# AgriFace - SPA Routing Fix untuk Hostinger/Apache
+# File ini diperlukan jika Hostinger menggunakan Apache di depan Node.js
+# agar refresh halaman di /dashboard, /absensi, dll tidak menghasilkan 404.
+
+Options -MultiViews
+RewriteEngine On
+
+# Izinkan akses file dan folder yang benar-benar ada
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Teruskan semua request /api/* ke Node.js (tidak perlu di-rewrite, Node.js sudah handle)
+# Semua request non-file lainnya → index.html (React Router yang akan handle)
+RewriteRule ^ index.html [L]
