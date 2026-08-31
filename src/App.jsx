@@ -150,13 +150,13 @@ function AppContent() {
           } catch (e) {
             console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
           }
-          
+
           const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
 
           empData = data.map(emp => {
             const biometrics = descMap.get(String(emp.id));
             const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
-            
+
             return {
               ...emp,
               nama_kebun: emp.kebun || emp.nama_kebun || '',
@@ -196,7 +196,7 @@ function AppContent() {
 
     if (empData) {
       setEmployees(empData);
-      
+
       // Persist to local cache for mobile offline support
       // Only clear and rebuild if we got fresh data from API or Supabase
       if (dataSource !== 'indexeddb') {
@@ -274,7 +274,7 @@ function AppContent() {
       if (user) {
         const adminObj = user;
         console.log('[DEBUG fetchLogs] adminObj:', { role: adminObj.role, kebun: adminObj.kebun, region: adminObj.region });
-        
+
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
           const empIds = localEmployees.map(e => e.id);
           if (empIds.length > 0) {
@@ -337,11 +337,11 @@ function AppContent() {
             log.attendance_type ||
             (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
           );
-          
+
           let parsedKebun = null;
           let parsedAfdeling = null;
           let cleanLocation = log.location || '';
-          
+
           if (cleanLocation.includes(' | ')) {
             const parts = cleanLocation.split(' | ');
             if (parts.length >= 3) {
@@ -508,16 +508,16 @@ function AppContent() {
 
       if (!seen.has(signature)) {
         seen.add(signature);
-        
+
         let resolvedLog = { ...log };
         const emp = masterEmpMap.get(String(resolvedLog.employee_id)) || {};
-        
+
         resolvedLog.nik = resolvedLog.nik && resolvedLog.nik !== '-' ? resolvedLog.nik : (emp.nik || '-');
         resolvedLog.name = resolvedLog.name && !resolvedLog.name.includes('#') ? resolvedLog.name : (emp.name || `Karyawan #${resolvedLog.employee_id}`);
         resolvedLog.department = resolvedLog.department && resolvedLog.department !== '-' ? resolvedLog.department : (emp.department || '-');
         resolvedLog.afdeling = resolvedLog.afdeling && resolvedLog.afdeling !== '-' ? resolvedLog.afdeling : (emp.afdeling || '-');
         resolvedLog.nama_kebun = resolvedLog.kebun || (resolvedLog.nama_kebun && resolvedLog.nama_kebun !== '-' ? resolvedLog.nama_kebun : (emp.nama_kebun || '-'));
-        
+
         finalLogs.push(resolvedLog);
       }
     });
@@ -544,10 +544,10 @@ function AppContent() {
       if (!l.timestamp) return false;
       return new Date(l.timestamp).toLocaleDateString('sv-SE') === todayStr;
     });
-    
+
     const checkIns = new Set(todayLogs.filter(l => l.attendance_type === 'CHECK-IN').map(l => l.employee_id));
     const checkOuts = new Set(todayLogs.filter(l => l.attendance_type === 'CHECK-OUT').map(l => l.employee_id));
-    
+
     let count = 0;
     checkIns.forEach(id => {
       if (!checkOuts.has(id)) {
@@ -578,7 +578,7 @@ function AppContent() {
 
     setIsSyncing(true);
     showToast('Sinkronisasi Dimulai', 'Mengirim data offline dan memuat ulang data terbaru dari cloud...', 'info');
-    
+
     // 1. Push pending offline logs
     await syncPendingAttendanceLogs(showToast, async () => {
       refreshUnsyncedCount();
@@ -736,13 +736,13 @@ function AppContent() {
   // Auto Check-out for previous days' orphaned check-ins
   useEffect(() => {
     if (!dbReady) return;
-    
+
     const autoFlagOrphanedLogs = async () => {
       try {
         const localLogs = await db.attendance_logs.toArray();
         const checkIns = localLogs.filter(l => l.attendance_type === 'CHECK-IN');
         const checkOuts = localLogs.filter(l => l.attendance_type === 'CHECK-OUT');
-        
+
         const checkOutKeys = new Set(checkOuts.map(l => {
           const d = new Date(l.timestamp);
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -750,20 +750,20 @@ function AppContent() {
         }));
 
         const todayStr = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
-        
+
         const newAutoCheckOuts = [];
-        
+
         for (const ci of checkIns) {
           const ciDate = new Date(ci.timestamp);
           const dateStr = `${ciDate.getFullYear()}-${String(ciDate.getMonth() + 1).padStart(2, '0')}-${String(ciDate.getDate()).padStart(2, '0')}`;
           const key = `${ci.employee_id}_${dateStr}`;
-          
+
           // Jika log check-in berasal dari HARI SEBELUMNYA dan tidak memiliki check-out
           if (dateStr < todayStr && !checkOutKeys.has(key)) {
             // Buat log check-out otomatis pukul 17:00 pada tanggal tersebut
             const defaultTime = new Date(ci.timestamp);
             defaultTime.setHours(23, 59, 0, 0); // 23:59 default
-            
+
             const newLog = {
               id: 'auto_out_' + ci.id + '_' + Date.now(),
               employee_id: ci.employee_id,
@@ -780,15 +780,15 @@ function AppContent() {
               attendance_type: 'CHECK-OUT',
               is_synced: false
             };
-            
+
             newAutoCheckOuts.push(newLog);
           }
         }
-        
+
         if (newAutoCheckOuts.length > 0) {
           console.log(`[Auto Check-Out] Menemukan ${newAutoCheckOuts.length} absensi tanpa check-out dari hari sebelumnya. Membuat check-out otomatis.`);
           await db.attendance_logs.bulkPut(newAutoCheckOuts);
-          
+
           // Jika online, sinkronkan ke Supabase
           if (isOnline) {
             for (const log of newAutoCheckOuts) {
@@ -814,7 +814,7 @@ function AppContent() {
               }
             }
           }
-          
+
           // Muat ulang log ke UI
           fetchLogs();
         }
@@ -822,7 +822,7 @@ function AppContent() {
         console.warn('[Auto Check-Out Error]:', err);
       }
     };
-    
+
     // Tunggu sebentar setelah startup agar data employees cache & log awal termuat
     const timer = setTimeout(autoFlagOrphanedLogs, 2000);
     return () => clearTimeout(timer);
