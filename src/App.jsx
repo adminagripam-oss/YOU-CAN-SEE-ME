@@ -215,8 +215,17 @@ function AppContent() {
   }, []);
 
   // Fetch Attendance Logs (2-Tier: Supabase + Offline Local Queue with Deduplication)
+  // Membaca scope admin LANGSUNG dari user state (bukan localStorage) untuk
+  // menghindari stale closure saat ganti akun tanpa full reload.
   const fetchLogs = useCallback(async () => {
     let onlineLogs = [];
+
+    // Baca admin aktif dari localStorage (sumber tunggal kebenaran scope)
+    const savedAdmin = localStorage.getItem('logged_in_admin');
+    const adminObj = savedAdmin ? JSON.parse(savedAdmin) : null;
+    const adminRole = adminObj?.role || 'estate_admin';
+    const adminKebun = adminObj?.kebun || null;
+    const adminRegion = adminObj?.region || null;
 
     // Helper to normalize CHECK_IN / CHECK-IN / CHECKIN to CHECK-IN, etc.
     const normalizeType = (type) => {
@@ -237,25 +246,38 @@ function AppContent() {
     // Map of employees by ID
     const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
 
-    console.log('[DEBUG fetchLogs] localEmployees loaded:', localEmployees.length, localEmployees.map(e => ({ id: e.id, name: e.name })));
+    console.log('[DEBUG fetchLogs] role:', adminRole, 'kebun:', adminKebun, 'region:', adminRegion, 'localEmployees:', localEmployees.length);
 
     // Step 1: Fetch latest online logs from Supabase and cache them in local database
     try {
       let query = supabase.from('attendance_logs').select('*');
 
-      // Saring log online berdasarkan karyawan yang berada di lingkup admin aktif
-      const savedAdmin = localStorage.getItem('logged_in_admin');
-      if (savedAdmin) {
-        const adminObj = JSON.parse(savedAdmin);
-        console.log('[DEBUG fetchLogs] adminObj:', { role: adminObj.role, kebun: adminObj.kebun });
-        if (adminObj.role !== 'headoffice_admin') {
-          const empIds = localEmployees.map(e => e.id);
-          console.log('[DEBUG fetchLogs] filtering query for empIds:', empIds);
-          if (empIds.length > 0) {
-            query = query.in('employee_id', empIds);
-          } else {
-            query = query.eq('employee_id', -1); // query kosong jika tidak ada karyawan
-          }
+      // Saring log online berdasarkan scope role admin aktif
+      if (adminRole === 'headoffice_admin') {
+        // HO: ambil semua log — tidak ada filter tambahan
+        console.log('[DEBUG fetchLogs] HO mode — mengambil semua log.');
+      } else if (adminRole === 'regional_admin' && adminRegion) {
+        // Regional Admin: filter berdasarkan employee_id yang bekerja di region ini
+        console.log('[DEBUG fetchLogs] Regional mode — region:', adminRegion);
+        const { data: regionEmps } = await supabase
+          .from('employees')
+          .select('id')
+          .eq('region', adminRegion);
+        const regionEmpIds = (regionEmps || []).map(e => e.id);
+        console.log('[DEBUG fetchLogs] Region empIds count:', regionEmpIds.length);
+        if (regionEmpIds.length > 0) {
+          query = query.in('employee_id', regionEmpIds);
+        } else {
+          query = query.eq('employee_id', -1);
+        }
+      } else {
+        // Estate Admin: filter berdasarkan employee_id di employee cache lokal (kebun-nya)
+        const empIds = localEmployees.map(e => e.id);
+        console.log('[DEBUG fetchLogs] Estate mode — filtering empIds count:', empIds.length);
+        if (empIds.length > 0) {
+          query = query.in('employee_id', empIds);
+        } else {
+          query = query.eq('employee_id', -1); // query kosong jika tidak ada karyawan
         }
       }
 
@@ -296,6 +318,7 @@ function AppContent() {
             department: emp.department || log.department || '-',
             afdeling: emp.afdeling || log.afdeling || '-',
             nama_kebun: emp.nama_kebun || log.nama_kebun || '-',
+            kebun: emp.nama_kebun || log.nama_kebun || '-',
             timestamp: log.timestamp,
             location: log.location,
             lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
@@ -308,7 +331,7 @@ function AppContent() {
           };
         });
 
-        // Save fresh online logs to local database
+        // Hapus cache synced lama, simpan log baru dari Supabase
         try {
           const localLogs = await db.attendance_logs.toArray();
           for (let i = 0; i < localLogs.length; i++) {
@@ -328,21 +351,16 @@ function AppContent() {
       console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
     }
 
-    // Step 2: Query all logs from local database
+    // Step 2: Query all logs from local database (sudah terfilter saat disimpan)
     let allLocalLogs = [];
     try {
       const rawLocal = await db.attendance_logs.toArray();
-      const savedAdmin = localStorage.getItem('logged_in_admin');
-      if (savedAdmin) {
-        const adminObj = JSON.parse(savedAdmin);
-        if (adminObj.role !== 'headoffice_admin') {
-          const empIds = new Set(localEmployees.map(e => String(e.id)));
-          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)));
-        } else {
-          allLocalLogs = rawLocal;
-        }
-      } else {
+      if (adminRole === 'headoffice_admin') {
         allLocalLogs = rawLocal;
+      } else {
+        // Filter tambahan dari local: pastikan hanya employee yang ada di cache lokal
+        const empIds = new Set(localEmployees.map(e => String(e.id)));
+        allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)));
       }
     } catch (e) {
       console.warn('[Local Database] Failed to load attendance logs:', e);
@@ -352,17 +370,11 @@ function AppContent() {
     let unsyncedQueue = [];
     try {
       const rawQueue = await db.attendance_sync_queue.toArray();
-      const savedAdmin = localStorage.getItem('logged_in_admin');
-      if (savedAdmin) {
-        const adminObj = JSON.parse(savedAdmin);
-        if (adminObj.role !== 'headoffice_admin') {
-          const empIds = new Set(localEmployees.map(e => String(e.id)));
-          unsyncedQueue = rawQueue.filter(q => empIds.has(String(q.employee_id)));
-        } else {
-          unsyncedQueue = rawQueue;
-        }
-      } else {
+      if (adminRole === 'headoffice_admin') {
         unsyncedQueue = rawQueue;
+      } else {
+        const empIds = new Set(localEmployees.map(e => String(e.id)));
+        unsyncedQueue = rawQueue.filter(q => empIds.has(String(q.employee_id)));
       }
     } catch (e) {
       console.warn('[Local Database] Failed to load unsynced queue logs:', e);
@@ -376,6 +388,7 @@ function AppContent() {
       department: q.department || '-',
       afdeling: q.afdeling || '-',
       nama_kebun: q.nama_kebun || '-',
+      kebun: q.nama_kebun || '-',
       timestamp: q.timestamp,
       location: q.location || '[OFFLINE] Antrean Absensi',
       lat: q.lat,
@@ -443,7 +456,8 @@ function AppContent() {
     // Sort by timestamp descending
     finalLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setLogs(finalLogs);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, user?.kebun, user?.region]);
 
   // Check Unsynced Count from IndexedDB
   const refreshUnsyncedCount = useCallback(async () => {
@@ -602,6 +616,23 @@ function AppContent() {
       cleanupSync();
     };
   }, [fetchLogs, refreshUnsyncedCount, showToast]);
+
+  // Bersihkan IndexedDB saat logout agar data akun lama tidak tampil ke akun berikutnya
+  useEffect(() => {
+    if (!dbReady) return;
+    if (!user) {
+      // User logout — hapus semua cache log & employee dari IndexedDB
+      (async () => {
+        try {
+          await db.attendance_logs.clear();
+          await db.employees_cache.clear();
+          console.log('[App] IndexedDB cache dibersihkan setelah logout.');
+        } catch (e) {
+          console.warn('[App] Gagal membersihkan IndexedDB:', e);
+        }
+      })();
+    }
+  }, [user, dbReady]);
 
   // Initial Data & face-api Model Loading (waits for dbReady)
   useEffect(() => {

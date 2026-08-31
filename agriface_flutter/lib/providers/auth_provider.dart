@@ -153,6 +153,15 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     _user = null;
     await SecureStorageHelper.instance.clearSession();
+
+    // Bersihkan semua cache lokal (log, karyawan, biometrik)
+    // agar data akun lama tidak terlihat oleh akun berikutnya.
+    try {
+      await DatabaseHelper.instance.clearAllLogsCache();
+    } catch (e) {
+      debugPrint('[Logout] Gagal membersihkan cache lokal: $e');
+    }
+
     _isLoading = false;
     notifyListeners();
   }

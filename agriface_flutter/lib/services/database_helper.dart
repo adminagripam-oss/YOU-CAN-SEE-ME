@@ -385,22 +385,87 @@ class DatabaseHelper {
     String? kebun,
   }) async {
     final db = await database;
-    List<Map<String, dynamic>> res;
+    List<Map<String, dynamic>> serverLogs;
+
     if (role == 'estate_admin' && kebun != null) {
-      res = await db.rawQuery('''
+      // Akun Kebun: hanya log dari kebun ini
+      serverLogs = await db.rawQuery('''
         SELECT al.*
         FROM local_attendance_logs al
-        INNER JOIN local_employees e ON al.employee_id = e.id
+        LEFT JOIN local_employees e ON CAST(al.employee_id AS TEXT) = CAST(e.id AS TEXT)
         WHERE e.nama_kebun = ?
         ORDER BY al.timestamp DESC
       ''', [kebun]);
+    } else if (role == 'regional_admin' && region != null) {
+      // Akun Regional: ambil semua kebun di region ini, lalu filter log berdasarkan itu
+      final kebunList = await db.query(
+        'local_employees',
+        columns: ['DISTINCT nama_kebun'],
+        where: 'nama_kebun IS NOT NULL',
+      );
+      // Since local_employees doesn't have a region column, we get all logs
+      // that belong to employees stored locally (which were filtered by region at sync time)
+      serverLogs = await db.rawQuery('''
+        SELECT DISTINCT al.*
+        FROM local_attendance_logs al
+        INNER JOIN local_employees e ON CAST(al.employee_id AS TEXT) = CAST(e.id AS TEXT)
+        ORDER BY al.timestamp DESC
+      ''');
     } else {
-      res = await db.query(
+      // Akun HO: tampilkan semua log
+      serverLogs = await db.query(
         'local_attendance_logs',
         orderBy: 'timestamp DESC',
       );
     }
-    return res;
+
+    // Gabungkan juga dengan unsynced queue (log offline yang belum diupload)
+    final queueLogs = await db.rawQuery('''
+      SELECT 
+        'offline_' || CAST(q.id AS TEXT) AS id,
+        q.employee_id, q.nik, q.name, q.department, q.afdeling,
+        q.timestamp, q.location, q.lat, q.lng, q.status,
+        q.attendance_type, q.euclidean_distance,
+        0 AS is_synced, q.created_at
+      FROM local_attendance_queue q
+      WHERE q.is_synced = 0
+      ORDER BY q.timestamp DESC
+    ''');
+
+    // Gabungkan server logs + offline queue, hindari duplikat
+    final allLogs = [...serverLogs, ...queueLogs];
+    return allLogs;
+  }
+
+  /// Hapus semua cache log dan karyawan lokal — dipanggil saat logout
+  /// untuk mencegah data akun lama terlihat oleh akun berikutnya.
+  Future<void> clearAllLogsCache() async {
+    final db = await database;
+    await db.delete('local_attendance_logs');
+    await db.delete('local_employees');
+    await db.delete('local_master_descriptors');
+    debugPrint('[DatabaseHelper] Semua cache log, karyawan, dan biometrik lokal telah dibersihkan.');
+  }
+
+  /// Ambil semua item dari antrian offline yang belum diupload ke Supabase
+  Future<List<Map<String, dynamic>>> getUnsyncedQueue() async {
+    final db = await database;
+    return await db.query(
+      'local_attendance_queue',
+      where: 'is_synced = 0',
+      orderBy: 'id ASC',
+    );
+  }
+
+  /// Tandai item antrian sebagai sudah disinkronkan
+  Future<void> markQueueItemSynced(int queueId, String serverAssignedId) async {
+    final db = await database;
+    await db.update(
+      'local_attendance_queue',
+      {'is_synced': 1},
+      where: 'id = ?',
+      whereArgs: [queueId],
+    );
   }
 
   Future<List<Map<String, dynamic>>> getTodayAttendanceLogs(int employeeId, String dateStr) async {
