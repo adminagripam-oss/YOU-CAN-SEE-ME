@@ -291,6 +291,8 @@ export default function TabAttendanceLogs({
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
       const key = `${log.nik}_${dateKey}`;
 
+      console.log(`[DEBUG GROUPING] Log ID: ${log.id}, NIK: ${log.nik}, DateKey: ${dateKey}, Key: ${key}, Type: ${log.attendance_type}`);
+
       if (!groups[key]) {
         groups[key] = {
           id: key,
