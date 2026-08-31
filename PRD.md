@@ -739,3 +739,31 @@ Pembaruan versi **v3.1.0** menandai implementasi sistem keamanan biometrik *one-
   * Di frontend React, fungsi `fetchLogs()` secara dinamis mencocokkan `employee_id` log absensi dengan data master karyawan (`employees` table yang memiliki data afdeling terdaftar hasil input `KaryawanPage.jsx`).
   * Penyatuan data ini terjadi secara lokal di tingkat aplikasi, memastikan kolom Afdeling di Halaman Logs dan Dashboard tetap terisi lengkap tanpa membebani lalu lintas server.
   * Menambahkan fungsi pencarian cerdas di logs page yang mendukung pemfilteran kata kunci afdeling (misal mencari log berdasarkan divisi: "Afd. III" atau "Afd. I").
+
+---
+
+## 19. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v3.2.0)
+
+Pembaruan versi **v3.2.0** berfokus pada penyelesaian masalah ketidakkonsistenan data saat berpindah akun admin pada satu perangkat (multi-account single device), pembersihan cache lokal secara selektif, penanganan *race condition* React state, sinkronisasi reconnect terintegrasi, serta tombol sync khusus pada halaman absensi:
+
+### 19.1 Inisialisasi User State Auth yang Konsisten (localStorage Key Fix)
+* **Akar Masalah**: Inisialisasi state awal `user` di [AuthContext.jsx](file:///d:/FACE%20VERIFICATION/src/context/AuthContext.jsx) salah membaca key `logged_in_employee` dari `localStorage`, padahal session login admin disimpan dengan key `logged_in_admin`. Ini menyebabkan `user` bernilai `null` sesaat pada setiap start/reload, memicu pembersihan memori data (`employees = []`, `logs = []`) secara tidak sengaja di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx).
+* **Solusi**: Mengganti inisialisasi state awal di `AuthContext.jsx` agar merujuk ke key `logged_in_admin` secara konsisten, meniadakan *loading flash* dan pembersihan state yang tidak perlu.
+
+### 19.2 Pembersihan Cache Karyawan Selektif Lintas Kebun/Region
+* **Akar Masalah**: Sebelumnya, sinkronisasi online memanggil `db.employees_cache.clear()` yang menghapus bersih seluruh data karyawan lokal dari perangkat. Akibatnya, jika admin berganti akun saat offline, data kebun lain sudah terlanjur hilang, mengembalikan 0 karyawan dan memblokir absensi.
+* **Pembersihan Selektif**: Meng-upgrade `sqliteClearEmployeesCache` di [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) and method `clear(filter)` di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js) agar menerima filter `{ kebun, region }`. Data karyawan dan deskriptor biometrik (`local_master_descriptors`) yang tidak relevan dengan admin aktif saja yang dihapus, sehingga cache kebun lain yang pernah diunduh saat online tetap tersimpan aman di penyimpanan lokal untuk operasional offline-first mendatang.
+
+### 19.3 Penyelarasan Pemetaan Log Absensi Lokal
+* **Penyaringan Sesuai Kebun/Region**: Memodifikasi fungsi `fetchLogs()` di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) untuk menyaring array `localEmployees` dari database lokal berdasarkan wilayah admin aktif sebelum melakukan pencocokan atau pengambilan logs. Ini mencegah kebocoran data dan inkonsistensi nama karyawan pada riwayat logs antarkebun di tingkat tampilan luring.
+
+### 19.4 Pencegahan Race Condition Pemuatan Logs (loadedUserRef)
+* **Akar Masalah**: Saat admin berubah, `employeesLoaded` dari sesi lama masih bernilai `true` selama siklus render pertama karena batching state React. Ini memicu `fetchLogs()` berjalan prematur dan melakukan query data logs lama di Supabase menggunakan data cache lama sebelum `fetchEmployees()` selesai menulis data cache yang baru.
+* **Pencegahan dengan Ref**: Menambahkan `loadedUserRef` berbasis `useRef` di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) untuk melacak username admin aktif dari karyawan yang berhasil termuat. `fetchLogs()` kini dicegah berjalan jika `loadedUserRef.current` tidak cocok dengan `user.username`, menjamin logs hanya diunduh setelah database lokal sinkron sepenuhnya dengan data admin yang baru.
+
+### 19.5 Sinkronisasi Otomatis Seluruh Data Saat Reconnect Online
+* **Sync Komprehensif**: Memperbarui callback event listener reconnect jaringan `initAutoSyncListener` di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx). Ketika perangkat beralih dari offline ke online, aplikasi secara berurutan memicu `await fetchEmployees()` terlebih dahulu, baru memanggil `await fetchLogs()`, memastikan seluruh data master dan log absensi diperbarui secara otomatis ke cloud database.
+
+### 19.6 Tombol Sinkronisasi Manual Aman Kamera di Halaman Absensi
+* **Desain UI Khusus**: Untuk mematuhi batasan penonaktifkan gesture *pull-to-refresh* di halaman absensi (guna mencegah reload browser tidak sengaja yang mematikan video stream kamera dan membuang RAM AI model), kami menambahkan tombol **Sync Karyawan** pada bar judul [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx).
+* **Sync Tanpa Refresh**: Tombol ini memicu fungsi `fetchEmployees()` dengan indikator berputar (*loading spinner*), memberikan cara aman bagi mandor di lapangan untuk melakukan sinkronisasi data master karyawan secara dinamis tanpa mematikan sesi kamera aktif.
