@@ -11,6 +11,8 @@ export default function Topbar({
   onManualSync,
   sidebarOpen,
   onToggleSidebar,
+  pendingCheckOutsCount = 0,
+  isPastShiftEnd = false,
 }) {
   const { user } = useAuth();
 
@@ -26,7 +28,7 @@ export default function Topbar({
         >
           <i className={`fa-solid ${sidebarOpen ? 'fa-xmark' : 'fa-bars'}`}></i>
         </button>
-
+ 
         {/* AgriFace Brand Title in Header */}
         <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span>AgriFace</span>
@@ -50,6 +52,28 @@ export default function Topbar({
             <i className={`fa-solid ${isSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}`}></i>
             <span>{isSyncing ? 'Syncing...' : `${unsyncedCount} Pending`}</span>
           </button>
+        )}
+
+        {/* Pending Check-Out Warning Badge */}
+        {pendingCheckOutsCount > 0 && isPastShiftEnd && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              background: 'rgba(249, 115, 22, 0.12)',
+              border: '1px solid rgba(249, 115, 22, 0.3)',
+              color: '#f97316',
+              fontSize: '0.8rem',
+              fontWeight: 700
+            }}
+            title={`${pendingCheckOutsCount} karyawan belum check-out setelah jam pulang kerja (17:00)`}
+          >
+            <i className="fa-solid fa-triangle-exclamation"></i>
+            <span>{pendingCheckOutsCount} Lupa Out</span>
+          </div>
         )}
       </div>
 

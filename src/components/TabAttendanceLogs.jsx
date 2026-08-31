@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
@@ -321,6 +321,7 @@ export default function TabAttendanceLogs({
         if (log.status.includes('Izin')) ket = 'Izin';
         else if (log.status.includes('Sakit')) ket = 'Sakit';
         else if (log.status.includes('Mangkir')) ket = 'Mangkir';
+        else if (log.status.includes('LUPA_CHECKOUT')) ket = 'Lupa Check-out';
       }
 
       if (!isCheckOut) {
@@ -873,6 +874,7 @@ export default function TabAttendanceLogs({
       case 'Izin': return <span className="status-badge info" style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', gap: '4px', fontSize: '0.75rem' }}><Mail size={14} /> Izin</span>;
       case 'Sakit': return <span className="status-badge warning" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', gap: '4px', fontSize: '0.75rem' }}><Power size={14} /> Sakit</span>;
       case 'Mangkir': return <span className="status-badge danger" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', gap: '4px', fontSize: '0.75rem' }}><XCircle size={14} /> Mangkir</span>;
+      case 'Lupa Check-out': return <span className="status-badge warning" style={{ background: 'rgba(249, 115, 22, 0.1)', color: '#f97316', border: '1px solid rgba(249, 115, 22, 0.3)', gap: '4px', fontSize: '0.75rem' }}><AlertTriangle size={14} /> Lupa Check-out</span>;
       default: return ket;
     }
   };
@@ -1297,68 +1299,101 @@ export default function TabAttendanceLogs({
       )}
 
       {/* EDIT MODAL */}
-      {isEditModalOpen && editData && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
-          <div className="glass-card" style={{ maxWidth: '450px', width: '100%', border: '1px solid var(--accent-primary)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>Edit Log Absensi</h3>
-            </div>
+      {isEditModalOpen && editData && (() => {
+        const isExpired = (() => {
+          if (isHQ) return false;
+          if (!editData || !editData.date) return false;
+          const logDate = new Date(editData.date);
+          const today = new Date();
+          logDate.setHours(0, 0, 0, 0);
+          today.setHours(0, 0, 0, 0);
+          const diffTime = Math.abs(today - logDate);
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          return diffDays > 3;
+        })();
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                Karyawan: <strong style={{ color: 'var(--text-main)' }}>{editData.name} ({editData.nik})</strong><br />
-                Tanggal: <strong style={{ color: 'var(--text-main)' }}>{editData.displayDate}</strong>
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+            <div className="glass-card" style={{ maxWidth: '450px', width: '100%', border: '1px solid var(--accent-primary)', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>Edit Log Absensi</h3>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-In</label>
-                <input
-                  type="time"
-                  step="1"
-                  value={editData.editCheckIn}
-                  onChange={(e) => setEditData({ ...editData, editCheckIn: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
-                  disabled={!editData.inLog}
-                />
-                {!editData.inLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-in</small>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {isExpired && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#ef4444',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    lineHeight: '1.4'
+                  }}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                    <span>Batas waktu koreksi (3 hari) telah berakhir. Data ini dikunci dan tidak dapat diubah.</span>
+                  </div>
+                )}
+
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                  Karyawan: <strong style={{ color: 'var(--text-main)' }}>{editData.name} ({editData.nik})</strong><br />
+                  Tanggal: <strong style={{ color: 'var(--text-main)' }}>{editData.displayDate}</strong>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-In</label>
+                  <input
+                    type="time"
+                    step="1"
+                    value={editData.editCheckIn}
+                    onChange={(e) => setEditData({ ...editData, editCheckIn: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                    disabled={!editData.inLog || isExpired}
+                  />
+                  {!editData.inLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-in</small>}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-Out</label>
+                  <input
+                    type="time"
+                    step="1"
+                    value={editData.editCheckOut}
+                    onChange={(e) => setEditData({ ...editData, editCheckOut: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                    disabled={!editData.outLog || isExpired}
+                  />
+                  {!editData.outLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-out</small>}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Keterangan</label>
+                  <select
+                    value={editData.editKeterangan}
+                    onChange={(e) => setEditData({ ...editData, editKeterangan: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
+                    disabled={isExpired}
+                  >
+                    <option value="Hadir">Hadir</option>
+                    <option value="Izin">Izin</option>
+                    <option value="Sakit">Sakit</option>
+                    <option value="Mangkir">Mangkir</option>
+                  </select>
+                </div>
+
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Waktu Check-Out</label>
-                <input
-                  type="time"
-                  step="1"
-                  value={editData.editCheckOut}
-                  onChange={(e) => setEditData({ ...editData, editCheckOut: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
-                  disabled={!editData.outLog}
-                />
-                {!editData.outLog && <small style={{ color: 'var(--text-muted)' }}>Belum ada data check-out</small>}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
+                <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>Batal</button>
+                <button type="button" className="btn btn-primary" onClick={saveEdit} disabled={isExpired}>Simpan Perubahan</button>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>Keterangan</label>
-                <select
-                  value={editData.editKeterangan}
-                  onChange={(e) => setEditData({ ...editData, editKeterangan: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', outline: 'none' }}
-                >
-                  <option value="Hadir">Hadir</option>
-                  <option value="Izin">Izin</option>
-                  <option value="Sakit">Sakit</option>
-                  <option value="Mangkir">Mangkir</option>
-                </select>
-              </div>
-
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
-              <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>Batal</button>
-              <button type="button" className="btn btn-primary" onClick={saveEdit}>Simpan Perubahan</button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
