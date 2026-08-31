@@ -191,11 +191,107 @@ export async function syncPendingAttendanceRequests() {
 }
 
 /**
+ * Executes Auto-Sync of offline registered employees & biometrics to Supabase
+ */
+export async function syncPendingEmployees(showToast = null, onSyncComplete = null) {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { db, cacheUserMasterVector } = await import('./db');
+    const pendingEmps = await db.employee_sync_queue.toArray();
+    if (!pendingEmps || pendingEmps.length === 0) return { count: 0 };
+
+    console.log(`[Auto-Sync Employees] Attempting to sync ${pendingEmps.length} offline registered employees...`);
+    let syncedCount = 0;
+
+    for (const emp of pendingEmps) {
+      try {
+        // 1. Insert employee record to Supabase
+        const { data: createdEmp, error: empErr } = await supabase
+          .from('employees')
+          .insert([{
+            nik: emp.nik,
+            name: emp.name,
+            department: emp.department || emp.jabatan,
+            afdeling: emp.afdeling,
+            nama_kebun: emp.nama_kebun,
+            status_tk: emp.status_tk,
+            jabatan: emp.jabatan,
+            status_perkawinan: emp.status_perkawinan
+          }])
+          .select()
+          .single();
+
+        if (empErr) {
+          console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, empErr.message);
+          continue;
+        }
+
+        const realEmpId = createdEmp.id;
+
+        // 2. Insert master biometrics descriptor if present
+        let descObj = emp.descriptor_json;
+        if (typeof descObj === 'string') {
+          try { descObj = JSON.parse(descObj); } catch (_) {}
+        }
+
+        if (descObj && Array.isArray(descObj)) {
+          const descStr = JSON.stringify(descObj);
+          await supabase
+            .from('master_descriptors')
+            .upsert({
+              employee_id: realEmpId,
+              descriptor_json: descStr
+            }, { onConflict: 'employee_id' });
+
+          await cacheUserMasterVector({
+            employee_id: realEmpId,
+            nik: createdEmp.nik,
+            name: createdEmp.name,
+            department: createdEmp.department || createdEmp.jabatan,
+            afdeling: createdEmp.afdeling,
+            nama_kebun: createdEmp.nama_kebun,
+            status_tk: createdEmp.status_tk,
+            jabatan: createdEmp.jabatan,
+            status_perkawinan: createdEmp.status_perkawinan,
+            descriptor_json: descObj
+          });
+        }
+
+        // 3. Remove temp ID from local queue
+        await db.employee_sync_queue.delete(emp.id);
+
+        syncedCount++;
+        console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);
+      } catch (singleErr) {
+        console.error(`[Sync Single Employee Exception]`, singleErr);
+      }
+    }
+
+    if (syncedCount > 0) {
+      if (showToast) {
+        showToast('Auto-Sync Karyawan', `Berhasil mengunggah ${syncedCount} data karyawan offline ke server!`, 'success');
+      }
+      if (onSyncComplete) {
+        onSyncComplete();
+      }
+    }
+
+    return { count: syncedCount };
+  } catch (err) {
+    console.error('[Sync Engine Pending Employees Error]:', err.message || err);
+    return { count: 0 };
+  }
+}
+
+/**
  * Setup Realtime Online Network Listener for Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
   const handleOnline = () => {
     console.log('[Network Status] Device is ONLINE. Triggering Auto-Sync...');
+    syncPendingEmployees(showToast, onSyncComplete);
     syncPendingAttendanceLogs(showToast, onSyncComplete);
     syncPendingAttendanceRequests();
   };
@@ -206,6 +302,7 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
     Network.addListener('networkStatusChange', (status) => {
       if (status.connected) {
         console.log('[Network Status] Device is ONLINE (Native). Triggering Auto-Sync...');
+        syncPendingEmployees(showToast, onSyncComplete);
         syncPendingAttendanceLogs(showToast, onSyncComplete);
         syncPendingAttendanceRequests();
       }
@@ -220,6 +317,7 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
   const intervalId = setInterval(async () => {
     const isOnline = await checkOnline();
     if (isOnline) {
+      syncPendingEmployees(showToast, onSyncComplete);
       syncPendingAttendanceLogs(showToast, onSyncComplete);
       syncPendingAttendanceRequests();
     }

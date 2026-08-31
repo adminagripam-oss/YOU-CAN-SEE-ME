@@ -267,31 +267,79 @@ export default function TabEmployeeManagement({
     setIsSubmitting(true);
 
     try {
-      const { data: createdEmp, error } = await supabase
+      const empPayload = {
+      nik: empNik.trim(),
+      name: empName.trim(),
+      department: empJabatan.trim(),
+      afdeling: empAfdeling.trim(),
+      nama_kebun: empNamaKebun.trim(),
+      status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
+      jabatan: empJabatan.trim(),
+      status_perkawinan: empStatusPerkawinan,
+    };
+
+    let isOffline = false;
+    let createdEmpId = null;
+    let createdEmp = null;
+
+    try {
+      const { data, error } = await supabase
         .from('employees')
-        .insert([
-          {
-            nik: empNik.trim(),
-            name: empName.trim(),
-            department: empJabatan.trim(),
-            afdeling: empAfdeling.trim(),
-            nama_kebun: empNamaKebun.trim(),
-            status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
-            jabatan: empJabatan.trim(),
-            status_perkawinan: empStatusPerkawinan,
-          },
-        ])
+        .insert([empPayload])
         .select()
         .single();
 
       if (error) {
-        showToast('Gagal Menambah Karyawan', error.message, 'error');
-        setIsSubmitting(false);
-        return;
+        if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+          isOffline = true;
+        } else {
+          showToast('Gagal Menambah Karyawan', error.message, 'error');
+          setIsSubmitting(false);
+          return;
+        }
+      } else {
+        createdEmp = data;
+        createdEmpId = data.id;
+      }
+    } catch (netErr) {
+      isOffline = true;
+    }
+
+    if (isOffline) {
+      // Offline fallback handling
+      const tempId = 'off_emp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      createdEmpId = tempId;
+      createdEmp = {
+        id: tempId,
+        ...empPayload,
+        has_master_biometric: !!currentEmpDescriptorRef.current,
+        is_synced: false,
+        created_at: new Date().toISOString()
+      };
+
+      const { db } = await import('../db');
+      await db.employee_sync_queue.add({
+        ...createdEmp,
+        descriptor_json: currentEmpDescriptorRef.current || null,
+        geometric_descriptor_json: currentEmpGFVRef.current || null
+      });
+
+      if (currentEmpDescriptorRef.current) {
+        await cacheUserMasterVector({
+          employee_id: tempId,
+          ...createdEmp,
+          descriptor_json: currentEmpDescriptorRef.current,
+          geometric_descriptor_json: currentEmpGFVRef.current || null
+        });
       }
 
-      const createdEmpId = createdEmp.id;
-
+      showToast(
+        'Karyawan Berhasil Disimpan (Offline)',
+        `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan akan di-sync otomatis saat online!`,
+        'success'
+      );
+    } else {
+      // Online flow
       if (currentEmpDescriptorRef.current) {
         const descJson = JSON.stringify(currentEmpDescriptorRef.current);
         await supabase
@@ -300,8 +348,6 @@ export default function TabEmployeeManagement({
             employee_id: createdEmpId,
             descriptor_json: descJson,
           }, { onConflict: 'employee_id' });
-
-
 
         await cacheUserMasterVector({
           employee_id: createdEmpId,
@@ -323,29 +369,30 @@ export default function TabEmployeeManagement({
         `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database!`,
         'success'
       );
-
-      setEmpNik('');
-      setEmpName('');
-      setEmpAfdeling('');
-      setEmpNamaKebun(user?.role === 'estate_admin' && user?.kebun ? user.kebun : '');
-      setEmpStatusTk('');
-      setEmpStatusTkCustom('');
-      setEmpJabatan('');
-      setEmpStatusPerkawinan('');
-      setPhotoPreview(null);
-      setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
-      currentEmpDescriptorRef.current = null;
-      currentEmpGFVRef.current = null;
-      setFaceCheckResult(null);
-
-      refreshEmployees();
-    } catch (err) {
-      console.error('[ADD EMP ERROR]:', err);
-      showToast('Error Sistem', 'Terjadi kesalahan: ' + err.message, 'error');
-    } finally {
-      setIsSubmitting(false);
     }
-  };
+
+    setEmpNik('');
+    setEmpName('');
+    setEmpAfdeling('');
+    setEmpNamaKebun(user?.role === 'estate_admin' && user?.kebun ? user.kebun : '');
+    setEmpStatusTk('');
+    setEmpStatusTkCustom('');
+    setEmpJabatan('');
+    setEmpStatusPerkawinan('');
+    setPhotoPreview(null);
+    setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
+    currentEmpDescriptorRef.current = null;
+    currentEmpGFVRef.current = null;
+    setFaceCheckResult(null);
+
+    refreshEmployees();
+  } catch (err) {
+    console.error('[ADD EMP ERROR]:', err);
+    showToast('Error Sistem', 'Terjadi kesalahan: ' + err.message, 'error');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   return (
     <div className="grid-2">

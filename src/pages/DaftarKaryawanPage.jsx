@@ -995,11 +995,18 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     <TableCell>{emp.status_tk || '-'}</TableCell>
                     <TableCell>{emp.status_perkawinan || '-'}</TableCell>
                     <TableCell className="no-print">
-                      {emp.has_master_biometric ? (
-                        <span className="status-badge success">Siap</span>
-                      ) : (
-                        <span className="status-badge fail">Belum</span>
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                        {emp.has_master_biometric ? (
+                          <span className="status-badge success">Siap</span>
+                        ) : (
+                          <span className="status-badge fail">Belum</span>
+                        )}
+                        {(emp.is_synced === false || String(emp.id).startsWith('off_')) && (
+                          <span className="status-badge warning" style={{ background: '#f59e0b', color: '#000', fontSize: '0.7rem', padding: '2px 6px', fontWeight: 'bold' }} title="Tersimpan di perangkat lokal, akan diunggah otomatis saat terhubung ke internet">
+                            ⌛ Pending Sync
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="no-print">
                       <div style={{ display: 'flex', gap: '8px' }}>
