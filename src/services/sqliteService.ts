@@ -74,7 +74,8 @@ export async function initSQLite(): Promise<void> {
         attendance_type TEXT,
         euclidean_distance REAL,
         is_synced INTEGER DEFAULT 0,
-        created_at TEXT
+        created_at TEXT,
+        kebun TEXT
       );
 
       CREATE TABLE IF NOT EXISTS local_today_attendance_cache (
@@ -102,7 +103,8 @@ export async function initSQLite(): Promise<void> {
         attendance_type TEXT,
         euclidean_distance REAL,
         is_synced INTEGER DEFAULT 0,
-        created_at TEXT
+        created_at TEXT,
+        kebun TEXT
       );
 
       CREATE TABLE IF NOT EXISTS local_admins (
@@ -120,7 +122,6 @@ export async function initSQLite(): Promise<void> {
 
     await dbConnection.execute(ddl);
 
-    // Alter tables to add 'afdeling' / 'region' if they don't exist (migrations)
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN afdeling TEXT;`);
       console.log('[SQLite Service] Migrated local_attendance_queue: added afdeling column');
@@ -128,8 +129,20 @@ export async function initSQLite(): Promise<void> {
       // Column might already exist, ignore error
     }
     try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN kebun TEXT;`);
+      console.log('[SQLite Service] Migrated local_attendance_queue: added kebun column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN afdeling TEXT;`);
       console.log('[SQLite Service] Migrated local_attendance_logs: added afdeling column');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN kebun TEXT;`);
+      console.log('[SQLite Service] Migrated local_attendance_logs: added kebun column');
     } catch (e) {
       // Column might already exist, ignore error
     }
@@ -289,14 +302,15 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
     
     await dbConnection.run(
       `INSERT INTO local_attendance_queue (
-        employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         logData.employee_id,
         logData.nik,
         logData.name,
         logData.department,
         logData.afdeling || null,
+        logData.kebun || null,
         timestamp,
         logData.location || 'HP Mobile (Offline)',
         logData.lat || null,
@@ -560,8 +574,8 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
   try {
     await dbConnection.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
-      (id, employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
         Number(log.employee_id),
@@ -569,6 +583,7 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
         log.name || null,
         log.department || null,
         log.afdeling || null,
+        log.kebun || log.nama_kebun || null,
         log.timestamp || null,
         log.location || null,
         log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
@@ -593,8 +608,8 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
   try {
     const statements = logs.map(log => ({
       statement: `INSERT OR REPLACE INTO local_attendance_logs 
-        (id, employee_id, nik, name, department, afdeling, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       values: [
         String(log.id),
         Number(log.employee_id),
@@ -602,6 +617,7 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
         log.name || null,
         log.department || null,
         log.afdeling || null,
+        log.kebun || log.nama_kebun || null,
         log.timestamp || null,
         log.location || null,
         log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
@@ -639,6 +655,8 @@ export async function sqliteGetAttendanceLogs(): Promise<any[]> {
       name: row.name,
       department: row.department,
       afdeling: row.afdeling,
+      kebun: row.kebun,
+      nama_kebun: row.kebun,
       timestamp: row.timestamp,
       location: row.location,
       lat: row.lat,
@@ -675,6 +693,8 @@ export async function sqliteGetTodayAttendanceLogs(empId: number, dateStr: strin
       name: row.name,
       department: row.department,
       afdeling: row.afdeling,
+      kebun: row.kebun,
+      nama_kebun: row.kebun,
       timestamp: row.timestamp,
       location: row.location,
       lat: row.lat,

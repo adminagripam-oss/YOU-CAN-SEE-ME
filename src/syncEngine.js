@@ -38,10 +38,16 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     console.log(`[Auto-Sync] Attempting to sync ${pendingLogs.length} pending offline attendance logs to server...`);
 
     const logsToInsert = pendingLogs.map(log => {
+      const logKebun = log.kebun || log.nama_kebun || '-';
+      const logAfdeling = log.afdeling || '-';
+      let formattedLocation = log.location || '';
+      if (formattedLocation && !formattedLocation.includes(' | ')) {
+        formattedLocation = `${logKebun} | ${logAfdeling} | ${formattedLocation}`;
+      }
       return {
         employee_id: log.employee_id,
         timestamp: log.timestamp,
-        location: log.location,
+        location: formattedLocation,
         status: log.status,
         euclidean_distance: log.euclidean_distance,
         latitude: log.latitude !== undefined ? log.latitude : (log.lat !== undefined ? log.lat : null),
@@ -82,6 +88,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           name: record.name,
           department: record.department,
           afdeling: record.afdeling || null,
+          kebun: record.kebun || null,
           timestamp: record.timestamp,
           location: record.location,
           lat: record.latitude !== undefined && record.latitude !== null ? record.latitude : (record.lat !== undefined ? record.lat : null),

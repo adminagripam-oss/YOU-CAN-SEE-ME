@@ -3,5 +3,4 @@ dist/
 *.log
 .vscode/
 *.apk
-!AgriFace.apk
-!AgriFaceFlutter.apk
+!AgriFaceV2.apk
