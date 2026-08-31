@@ -813,7 +813,7 @@ function AppContent() {
                 .from('attendance_logs')
                 .insert(payload)
                 .select();
-              
+
               if (!error && insertedData && insertedData.length > 0) {
                 // Delete the temporary log from local DB
                 await db.attendance_logs.delete(log.id);
