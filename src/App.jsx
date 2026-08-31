@@ -605,7 +605,7 @@ function AppContent() {
           if (dateStr < todayStr && !checkOutKeys.has(key)) {
             // Buat log check-out otomatis pukul 17:00 pada tanggal tersebut
             const defaultTime = new Date(ci.timestamp);
-            defaultTime.setHours(17, 0, 0, 0); // 17:00 default
+            defaultTime.setHours(23, 59, 0, 0); // 23:59 default
             
             const newLog = {
               id: 'auto_out_' + ci.id + '_' + Date.now(),
