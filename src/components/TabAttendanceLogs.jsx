@@ -299,6 +299,7 @@ export default function TabAttendanceLogs({
           nik: log.nik,
           name: log.name,
           department: log.department,
+          nama_kebun: log.kebun || '-',
           afdeling: log.afdeling || '-',
           checkIn: '-',
           checkOut: '-',
@@ -387,6 +388,7 @@ export default function TabAttendanceLogs({
               name: group.name,
               nama_kebun: group.nama_kebun || user?.kebun || '-',
               requested_by: user?.username || 'unknown_admin',
+              requested_at: new Date().toISOString(),
               status: 'PENDING',
               old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
             };
@@ -414,6 +416,7 @@ export default function TabAttendanceLogs({
                 name: group.name,
                 nama_kebun: group.nama_kebun || user?.kebun || '-',
                 requested_by: user?.username || 'unknown_admin',
+                requested_at: new Date().toISOString(),
                 status: 'PENDING',
                 is_synced: false
               };
@@ -527,6 +530,7 @@ export default function TabAttendanceLogs({
           name: editData.name,
           nama_kebun: editData.nama_kebun || user?.kebun || '-',
           requested_by: user?.username || 'unknown_admin',
+          requested_at: new Date().toISOString(),
           status: 'PENDING',
           old_value: { 
             checkIn: editData.checkIn, 
