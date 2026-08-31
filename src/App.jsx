@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { human, loadHumanWithFallback } from './humanSingleton';
 import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
@@ -27,6 +27,7 @@ import OfflineOrderForm from './components/OfflineOrderForm';
 
 function AppContent() {
   const { user } = useAuth();
+  const loadedUserRef = useRef(null);
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
@@ -198,7 +199,13 @@ function AppContent() {
       // Only clear and rebuild if we got fresh data from API or Supabase
       if (dataSource !== 'indexeddb') {
         try {
-          await db.employees_cache.clear();
+          let filter = null;
+          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+            filter = { kebun: adminObj.kebun };
+          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+            filter = { region: adminObj.region };
+          }
+          await db.employees_cache.clear(filter);
           if (empData.length > 0) {
             await db.employees_cache.bulkPut(empData);
             for (const emp of empData) {
@@ -211,8 +218,10 @@ function AppContent() {
           console.warn(`[${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} BULK PUT WARN]:`, cacheErr.message);
         }
       }
+      loadedUserRef.current = adminObj.username;
       setEmployeesLoaded(true);
     } else {
+      loadedUserRef.current = adminObj.username;
       setEmployeesLoaded(true); // set true even if fetch failed to unblock logs query
     }
   }, [user]);
@@ -232,7 +241,20 @@ function AppContent() {
     let localEmployees = [];
     try {
       const cached = await db.employees_cache.toArray();
-      if (cached) localEmployees = cached;
+      if (cached) {
+        if (user) {
+          const adminObj = user;
+          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+            localEmployees = cached.filter(e => e.nama_kebun === adminObj.kebun);
+          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+            localEmployees = cached.filter(e => e.region === adminObj.region);
+          } else {
+            localEmployees = cached;
+          }
+        } else {
+          localEmployees = cached;
+        }
+      }
     } catch (e) {
       console.warn('[FETCH LOGS LOCAL CACHE WARN]:', e);
     }
@@ -632,8 +654,9 @@ function AppContent() {
       window.addEventListener('online', handleWebOnline);
       window.addEventListener('offline', handleWebOffline);
 
-      const cleanupSync = initAutoSyncListener(showToast, () => {
-        fetchLogs();
+      const cleanupSync = initAutoSyncListener(showToast, async () => {
+        await fetchEmployees();
+        await fetchLogs();
         refreshUnsyncedCount();
       });
 
@@ -646,8 +669,9 @@ function AppContent() {
       };
     }
 
-    const cleanupSync = initAutoSyncListener(showToast, () => {
-      fetchLogs();
+    const cleanupSync = initAutoSyncListener(showToast, async () => {
+      await fetchEmployees();
+      await fetchLogs();
       refreshUnsyncedCount();
     });
 
@@ -659,7 +683,7 @@ function AppContent() {
       }
       cleanupSync();
     };
-  }, [fetchLogs, refreshUnsyncedCount, showToast]);
+  }, [fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast]);
 
   // Initial Data & face-api Model Loading (waits for dbReady)
   useEffect(() => {
@@ -678,6 +702,11 @@ function AppContent() {
   // Fetch logs only after employees are loaded (eliminates race condition)
   useEffect(() => {
     if (!dbReady || !user || !employeesLoaded) return;
+    // Pastikan data karyawan yang ter-cache cocok dengan user aktif
+    if (loadedUserRef.current !== user.username) {
+      console.log('[App Startup] Cache user mismatch. Waiting for fetchEmployees...');
+      return;
+    }
     console.log('[App Startup] Employees loaded. Fetching fresh logs...');
     fetchLogs();
   }, [dbReady, user, employeesLoaded, fetchLogs]);
@@ -932,6 +961,7 @@ function AppContent() {
                     modelStatusText={modelStatusText}
                     showToast={showToast}
                     refreshLogs={fetchLogs}
+                    refreshEmployees={fetchEmployees}
                   />
                 )
               }

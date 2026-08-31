@@ -547,12 +547,13 @@ const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
-  gpsPermission = 'granted', liveCoords = null,
+  gpsPermission = 'granted', liveCoords = null, onRefreshEmployees,
 }) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [nikInput, setNikInput] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('Hadir');
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const [isSyncingEmployees, setIsSyncingEmployees] = useState(false);
 
   // Liveness States (Blink & Head Turn)
   const [isLiveHuman, setIsLiveHuman] = useState(false);
@@ -1592,8 +1593,44 @@ export default function TabFaceVerification({
 
   return (
     <div className="glass-card">
-      <div className="card-title">
-        <i className="fa-solid fa-camera"></i> Absensi Biometrik Wajah
+      <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <i className="fa-solid fa-camera"></i> Absensi Biometrik Wajah
+        </span>
+        {onRefreshEmployees && (
+          <button
+            type="button"
+            className="topbar-sync-btn"
+            onClick={async () => {
+              setIsSyncingEmployees(true);
+              try {
+                await onRefreshEmployees();
+                showToast('Pembaruan Berhasil', 'Data karyawan terbaru berhasil dimuat.', 'success');
+              } catch (e) {
+                showToast('Pembaruan Gagal', 'Gagal memuat data karyawan.', 'error');
+              } finally {
+                setIsSyncingEmployees(false);
+              }
+            }}
+            disabled={isSyncingEmployees}
+            style={{
+              padding: '4px 10px',
+              fontSize: '0.75rem',
+              borderRadius: '6px',
+              background: 'rgba(16, 185, 129, 0.15)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              color: '#10b981',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            title="Refresh data karyawan dari server"
+          >
+            <i className={`fa-solid ${isSyncingEmployees ? 'fa-spinner fa-spin' : 'fa-arrows-rotate'}`}></i>
+            <span>{isSyncingEmployees ? 'Memuat...' : 'Sync Karyawan'}</span>
+          </button>
+        )}
       </div>
 
       <div className="grid-2">

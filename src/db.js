@@ -96,11 +96,35 @@ export const db = {
         return await dexieDb.employees_cache.toArray();
       }
     },
-    async clear() {
+    async clear(filter) {
       if (Capacitor.isNativePlatform()) {
-        await sqliteClearEmployeesCache();
+        await sqliteClearEmployeesCache(filter);
       } else {
-        await dexieDb.employees_cache.clear();
+        try {
+          if (filter && filter.kebun) {
+            const keysToDelete = [];
+            await dexieDb.employees_cache.filter(e => e.nama_kebun === filter.kebun).each(e => {
+              keysToDelete.push(e.id);
+            });
+            await dexieDb.employees_cache.bulkDelete(keysToDelete);
+            await dexieDb.user_master.filter(m => keysToDelete.includes(m.employee_id)).delete();
+            console.log(`[IndexedDB] Cleared local employees & descriptors cache for kebun: ${filter.kebun}`);
+          } else if (filter && filter.region) {
+            const keysToDelete = [];
+            await dexieDb.employees_cache.filter(e => e.region === filter.region).each(e => {
+              keysToDelete.push(e.id);
+            });
+            await dexieDb.employees_cache.bulkDelete(keysToDelete);
+            await dexieDb.user_master.filter(m => keysToDelete.includes(m.employee_id)).delete();
+            console.log(`[IndexedDB] Cleared local employees & descriptors cache for region: ${filter.region}`);
+          } else {
+            await dexieDb.employees_cache.clear();
+            await dexieDb.user_master.clear();
+            console.log('[IndexedDB] Cleared all local employees & descriptors cache.');
+          }
+        } catch (e) {
+          console.warn('[IndexedDB Clear Cache Error]:', e);
+        }
       }
     },
     async bulkPut(data) {

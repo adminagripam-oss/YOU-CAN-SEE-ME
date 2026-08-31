@@ -15,7 +15,7 @@ export async function initSQLite(): Promise<void> {
 
   try {
     console.log('[SQLite Service] Initializing SQLite connection for native APK...');
-    
+
     // Check if connection already exists
     const isConn = await sqlite.isConnection('AgriFaceLocalDB', false);
     if (isConn.result) {
@@ -299,7 +299,7 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
   try {
     const createdAt = new Date().toISOString();
     const timestamp = logData.timestamp || createdAt;
-    
+
     await dbConnection.run(
       `INSERT INTO local_attendance_queue (
         employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
@@ -376,11 +376,28 @@ export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
 /**
  * Clear the local employees cache.
  */
-export async function sqliteClearEmployeesCache(): Promise<void> {
+export async function sqliteClearEmployeesCache(filter?: { kebun?: string | null; region?: string | null }): Promise<void> {
   if (!dbConnection) return;
   try {
-    await dbConnection.execute(`DELETE FROM local_employees`);
-    console.log('[SQLite Service] Cleared employees cache table.');
+    if (filter && filter.kebun) {
+      await dbConnection.run(
+        `DELETE FROM local_master_descriptors WHERE employee_id IN (SELECT id FROM local_employees WHERE nama_kebun = ?)`,
+        [filter.kebun]
+      );
+      await dbConnection.run(`DELETE FROM local_employees WHERE nama_kebun = ?`, [filter.kebun]);
+      console.log(`[SQLite Service] Cleared local employees & descriptors cache for kebun: ${filter.kebun}`);
+    } else if (filter && filter.region) {
+      await dbConnection.run(
+        `DELETE FROM local_master_descriptors WHERE employee_id IN (SELECT id FROM local_employees WHERE region = ?)`,
+        [filter.region]
+      );
+      await dbConnection.run(`DELETE FROM local_employees WHERE region = ?`, [filter.region]);
+      console.log(`[SQLite Service] Cleared local employees & descriptors cache for region: ${filter.region}`);
+    } else {
+      await dbConnection.execute(`DELETE FROM local_master_descriptors`);
+      await dbConnection.execute(`DELETE FROM local_employees`);
+      console.log('[SQLite Service] Cleared all local employees & descriptors cache.');
+    }
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearEmployeesCache Error]:', err?.message || err);
   }
@@ -498,7 +515,7 @@ export async function sqliteCacheTodayAttendance(statusMap: any, cachedDate: str
       const empId = keys[i];
       const status = statusMap[empId];
       if (!status) continue;
-      
+
       statements.push({
         statement: `INSERT OR REPLACE INTO local_today_attendance_cache 
                     (employee_id, has_checked_in, has_checked_out, checked_in, check_in_time, check_out_time, cached_date)
