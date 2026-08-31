@@ -1271,16 +1271,14 @@ export default function TabAttendanceLogs({
                         {req.status === 'PENDING' ? (
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button 
-                              className="btn btn-primary" 
+                              className="btn-shadcn-success" 
                               onClick={() => handleApproveRequest(req)}
-                              style={{ padding: '6px 10px', fontSize: '0.72rem', width: 'auto', background: '#15803d', border: 'none', color: '#fff', fontWeight: 'bold' }}
                             >
                               Setujui
                             </button>
                             <button 
-                              className="btn btn-secondary" 
+                              className="btn-shadcn-destructive" 
                               onClick={() => handleRejectRequest(req)}
-                              style={{ padding: '6px 10px', fontSize: '0.72rem', width: 'auto', background: '#b91c1c', border: 'none', color: '#fff', fontWeight: 'bold' }}
                             >
                               Tolak
                             </button>
