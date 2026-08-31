@@ -680,8 +680,8 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
                     const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
 
-                    const afdeling = empMatch?.afdeling || l.afdeling || '';
-                    const namaKebun = empMatch?.nama_kebun || l.nama_kebun || '';
+                    const afdeling = l.afdeling || empMatch?.afdeling || '';
+                    const namaKebun = l.nama_kebun || l.kebun || empMatch?.nama_kebun || '';
                     const displayAfdeling =
                       afdeling && namaKebun
                         ? `Afd. ${afdeling} – ${namaKebun}`

@@ -33,7 +33,7 @@ Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Of
                                       +-------------------+-------------------+
                                       |                                       |
                          Tier 1: Express API                     Tier 2: Direct Supabase SDK
-                         (http://localhost:8081)                 (HTTPS / CORS Safe)
+                         (http://localhost:8080)                 (HTTPS / CORS Safe)
                                       |                                       |
                                       v                                       v
                         +---------------------------+           +---------------------------+

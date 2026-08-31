@@ -29,6 +29,7 @@ function AppContent() {
   const { user } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [employeesLoaded, setEmployeesLoaded] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelStatusText, setModelStatusText] = useState('Memuat Model AI Biometrik Wajah...');
   const [toasts, setToasts] = useState([]);
@@ -105,9 +106,8 @@ function AppContent() {
   // Fetch Employees (2-Tier Fallback: Direct Supabase -> IndexedDB Cache)
   const fetchEmployees = useCallback(async () => {
     // Tunggu admin user terotentikasi
-    const savedAdmin = localStorage.getItem('logged_in_admin');
-    if (!savedAdmin) return;
-    const adminObj = JSON.parse(savedAdmin);
+    if (!user) return;
+    const adminObj = user;
 
     let empData = null;
     let dataSource = 'supabase';
@@ -211,21 +211,15 @@ function AppContent() {
           console.warn(`[${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} BULK PUT WARN]:`, cacheErr.message);
         }
       }
+      setEmployeesLoaded(true);
+    } else {
+      setEmployeesLoaded(true); // set true even if fetch failed to unblock logs query
     }
-  }, []);
+  }, [user]);
 
   // Fetch Attendance Logs (2-Tier: Supabase + Offline Local Queue with Deduplication)
-  // Membaca scope admin LANGSUNG dari user state (bukan localStorage) untuk
-  // menghindari stale closure saat ganti akun tanpa full reload.
   const fetchLogs = useCallback(async () => {
     let onlineLogs = [];
-
-    // Baca admin aktif dari localStorage (sumber tunggal kebenaran scope)
-    const savedAdmin = localStorage.getItem('logged_in_admin');
-    const adminObj = savedAdmin ? JSON.parse(savedAdmin) : null;
-    const adminRole = adminObj?.role || 'estate_admin';
-    const adminKebun = adminObj?.kebun || null;
-    const adminRegion = adminObj?.region || null;
 
     // Helper to normalize CHECK_IN / CHECK-IN / CHECKIN to CHECK-IN, etc.
     const normalizeType = (type) => {
@@ -246,38 +240,47 @@ function AppContent() {
     // Map of employees by ID
     const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
 
-    console.log('[DEBUG fetchLogs] role:', adminRole, 'kebun:', adminKebun, 'region:', adminRegion, 'localEmployees:', localEmployees.length);
+    console.log('[DEBUG fetchLogs] localEmployees loaded:', localEmployees.length, localEmployees.map(e => ({ id: e.id, name: e.name })));
 
     // Step 1: Fetch latest online logs from Supabase and cache them in local database
     try {
       let query = supabase.from('attendance_logs').select('*');
 
-      // Saring log online berdasarkan scope role admin aktif
-      if (adminRole === 'headoffice_admin') {
-        // HO: ambil semua log — tidak ada filter tambahan
-        console.log('[DEBUG fetchLogs] HO mode — mengambil semua log.');
-      } else if (adminRole === 'regional_admin' && adminRegion) {
-        // Regional Admin: filter berdasarkan employee_id yang bekerja di region ini
-        console.log('[DEBUG fetchLogs] Regional mode — region:', adminRegion);
-        const { data: regionEmps } = await supabase
-          .from('employees')
-          .select('id')
-          .eq('region', adminRegion);
-        const regionEmpIds = (regionEmps || []).map(e => e.id);
-        console.log('[DEBUG fetchLogs] Region empIds count:', regionEmpIds.length);
-        if (regionEmpIds.length > 0) {
-          query = query.in('employee_id', regionEmpIds);
-        } else {
-          query = query.eq('employee_id', -1);
-        }
-      } else {
-        // Estate Admin: filter berdasarkan employee_id di employee cache lokal (kebun-nya)
-        const empIds = localEmployees.map(e => e.id);
-        console.log('[DEBUG fetchLogs] Estate mode — filtering empIds count:', empIds.length);
-        if (empIds.length > 0) {
-          query = query.in('employee_id', empIds);
-        } else {
-          query = query.eq('employee_id', -1); // query kosong jika tidak ada karyawan
+      // Saring log online berdasarkan lingkup admin aktif
+      if (user) {
+        const adminObj = user;
+        console.log('[DEBUG fetchLogs] adminObj:', { role: adminObj.role, kebun: adminObj.kebun, region: adminObj.region });
+        
+        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+          const empIds = localEmployees.map(e => e.id);
+          if (empIds.length > 0) {
+            query = query.or(`employee_id.in.(${empIds.join(',')}),location.ilike.%${adminObj.kebun}%`);
+          } else {
+            query = query.ilike('location', `%${adminObj.kebun}%`);
+          }
+        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+          const regionKebuns = {
+            'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
+            'Riau 1': ['Panca Agro Lestari (Pal)', 'Wana Jingga Timur (Wjt)', 'Duta Palma Nusantara (Dpn) I', 'Duta Palma Nusantara (Dpn) II', 'Duta Palma Nusantara (Dpn) III', 'Eluan Mahkota (EMA) - KT', 'Johan Sentosa', 'Palma Inti Lestari (PIL)'],
+            'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
+            'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
+          };
+          const allowed = regionKebuns[adminObj.region] || [];
+          const empIds = localEmployees.map(e => e.id);
+          if (allowed.length > 0) {
+            const locationLikes = allowed.map(k => `location.ilike.%${k}%`);
+            if (empIds.length > 0) {
+              query = query.or(`employee_id.in.(${empIds.join(',')}),${locationLikes.join(',')}`);
+            } else {
+              query = query.or(locationLikes.join(','));
+            }
+          } else {
+            if (empIds.length > 0) {
+              query = query.in('employee_id', empIds);
+            } else {
+              query = query.eq('employee_id', -1);
+            }
+          }
         }
       }
 
@@ -310,17 +313,31 @@ function AppContent() {
             log.attendance_type ||
             (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
           );
+          
+          let parsedKebun = null;
+          let parsedAfdeling = null;
+          let cleanLocation = log.location || '';
+          
+          if (cleanLocation.includes(' | ')) {
+            const parts = cleanLocation.split(' | ');
+            if (parts.length >= 3) {
+              parsedKebun = parts[0] === '-' ? null : parts[0];
+              parsedAfdeling = parts[1] === '-' ? null : parts[1];
+              cleanLocation = parts.slice(2).join(' | ');
+            }
+          }
+
           return {
             id: String(log.id),
             employee_id: log.employee_id,
             nik: emp.nik || log.nik || '-',
             name: emp.name || log.name || `Karyawan #${log.employee_id}`,
             department: emp.department || log.department || '-',
-            afdeling: emp.afdeling || log.afdeling || '-',
-            nama_kebun: emp.nama_kebun || log.nama_kebun || '-',
-            kebun: emp.nama_kebun || log.nama_kebun || '-',
+            afdeling: parsedAfdeling || log.afdeling || emp.afdeling || '-',
+            nama_kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
+            kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
             timestamp: log.timestamp,
-            location: log.location,
+            location: cleanLocation,
             lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
             lng: log.longitude !== undefined && log.longitude !== null ? log.longitude : (log.lng !== undefined ? log.lng : null),
             status: log.status,
@@ -331,7 +348,7 @@ function AppContent() {
           };
         });
 
-        // Hapus cache synced lama, simpan log baru dari Supabase
+        // Save fresh online logs to local database
         try {
           const localLogs = await db.attendance_logs.toArray();
           for (let i = 0; i < localLogs.length; i++) {
@@ -351,16 +368,30 @@ function AppContent() {
       console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', err.message);
     }
 
-    // Step 2: Query all logs from local database (sudah terfilter saat disimpan)
+    // Step 2: Query all logs from local database
     let allLocalLogs = [];
     try {
       const rawLocal = await db.attendance_logs.toArray();
-      if (adminRole === 'headoffice_admin') {
-        allLocalLogs = rawLocal;
+      if (user) {
+        const adminObj = user;
+        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)) || l.kebun === adminObj.kebun || l.nama_kebun === adminObj.kebun);
+        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+          const regionKebuns = {
+            'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
+            'Riau 1': ['Panca Agro Lestari (Pal)', 'Wana Jingga Timur (Wjt)', 'Duta Palma Nusantara (Dpn) I', 'Duta Palma Nusantara (Dpn) II', 'Duta Palma Nusantara (Dpn) III', 'Eluan Mahkota (EMA) - KT', 'Johan Sentosa', 'Palma Inti Lestari (PIL)'],
+            'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
+            'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
+          };
+          const allowed = new Set(regionKebuns[adminObj.region] || []);
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)) || allowed.has(l.kebun) || allowed.has(l.nama_kebun));
+        } else {
+          allLocalLogs = rawLocal;
+        }
       } else {
-        // Filter tambahan dari local: pastikan hanya employee yang ada di cache lokal
-        const empIds = new Set(localEmployees.map(e => String(e.id)));
-        allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)));
+        allLocalLogs = rawLocal;
       }
     } catch (e) {
       console.warn('[Local Database] Failed to load attendance logs:', e);
@@ -370,11 +401,26 @@ function AppContent() {
     let unsyncedQueue = [];
     try {
       const rawQueue = await db.attendance_sync_queue.toArray();
-      if (adminRole === 'headoffice_admin') {
-        unsyncedQueue = rawQueue;
+      if (user) {
+        const adminObj = user;
+        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          unsyncedQueue = rawQueue.filter(q => q.employee_id && (empIds.has(String(q.employee_id)) || q.kebun === adminObj.kebun || q.nama_kebun === adminObj.kebun));
+        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+          const regionKebuns = {
+            'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
+            'Riau 1': ['Panca Agro Lestari (Pal)', 'Wana Jingga Timur (Wjt)', 'Duta Palma Nusantara (Dpn) I', 'Duta Palma Nusantara (Dpn) II', 'Duta Palma Nusantara (Dpn) III', 'Eluan Mahkota (EMA) - KT', 'Johan Sentosa', 'Palma Inti Lestari (PIL)'],
+            'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
+            'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
+          };
+          const allowed = new Set(regionKebuns[adminObj.region] || []);
+          const empIds = new Set(localEmployees.map(e => String(e.id)));
+          unsyncedQueue = rawQueue.filter(q => q.employee_id && (empIds.has(String(q.employee_id)) || allowed.has(q.kebun) || allowed.has(q.nama_kebun)));
+        } else {
+          unsyncedQueue = rawQueue;
+        }
       } else {
-        const empIds = new Set(localEmployees.map(e => String(e.id)));
-        unsyncedQueue = rawQueue.filter(q => empIds.has(String(q.employee_id)));
+        unsyncedQueue = rawQueue;
       }
     } catch (e) {
       console.warn('[Local Database] Failed to load unsynced queue logs:', e);
@@ -387,8 +433,7 @@ function AppContent() {
       name: q.name || '-',
       department: q.department || '-',
       afdeling: q.afdeling || '-',
-      nama_kebun: q.nama_kebun || '-',
-      kebun: q.nama_kebun || '-',
+      nama_kebun: q.kebun || q.nama_kebun || '-',
       timestamp: q.timestamp,
       location: q.location || '[OFFLINE] Antrean Absensi',
       lat: q.lat,
@@ -441,14 +486,14 @@ function AppContent() {
         seen.add(signature);
         
         let resolvedLog = { ...log };
-        if (!resolvedLog.name || resolvedLog.name === 'Karyawan' || resolvedLog.name.includes('#')) {
-          const emp = masterEmpMap.get(String(resolvedLog.employee_id)) || {};
-          resolvedLog.nik = emp.nik || resolvedLog.nik || '-';
-          resolvedLog.name = emp.name || resolvedLog.name || `Karyawan #${resolvedLog.employee_id}`;
-          resolvedLog.department = emp.department || resolvedLog.department || '-';
-          resolvedLog.afdeling = emp.afdeling || resolvedLog.afdeling || '-';
-          resolvedLog.nama_kebun = emp.nama_kebun || resolvedLog.nama_kebun || '-';
-        }
+        const emp = masterEmpMap.get(String(resolvedLog.employee_id)) || {};
+        
+        resolvedLog.nik = resolvedLog.nik && resolvedLog.nik !== '-' ? resolvedLog.nik : (emp.nik || '-');
+        resolvedLog.name = resolvedLog.name && !resolvedLog.name.includes('#') ? resolvedLog.name : (emp.name || `Karyawan #${resolvedLog.employee_id}`);
+        resolvedLog.department = resolvedLog.department && resolvedLog.department !== '-' ? resolvedLog.department : (emp.department || '-');
+        resolvedLog.afdeling = resolvedLog.afdeling && resolvedLog.afdeling !== '-' ? resolvedLog.afdeling : (emp.afdeling || '-');
+        resolvedLog.nama_kebun = resolvedLog.kebun || (resolvedLog.nama_kebun && resolvedLog.nama_kebun !== '-' ? resolvedLog.nama_kebun : (emp.nama_kebun || '-'));
+        
         finalLogs.push(resolvedLog);
       }
     });
@@ -456,8 +501,7 @@ function AppContent() {
     // Sort by timestamp descending
     finalLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setLogs(finalLogs);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role, user?.kebun, user?.region]);
+  }, [user]);
 
   // Check Unsynced Count from IndexedDB
   const refreshUnsyncedCount = useCallback(async () => {
@@ -617,35 +661,29 @@ function AppContent() {
     };
   }, [fetchLogs, refreshUnsyncedCount, showToast]);
 
-  // Bersihkan IndexedDB saat logout agar data akun lama tidak tampil ke akun berikutnya
-  useEffect(() => {
-    if (!dbReady) return;
-    if (!user) {
-      // User logout — hapus semua cache log & employee dari IndexedDB
-      (async () => {
-        try {
-          await db.attendance_logs.clear();
-          await db.employees_cache.clear();
-          console.log('[App] IndexedDB cache dibersihkan setelah logout.');
-        } catch (e) {
-          console.warn('[App] Gagal membersihkan IndexedDB:', e);
-        }
-      })();
-    }
-  }, [user, dbReady]);
-
   // Initial Data & face-api Model Loading (waits for dbReady)
   useEffect(() => {
     if (!dbReady) return;
 
+    setEmployeesLoaded(false);
     if (user) {
-      console.log('[App Startup] Logged in admin changed. Fetching fresh employees and logs...');
+      console.log('[App Startup] Logged in admin changed. Fetching fresh employees...');
       fetchEmployees();
-      fetchLogs();
     } else {
       setEmployees([]);
       setLogs([]);
     }
+  }, [dbReady, user, fetchEmployees]);
+
+  // Fetch logs only after employees are loaded (eliminates race condition)
+  useEffect(() => {
+    if (!dbReady || !user || !employeesLoaded) return;
+    console.log('[App Startup] Employees loaded. Fetching fresh logs...');
+    fetchLogs();
+  }, [dbReady, user, employeesLoaded, fetchLogs]);
+
+  useEffect(() => {
+    if (!dbReady) return;
 
     async function loadHumanModels() {
       try {

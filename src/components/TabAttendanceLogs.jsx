@@ -299,7 +299,7 @@ export default function TabAttendanceLogs({
           nik: log.nik,
           name: log.name,
           department: log.department,
-          nama_kebun: log.kebun || '-',
+          nama_kebun: log.nama_kebun || log.kebun || '-',
           afdeling: log.afdeling || '-',
           checkIn: '-',
           checkOut: '-',

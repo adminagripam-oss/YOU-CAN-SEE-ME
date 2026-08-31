@@ -1,8 +1,8 @@
 @echo off
 title AGRIPAM - Sistem Absensi Biometrik (Development Mode)
 echo =====================================================================
-echo 🚀 Memulai Backend API Server (Port 8081) dan Frontend Vite (Port 8080)...
-echo 🌐 Aplikasi akan terbuka otomatis di http://localhost:8080
+echo 🚀 Memulai Backend API Server (Port 8080) dan Frontend Vite (Port 5173)...
+echo 🌐 Aplikasi akan terbuka otomatis di http://localhost:5173
 echo =====================================================================
 
 :: Jalankan Express Backend Server di window command prompt terpisah
@@ -15,7 +15,7 @@ echo Menunggu server siap...
 timeout /t 3
 
 :: Buka browser di URL Vite dev server (yang memiliki HMR dan Proxy ke API Backend)
-start http://localhost:8080
+start http://localhost:5173
 
 echo =====================================================================
 echo 🌟 Server berjalan! Tekan Ctrl+C di masing-masing jendela untuk mematikan.

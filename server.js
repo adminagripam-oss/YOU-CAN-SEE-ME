@@ -397,7 +397,9 @@ apiRouter.post('/attendance/verify', async (req, res) => {
       status: customStatus,
       durasi,
       latitude,
-      longitude
+      longitude,
+      kebun,
+      afdeling
     } = req.body;
 
     // Check if status is manual assignment (Izin, Sakit, Mangkir)
@@ -479,12 +481,14 @@ apiRouter.post('/attendance/verify', async (req, res) => {
     // Handle Manual Non-Face Status (Izin, Sakit, Mangkir)
     if (isManualStatus) {
       const nowTs = new Date().toISOString();
+      const logKebun = kebun || employee.nama_kebun || '-';
+      const logAfdeling = afdeling || employee.afdeling || '-';
       const logPayload = {
         employee_id: employee.id,
         nik: employee.nik,
         name: employee.name,
         department: employee.department,
-        location: `${location} [${customStatus}]`,
+        location: `${logKebun} | ${logAfdeling} | ${location} [${customStatus}]`,
         status: customStatus,
         timestamp: nowTs,
         euclidean_distance: 0,
@@ -557,12 +561,14 @@ apiRouter.post('/attendance/verify', async (req, res) => {
     const nowTs = new Date().toISOString();
 
     // 6. Log Attendance to Supabase Database (Pencatatan Audit Audit Log)
+    const logKebun = kebun || employee.nama_kebun || '-';
+    const logAfdeling = afdeling || employee.afdeling || '-';
     const logPayload = {
       employee_id: employee.id,
       nik: employee.nik,
       name: employee.name,
       department: employee.department,
-      location: `${location} [${typeLabel}]`,
+      location: `${logKebun} | ${logAfdeling} | ${location} [${typeLabel}]`,
       status,
       timestamp: nowTs,
       euclidean_distance: parseFloat(distance.toFixed(4)),

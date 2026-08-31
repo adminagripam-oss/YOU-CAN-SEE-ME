@@ -501,6 +501,8 @@ export async function queueOfflineAttendance(logData) {
       nik: logData.nik,
       name: logData.name,
       department: logData.department,
+      afdeling: logData.afdeling || null,
+      kebun: logData.kebun || null,
       timestamp: logData.timestamp || new Date().toISOString(),
       location: logData.location || 'HP Mobile (Offline)',
       lat: logData.lat || null,

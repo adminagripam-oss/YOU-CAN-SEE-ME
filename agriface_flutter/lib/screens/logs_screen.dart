@@ -71,7 +71,7 @@ class _LogsScreenState extends State<LogsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('📡 Offline — menampilkan data lokal'),
+            content: Text(' Offline — menampilkan data lokal'),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 2),
           ),
@@ -85,7 +85,7 @@ class _LogsScreenState extends State<LogsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('☁️ Mengunggah data offline ke server...'),
+          content: Text(' Mengunggah data offline ke server...'),
           backgroundColor: Color(0xFF1A6B5A),
           duration: Duration(seconds: 2),
         ),
@@ -162,8 +162,8 @@ class _LogsScreenState extends State<LogsScreen> {
         SnackBar(
           content: Text(
             uploadedCount > 0
-                ? '✅ $uploadedCount data offline terupload. Mengunduh data terbaru...'
-                : '🔄 Mengunduh data terbaru dari server...',
+                ? ' $uploadedCount data offline terupload. Mengunduh data terbaru...'
+                : ' Mengunduh data terbaru dari server...',
           ),
           backgroundColor: const Color(0xFF1A3D5A),
           duration: const Duration(seconds: 2),
@@ -259,7 +259,7 @@ class _LogsScreenState extends State<LogsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Sinkronisasi selesai'),
+          content: Text(' Sinkronisasi selesai'),
           backgroundColor: Color(0xFF1A6B2A),
           duration: Duration(seconds: 2),
         ),
