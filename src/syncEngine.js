@@ -152,6 +152,7 @@ export async function syncPendingAttendanceRequests() {
       name: r.name || null,
       nama_kebun: r.nama_kebun || null,
       requested_by: r.requested_by,
+      requested_at: r.requested_at || new Date().toISOString(),
       status: r.status || 'PENDING',
       old_value: r.old_value || null,
       new_value: r.new_value || null
