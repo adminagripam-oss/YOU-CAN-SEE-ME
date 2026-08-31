@@ -127,7 +127,10 @@ function AppContent() {
 
         const { data, error } = await query.order('created_at', { ascending: false });
 
-        if (!error && data) {
+        if (error || !data) {
+          console.warn('[FETCH EMPLOYEES SUPABASE DIRECT ERROR]:', error?.message || 'No data');
+          dataSource = 'indexeddb';
+        } else {
           let descData = [];
           let allMasters = [];
           try {
