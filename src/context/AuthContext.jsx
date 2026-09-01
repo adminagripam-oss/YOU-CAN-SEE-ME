@@ -191,25 +191,41 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Logout handler
-  const logout = async () => {
+  // Logout handler (dengan proteksi cegah kehilangan data offline & tanpa penghapusan database non-destruktif)
+  const logout = async (force = false, showToast = null) => {
+    try {
+      const { getUnsyncedDataSummary } = await import('../db');
+      const summary = await getUnsyncedDataSummary();
+
+      if (summary.total > 0 && !force) {
+        const detailParts = [];
+        if (summary.unsyncedLogsCount > 0) detailParts.push(`${summary.unsyncedLogsCount} log absensi`);
+        if (summary.unsyncedEmployeesCount > 0) detailParts.push(`${summary.unsyncedEmployeesCount} karyawan baru`);
+        if (summary.unsyncedRequestsCount > 0) detailParts.push(`${summary.unsyncedRequestsCount} pengajuan admin`);
+
+        const errorMsg = `Gagal Keluar (Logout Dibatalkan): Terdapat ${summary.total} data offline yang belum tersinkronisasi (${detailParts.join(', ')}). Silakan lakukan sinkronisasi (Sync) terlebih dahulu sebelum keluar!`;
+
+        console.warn('[LOGOUT PREVENTED - UNSYNCED DATA]:', errorMsg);
+        if (showToast) {
+          showToast('Logout Dibatalkan', errorMsg, 'error');
+        }
+        return {
+          success: false,
+          blocked: true,
+          summary,
+          message: errorMsg
+        };
+      }
+    } catch (checkErr) {
+      console.warn('[LOGOUT CHECK WARN]:', checkErr);
+    }
+
     setUser(null);
     localStorage.removeItem('logged_in_admin');
     
-    // Failsafe: Hapus service worker PWA agar update terbaru bisa masuk
-    if ('serviceWorker' in navigator) {
-      try {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        for (let registration of registrations) {
-          await registration.unregister();
-        }
-      } catch (err) {
-        console.warn('Gagal unregister SW saat logout', err);
-      }
-    }
-
     // Force redirect ke login untuk menimpa state router
     window.location.href = '/login';
+    return { success: true };
   };
 
   const value = {

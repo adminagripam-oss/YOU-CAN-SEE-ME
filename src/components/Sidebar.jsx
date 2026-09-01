@@ -86,8 +86,12 @@ export default function Sidebar({ isOpen, onClose }) {
                   color: 'var(--accent-red, #ef4444)',
                 }}
                 onClick={async () => {
-                  await logout();
-                  navigate('/login');
+                  const res = await logout();
+                  if (res && res.blocked) {
+                    alert(res.message);
+                  } else {
+                    navigate('/login');
+                  }
                 }}
                 title="Keluar dari Sesi Login"
               >
