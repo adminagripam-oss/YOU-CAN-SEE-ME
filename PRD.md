@@ -789,3 +789,28 @@ Pembaruan versi **v3.3.0** berfokus pada penyelesaian masalah fatal tipe data pr
 * **Akar Masalah**: Peringatan `[Manual Sync Requests Error]` muncul di konsol saat menekan tombol sinkronisasi manual karena di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) fungsi sinkronisasi pengajuan di-import dengan nama salah `syncPendingRequests`, padahal nama fungsi asli yang di-export dari [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) adalah `syncPendingAttendanceRequests`.
 * **Solusi**: Memperbaiki pemanggilan nama fungsi import di `App.jsx` menjadi `syncPendingAttendanceRequests`, serta menambahkan pemanggilan `syncPendingEmployees` pada alur sinkronisasi manual agar pendaftaran karyawan offline & biometrik ikut di-push secara instan ke cloud server.
 
+---
+
+## 21. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v3.4.0)
+
+Pembaruan versi **v3.4.0** berfokus pada optimasi performa tinggi melalui penerapan Delta Sync (pembaruan parsial), penanganan cache Service Worker untuk endpoint Supabase Cloud, dan fitur sinkronisasi latar belakang tanpa reload kamera:
+
+### 21.1 Penerapan Delta Sync (Pembaruan Parsial Hemat Bandwidth)
+* **Masalah Query Masif**: Sebelumnya, setiap kali koneksi internet pulih atau sinkronisasi dipanggil, fungsi `fetchEmployees()` dan `fetchLogs()` di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) memuat ulang seluruh baris data dari Supabase dari awal (`SELECT *`). Memuat ribuan baris data secara terus-menerus menyebabkan respons aplikasi menjadi lambat dan menghamburkan kuota data.
+* **Solusi Delta Sync**:
+  * Menyimpan penanda waktu sinkronisasi terakhir (`last_emp_sync_...` dan `last_log_sync_...`) di `localStorage`.
+  * Saat sinkronisasi rutin atau reconnect online, kueri Supabase diubah menggunakan filter `.gt('created_at', lastSyncTime)`.
+  * Jika tidak ada data baru (0 baris diunduh), aplikasi secara instan menggunakan cache lokal (0 byte data diunduh dari cloud).
+  * Jika ada baris data baru/terbaru, hanya delta baris tersebut yang diunduh lalu di-merge secara otomatis ke dalam database lokal (`db.employees_cache` dan `db.attendance_logs`).
+
+### 21.2 Penyelarasan Cache Service Worker (`sw.js` Bypass Cache Supabase)
+* **Masalah Cache Stale PWA**: Service Worker pada browser/PWA dapat menyimpan respon HTTP lama dari cloud (efek "harus diklik 2 kali baru data muncul").
+* **Solusi Service Worker Dedicated**:
+  * Membuat berkas [sw.js](file:///d:/FACE%20VERIFICATION/public/sw.js) dan mendaftarkannya pada [index.html](file:///d:/FACE%20VERIFICATION/index.html).
+  * Memasang aturan eksplisit **BYPASS CACHE** (`cache: 'no-store'`) khusus untuk seluruh permintaan jaringan berdomain `*.supabase.co` dan endpoint `/api/`.
+  * Menjamin seluruh kueri ke cloud Supabase selalu mengembalikan data segar secara instan pada klik pertama tanpa tertahan oleh cache browser.
+
+### 21.3 Sinkronisasi Latar Belakang Tanpa Reload Kamera
+* **Performa Scanner Aman RAM**: Tombol **Sync Karyawan** pada antarmuka scanner di [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx) memicu penarikan data karyawan terbaru di latar belakang dengan indikator spinner tanpa menghentikan video stream kamera atau memuat ulang model AI biometrik yang berat.
+
+
