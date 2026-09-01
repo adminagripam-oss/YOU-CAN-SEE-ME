@@ -259,7 +259,31 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           });
         }
 
-        // 3. Remove temp ID from local queue
+        // 3. Update any pending offline attendance logs that used this temporary employee ID
+        try {
+          const allPendingLogs = await getUnsyncedLogs();
+          for (const pendingLog of allPendingLogs) {
+            if (String(pendingLog.employee_id) === String(emp.id)) {
+              console.log(`[Sync Engine FK Update] Updating pending log #${pendingLog.id} employee_id from ${emp.id} to ${realEmpId}`);
+              pendingLog.employee_id = realEmpId;
+              if (Capacitor.isNativePlatform()) {
+                const { dbConnection } = await import('./services/sqliteService');
+                if (dbConnection) {
+                  await dbConnection.run(
+                    `UPDATE local_attendance_queue SET employee_id = ? WHERE id = ?`,
+                    [String(realEmpId), pendingLog.id]
+                  );
+                }
+              } else {
+                await db.attendance_sync_queue.put(pendingLog);
+              }
+            }
+          }
+        } catch (fkErr) {
+          console.warn('[Sync Engine FK Mapping Error]:', fkErr);
+        }
+
+        // 4. Remove temp ID from local employee sync queue
         await db.employee_sync_queue.delete(emp.id);
 
         syncedCount++;
@@ -286,25 +310,28 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 }
 
 /**
- * Setup Realtime Online Network Listener for Auto-Sync
+ * Setup Realtime Online Network Listener for Sequential 3-Tier Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
-  const handleOnline = () => {
-    console.log('[Network Status] Device is ONLINE. Triggering Auto-Sync...');
-    syncPendingEmployees(showToast, onSyncComplete);
-    syncPendingAttendanceLogs(showToast, onSyncComplete);
-    syncPendingAttendanceRequests();
+  const handleOnline = async () => {
+    console.log('[Network Status] Device is ONLINE. Triggering Sequential 3-Tier Auto-Sync...');
+    // Tier 1: Upload offline employees first & update FKs
+    await syncPendingEmployees(showToast, onSyncComplete);
+    // Tier 2: Upload offline attendance logs
+    await syncPendingAttendanceLogs(showToast, onSyncComplete);
+    // Tier 3: Upload offline admin requests
+    await syncPendingAttendanceRequests();
   };
 
   let networkListener = null;
 
   if (Capacitor.isNativePlatform()) {
-    Network.addListener('networkStatusChange', (status) => {
+    Network.addListener('networkStatusChange', async (status) => {
       if (status.connected) {
-        console.log('[Network Status] Device is ONLINE (Native). Triggering Auto-Sync...');
-        syncPendingEmployees(showToast, onSyncComplete);
-        syncPendingAttendanceLogs(showToast, onSyncComplete);
-        syncPendingAttendanceRequests();
+        console.log('[Network Status] Device is ONLINE (Native). Triggering Sequential 3-Tier Auto-Sync...');
+        await syncPendingEmployees(showToast, onSyncComplete);
+        await syncPendingAttendanceLogs(showToast, onSyncComplete);
+        await syncPendingAttendanceRequests();
       }
     }).then(handle => {
       networkListener = handle;
@@ -317,9 +344,9 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
   const intervalId = setInterval(async () => {
     const isOnline = await checkOnline();
     if (isOnline) {
-      syncPendingEmployees(showToast, onSyncComplete);
-      syncPendingAttendanceLogs(showToast, onSyncComplete);
-      syncPendingAttendanceRequests();
+      await syncPendingEmployees(showToast, onSyncComplete);
+      await syncPendingAttendanceLogs(showToast, onSyncComplete);
+      await syncPendingAttendanceRequests();
     }
   }, 20000);
 
