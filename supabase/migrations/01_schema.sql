@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS public.employees (
     deleted_at TIMESTAMPTZ DEFAULT NULL
 );
 
+-- Pastikan seluruh kolom tambahan ada jika tabel sudah dibuat pada rilis terdahulu
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS afdeling TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS status_tk TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS jabatan TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS status_perkawinan TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS has_master_biometric BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+
 -- Index for soft delete and fast scope lookups
 CREATE INDEX IF NOT EXISTS idx_employees_kebun ON public.employees(nama_kebun) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_employees_region ON public.employees(region) WHERE deleted_at IS NULL;
