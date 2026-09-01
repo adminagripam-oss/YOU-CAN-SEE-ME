@@ -767,9 +767,45 @@ export async function writeToBackupStorage(logLine) {
         console.log('[Storage Backup] Fallback write successful');
       }
     } catch (writeErr) {
-      console.error('[Storage Backup] Fallback write failed:', writeErr);
+      console.error('[Storage Backup Fatal] Failed to write backup log to filesystem:', writeErr);
     }
   }
 }
 
+/**
+ * Summary of all unsynced local data across attendance logs, offline registered employees, and attendance requests
+ */
+export async function getUnsyncedDataSummary() {
+  let unsyncedLogsCount = 0;
+  let unsyncedEmployeesCount = 0;
+  let unsyncedRequestsCount = 0;
 
+  try {
+    const logs = await db.attendance_sync_queue.toArray();
+    unsyncedLogsCount = logs ? logs.length : 0;
+  } catch (e) {
+    console.warn('[Unsynced Summary] Logs check warn:', e);
+  }
+
+  try {
+    const emps = await db.employee_sync_queue.toArray();
+    unsyncedEmployeesCount = emps ? emps.length : 0;
+  } catch (e) {
+    console.warn('[Unsynced Summary] Employees check warn:', e);
+  }
+
+  try {
+    const reqs = await db.attendance_requests.toArray();
+    unsyncedRequestsCount = reqs ? reqs.filter(r => !r.is_synced).length : 0;
+  } catch (e) {
+    console.warn('[Unsynced Summary] Requests check warn:', e);
+  }
+
+  const total = unsyncedLogsCount + unsyncedEmployeesCount + unsyncedRequestsCount;
+  return {
+    total,
+    unsyncedLogsCount,
+    unsyncedEmployeesCount,
+    unsyncedRequestsCount
+  };
+}
