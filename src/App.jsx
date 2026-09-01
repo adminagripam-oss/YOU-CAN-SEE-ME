@@ -606,7 +606,7 @@ function AppContent() {
     return () => clearInterval(timer);
   }, []);
 
-  // Manual Trigger Auto-Sync (Bidirectional: Push local logs & requests + Pull cloud employees & logs)
+  // Manual Trigger Auto-Sync (Bidirectional: Push local logs, employees & requests + Pull cloud employees & logs)
   const handleManualSync = async () => {
     if (!isOnline) {
       showToast('Gagal Sinkronisasi', 'Aplikasi berada dalam mode luring (offline). Silakan hubungkan ke internet.', 'error');
@@ -616,27 +616,35 @@ function AppContent() {
     setIsSyncing(true);
     showToast('Sinkronisasi Dimulai', 'Mengirim data offline dan memuat ulang data terbaru dari cloud...', 'info');
 
-    // 1. Push pending offline logs
+    // 1. Push pending offline employees
+    try {
+      const { syncPendingEmployees } = await import('./syncEngine');
+      await syncPendingEmployees();
+    } catch (e) {
+      console.warn('[Manual Sync Employees Error]:', e);
+    }
+
+    // 2. Push pending offline logs
     await syncPendingAttendanceLogs(showToast, async () => {
       refreshUnsyncedCount();
     });
 
-    // 2. Push pending offline requests (edit/hapus)
+    // 3. Push pending offline requests (edit/hapus)
     try {
-      const { syncPendingRequests } = await import('./syncEngine');
-      await syncPendingRequests();
+      const { syncPendingAttendanceRequests } = await import('./syncEngine');
+      await syncPendingAttendanceRequests();
     } catch (e) {
       console.warn('[Manual Sync Requests Error]:', e);
     }
 
-    // 3. Pull fresh employees & missing biometrics descriptors
+    // 4. Pull fresh employees & missing biometrics descriptors
     try {
       await fetchEmployees();
     } catch (e) {
       console.warn('[Manual Sync Pull Employees Error]:', e);
     }
 
-    // 4. Pull fresh attendance logs
+    // 5. Pull fresh attendance logs
     try {
       await fetchLogs();
     } catch (e) {
