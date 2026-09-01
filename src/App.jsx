@@ -365,7 +365,7 @@ function AppContent() {
 
       const useLogDeltaSync = !isFullSync && rawLocalCached && rawLocalCached.length > 0 && !!lastLogSyncTime;
       if (useLogDeltaSync) {
-        query = query.gt('created_at', lastLogSyncTime);
+        query = query.gt('timestamp', lastLogSyncTime);
       }
 
       const { data: rawLogs, error } = await query.order('timestamp', { ascending: false });
@@ -442,12 +442,11 @@ function AppContent() {
 
           // Save fresh online logs to local database
           try {
-            if (!useLogDeltaSync) {
-              const localLogs = await db.attendance_logs.toArray();
-              for (let i = 0; i < localLogs.length; i++) {
-                if (localLogs[i].is_synced) {
-                  await db.attendance_logs.delete(localLogs[i].id);
-                }
+            const localLogs = await db.attendance_logs.toArray();
+            for (let i = 0; i < localLogs.length; i++) {
+              const isFakeOnline = String(localLogs[i].id).startsWith('online_');
+              if (isFakeOnline || (!useLogDeltaSync && localLogs[i].is_synced)) {
+                await db.attendance_logs.delete(localLogs[i].id);
               }
             }
             if (onlineLogs.length > 0) {
