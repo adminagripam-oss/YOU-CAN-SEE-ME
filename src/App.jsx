@@ -363,12 +363,12 @@ function AppContent() {
         }
       }
 
-      const useLogDeltaSync = !isFullSync && rawLocalCached && rawLocalCached.length > 0 && !!lastLogSyncTime;
-      if (useLogDeltaSync) {
-        query = query.gt('timestamp', lastLogSyncTime);
-      }
+      // Nonaktifkan sementara Delta Sync berbasis timestamp karena untuk absensi offline, 
+      // timestamp bisa jadi sudah berlalu (backdated), sehingga Delta Sync akan melewatkannya.
+      // Kita gunakan Full Sync dengan limit yang lebih besar (misal 2000) agar history tidak hilang.
+      const useLogDeltaSync = false; 
 
-      const { data: rawLogs, error } = await query.order('timestamp', { ascending: false });
+      const { data: rawLogs, error } = await query.order('timestamp', { ascending: false }).limit(2000);
 
       if (error) {
         const isOfflineErr = error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError');
