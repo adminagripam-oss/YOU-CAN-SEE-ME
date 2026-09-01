@@ -5,7 +5,7 @@ import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
 import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors } from './db';
-import { syncPendingAttendanceLogs, initAutoSyncListener } from './syncEngine';
+import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
@@ -114,6 +114,15 @@ function AppContent() {
     let empData = null;
     let dataSource = 'supabase';
     const lastSyncKey = `last_emp_sync_${adminObj.username}`;
+
+    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
+    try {
+      await syncPendingEmployees();
+      await syncPendingAttendanceLogs();
+      await syncPendingAttendanceRequests();
+    } catch (syncErr) {
+      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
+    }
 
     // Preload existing cached employees to support Delta Sync
     let localCachedEmps = [];
@@ -284,6 +293,15 @@ function AppContent() {
 
   // Fetch Attendance Logs (Delta Sync + 2-Tier: Supabase + Offline Local Queue)
   const fetchLogs = useCallback(async (isFullSync = false) => {
+    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
+    try {
+      await syncPendingEmployees();
+      await syncPendingAttendanceLogs(showToast);
+      await syncPendingAttendanceRequests();
+    } catch (syncErr) {
+      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
+    }
+
     let onlineLogs = [];
 
     // Helper to normalize CHECK_IN / CHECK-IN / CHECKIN to CHECK-IN, etc.
