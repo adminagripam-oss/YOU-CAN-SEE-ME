@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Dexie from 'dexie';
-import { createClient } from '@supabase/supabase-js';
-
-// ==========================================
-// 1. Setup Supabase
-// (Sesuaikan URL dan Key dengan project Supabase Anda)
-// ==========================================
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://xyzcompany.supabase.co';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'public-anon-key';
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { supabase } from '../supabaseClient';
 
 // ==========================================
 // 2. Setup Dexie.js (Database Lokal)
