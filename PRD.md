@@ -833,6 +833,7 @@ Pembaruan versi **v4.0.0** merupakan rilis arsitektur utama yang mencakup empat 
   2. Mengambil ID Cloud resmi dari Supabase dan secara otomatis memperbarui `employee_id` pada antrean log absensi luring yang sebelumnya memakai ID sementara (`off_emp_...`).
   3. Mengunggah antrean log absensi (`attendance_sync_queue`).
   4. Mengunggah pengajuan admin (`attendance_requests`).
+* **Trigger Ganda (Network & Pull-to-Refresh)**: Mesin sinkronisasi kini tidak hanya bergantung pada *event listener* `networkStatusChange` (yang rentan gagal pada beberapa perangkat Android), melainkan juga disuntikkan langsung ke dalam fungsi `fetchLogs` dan `fetchEmployees` di `App.jsx`. Hal ini memungkinkan aksi usap ke bawah (*Pull-to-Refresh*) atau interval otomatis tiap 60 detik untuk bertindak sebagai *trigger* cadangan penarik data *offline* jika sedang berstatus *online*.
 * **Write-Ahead Log (WAL) Storage**: Mengintegrasikan `@capacitor/filesystem` untuk menuliskan berkas cadangan log absensi luring secara *append-only* ke `Directory.Documents`.
 
 ### 22.4 Presisi WebGL & Penguncian Status Scanner (`humanSingleton.js` & `TabFaceVerification.jsx`)
