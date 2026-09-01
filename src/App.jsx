@@ -596,7 +596,7 @@ function AppContent() {
     // Sort by timestamp descending
     finalLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setLogs(finalLogs);
-  }, [user]);
+  }, [user, localEmployees]);
 
   // Check Unsynced Count from IndexedDB
   const refreshUnsyncedCount = useCallback(async () => {
