@@ -767,3 +767,25 @@ Pembaruan versi **v3.2.0** berfokus pada penyelesaian masalah ketidakkonsistenan
 ### 19.6 Tombol Sinkronisasi Manual Aman Kamera di Halaman Absensi
 * **Desain UI Khusus**: Untuk mematuhi batasan penonaktifkan gesture *pull-to-refresh* di halaman absensi (guna mencegah reload browser tidak sengaja yang mematikan video stream kamera dan membuang RAM AI model), kami menambahkan tombol **Sync Karyawan** pada bar judul [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx).
 * **Sync Tanpa Refresh**: Tombol ini memicu fungsi `fetchEmployees()` dengan indikator berputar (*loading spinner*), memberikan cara aman bagi mandor di lapangan untuk melakukan sinkronisasi data master karyawan secara dinamis tanpa mematikan sesi kamera aktif.
+
+---
+
+## 20. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v3.3.0)
+
+Pembaruan versi **v3.3.0** berfokus pada penyelesaian masalah fatal tipe data primary key SQLite pada pengoperasian luring (*offline-first*), perbaikan nama ekspor fungsi sinkronisasi manual, serta penyelarasan alur registrasi & absensi offline:
+
+### 20.1 Migrasi Tipe Data SQLite Primary Key (TEXT Primary Key for Offline Employees)
+* **Akar Masalah**: Saat melakukan penambahan karyawan secara offline di [KaryawanPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/KaryawanPage.jsx), sistem membuat ID sementara berbasis string (`off_emp_1788222532279_pq5h2`). Namun, pada skema SQLite native APK di [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts), kolom `id` dan `employee_id` pada tabel `local_employees`, `local_master_descriptors`, `local_today_attendance_cache`, `local_attendance_queue`, dan `local_attendance_logs` didefinisikan sebagai `INTEGER PRIMARY KEY` atau `INTEGER NOT NULL`. Karena SQLite secara ketat memberlakukan aturan angka pada `INTEGER PRIMARY KEY`, percobaan menyimpan ID string memicu error fatal `[SQLite Service cacheUserMasterVector Error]: Run: datatype mismatch (code 20)`.
+* **Solusi Skema & Auto-Migration**:
+  * Mengubah seluruh definisi DDL kolom primary key dan foreign key ID menjadi `TEXT PRIMARY KEY` dan `TEXT NOT NULL` pada skema SQLite.
+  * Menambahkan rutin **Auto-Migration** otomatis berbasis `PRAGMA table_info` di `initSQLite()`. Jika aplikasi dijalankan di perangkat dengan database lama, sistem secara aman membuat tabel versi `v2`, memindahkan data lama dengan `CAST(id AS TEXT)`, membuang tabel lama, dan mengganti namanya ke tabel utama tanpa kehilangan data offline yang sudah tersimpan.
+  * Memperbarui seluruh fungsi pendukung (`sqliteCacheUserMasterVector`, `sqliteCacheGeometricVector`, `sqliteQueueOfflineAttendance`, `sqliteBulkPutEmployeesCache`, `sqliteDeleteEmployeeBiometrics`, `sqliteCacheTodayAttendance`, `sqliteGetTodayAttendance`, `sqliteSaveAttendanceLog`, `sqliteBulkSaveAttendanceLogs`, dan `sqliteSavePendingEmployee`) agar memproses ID sebagai `String` tanpa melakukan konversi `parseInt(...)` atau `Number(...)` yang menghasilkan `NaN`.
+
+### 20.2 Alur Registrasi & Absensi Offline 100% Mandiri
+* **Registrasi ke Absensi Offline**: Dengan tipe data `TEXT` pada SQLite lokal, karyawan yang didaftarkan saat offline dapat langsung melakukan scan absensi biometrik di [AbsensiPage.jsx](file:///d:/FACE%20VERIFICATION/src/pages/AbsensiPage.jsx) meskipun perangkat tidak terhubung ke internet.
+* **Proses Auto-Sync Bertahap**: Saat perangkat terhubung kembali ke internet, [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) akan mengunggah data karyawan offline terlebih dahulu ke Supabase untuk mendapatkan ID resmi dari server, memperbarui cache lokal, lalu mengunggah antrean log absensinya.
+
+### 20.3 Pembenahan Panggilan Import Sinkronisasi Manual (`Manual Sync Requests Error`)
+* **Akar Masalah**: Peringatan `[Manual Sync Requests Error]` muncul di konsol saat menekan tombol sinkronisasi manual karena di [App.jsx](file:///d:/FACE%20VERIFICATION/src/App.jsx) fungsi sinkronisasi pengajuan di-import dengan nama salah `syncPendingRequests`, padahal nama fungsi asli yang di-export dari [syncEngine.js](file:///d:/FACE%20VERIFICATION/src/syncEngine.js) adalah `syncPendingAttendanceRequests`.
+* **Solusi**: Memperbaiki pemanggilan nama fungsi import di `App.jsx` menjadi `syncPendingAttendanceRequests`, serta menambahkan pemanggilan `syncPendingEmployees` pada alur sinkronisasi manual agar pendaftaran karyawan offline & biometrik ikut di-push secara instan ke cloud server.
+
