@@ -146,6 +146,8 @@ FOR EACH ROW EXECUTE FUNCTION public.set_updated_at_timestamp();
 -- ----------------------------------------------------------------------------
 -- 7. RPC FUNCTION: VERIFY ADMIN LOGIN
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.verify_admin_login(TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.verify_admin_login(
     p_username TEXT,
     p_password_hash TEXT
