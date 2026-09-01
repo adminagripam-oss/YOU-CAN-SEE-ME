@@ -1528,6 +1528,8 @@ export default function TabFaceVerification({
             name: targetEmp.name,
             department: targetEmp.department,
             afdeling: targetEmp.afdeling || null,
+            nama_kebun: targetEmp.nama_kebun || currentUser?.kebun || null,
+            kebun: targetEmp.nama_kebun || currentUser?.kebun || null,
             timestamp: recordTimestamp,
             location: `${locationStr} - GeoMesh Scanner`,
             lat: userLat,

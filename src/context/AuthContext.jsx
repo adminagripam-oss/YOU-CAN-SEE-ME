@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { db } from '../db';
+import { db, getUnsyncedDataSummary } from '../db';
 
 // Helper function to hash a string to SHA-256 for local offline credential matching
 async function hashPassword(password) {
@@ -194,7 +194,6 @@ export function AuthProvider({ children }) {
   // Logout handler (dengan proteksi cegah kehilangan data offline & tanpa penghapusan database non-destruktif)
   const logout = async (force = false, showToast = null) => {
     try {
-      const { getUnsyncedDataSummary } = await import('../db');
       const summary = await getUnsyncedDataSummary();
 
       if (summary.total > 0 && !force) {
