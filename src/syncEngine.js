@@ -53,7 +53,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
         latitude: log.latitude !== undefined ? log.latitude : (log.lat !== undefined ? log.lat : null),
         longitude: log.longitude !== undefined ? log.longitude : (log.lng !== undefined ? log.lng : null),
         durasi: log.durasi || null,
-        attendance_type: log.attendance_type || 'CHECK_IN',
+        attendance_type: (log.attendance_type || 'CHECK-IN').replace('_', '-'),
         nik: log.nik || null,
         name: log.name || null,
         department: log.department || null
