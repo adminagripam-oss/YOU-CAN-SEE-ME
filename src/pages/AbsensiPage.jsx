@@ -22,7 +22,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
         accuracy: pos.coords.accuracy,
       }),
       () => { },
-      { enableHighAccuracy: true, maximumAge: 10000 }
+      { enableHighAccuracy: false, maximumAge: 10000 }
     );
   };
 
@@ -81,42 +81,25 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
         if (showToast) showToast('Lokasi Aktif', 'GPS berhasil diaktifkan. Koordinat Anda siap direkam.', 'success');
       },
       (err) => {
-        // Coba lagi dengan low accuracy jika gagal karena timeout/sinyal
-        if (err.code === 3 || err.code === 2) {
-          console.warn('[AbsensiPage] GPS high accuracy failed, retrying with low accuracy...');
-          navigator.geolocation.getCurrentPosition(
-            (pos2) => {
-              setGpsPermission('granted');
-              setLiveCoords({
-                lat: pos2.coords.latitude,
-                lng: pos2.coords.longitude,
-                accuracy: pos2.coords.accuracy,
-              });
-              startGpsWatcher();
-              if (showToast) showToast('Lokasi Aktif', 'GPS diaktifkan dalam mode akurasi standar.', 'success');
-            },
-            (err2) => {
-              // Jika masih gagal (misal tetap timeout), berikan toleransi (bypass) untuk pengetesan agar tidak stuck
-              console.error('[AbsensiPage] GPS low accuracy failed too:', err2);
-              setGpsPermission('granted'); // Set to granted so user is not blocked
-              setLiveCoords({
-                lat: -6.200000, // Fallback ke kantor
-                lng: 106.816600,
-                accuracy: 999
-              });
-              startGpsWatcher();
-              if (showToast) showToast('Lokasi Standar', 'Menggunakan lokasi default karena GPS HP tidak merespon.', 'warning');
-            },
-            { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
-          );
-        } else {
-          // Jika ditolak izinnya oleh user (err.code === 1)
+        // Jika ditolak izinnya oleh user (err.code === 1)
+        if (err.code === 1) {
           setGpsPermission('denied');
           setLiveCoords(null);
           if (showToast) showToast('Izin Ditolak', 'Izin lokasi ditolak. Aktifkan di pengaturan browser/HP Anda.', 'error');
+        } else {
+          // Jika gagal karena timeout/sinyal (err.code === 2 atau 3), berikan toleransi (bypass) untuk pengetesan agar tidak stuck
+          console.error('[AbsensiPage] GPS low accuracy failed:', err);
+          setGpsPermission('granted'); // Set to granted so user is not blocked
+          setLiveCoords({
+            lat: -6.200000, // Fallback ke kantor
+            lng: 106.816600,
+            accuracy: 999
+          });
+          startGpsWatcher();
+          if (showToast) showToast('Lokasi Standar', 'Menggunakan lokasi default karena GPS HP tidak merespon.', 'warning');
         }
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
     );
   };
 
