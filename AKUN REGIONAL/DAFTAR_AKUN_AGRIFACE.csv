@@ -1,5 +1,6 @@
 Kategori;Nama Scope;Username;Password;Role;Region;Kebun;NIK
 Head Office;Nasional;admin.hq;tanamanhead;headoffice_admin;;;KB-BHI-01
+Head Office;Nasional;admin;tanaman;headoffice_admin;;;KB-ADM-00
 Regional;Sumut 2;admin.sumut2;tanamansumut2;regional_admin;Sumut 2;;KB-BHI-02
 Regional;Riau 1;admin.riau1;tanamanriau1;regional_admin;Riau 1;;KB-PAR-01
 Regional;Kalbar 1A;admin.kalbar1a;tanamankalbar1a;regional_admin;Kalbar 1A;;KB-PJA-01
