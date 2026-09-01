@@ -813,4 +813,31 @@ Pembaruan versi **v3.4.0** berfokus pada optimasi performa tinggi melalui penera
 ### 21.3 Sinkronisasi Latar Belakang Tanpa Reload Kamera
 * **Performa Scanner Aman RAM**: Tombol **Sync Karyawan** pada antarmuka scanner di [TabFaceVerification.jsx](file:///d:/FACE%20VERIFICATION/src/components/TabFaceVerification.jsx) memicu penarikan data karyawan terbaru di latar belakang dengan indikator spinner tanpa menghentikan video stream kamera atau memuat ulang model AI biometrik yang berat.
 
+---
+
+## 22. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v4.0.0)
+
+Pembaruan versi **v4.0.0** merupakan rilis arsitektur utama yang mencakup empat tahapan *System Directives*:
+
+### 22.1 Database & RLS Secure Schema (`01_schema.sql`)
+* **Soft Delete Pattern**: Menghapus `ON DELETE CASCADE` pada tabel `employees` dan menggantinya dengan kolom `deleted_at TIMESTAMPTZ` di [01_schema.sql](file:///d:/FACE%20VERIFICATION/supabase/migrations/01_schema.sql) untuk mencegah kehilangan data master atau riwayat absensi.
+* **RLS Policies & RPC Login**: Menerapkan kebijakan Row Level Security (RLS) pada seluruh tabel utama dan fungsi RPC `verify_admin_login` untuk verifikasi akun admin lokal.
+
+### 22.2 Hybrid Offline Storage Layer (`db.js` & `sqliteService.ts`)
+* **Pemetaan ID Text**: Memastikan seluruh kolom ID (`id`, `employee_id`) pada skema SQLite native APK dan Dexie.js terpetakan sebagai `TEXT PRIMARY KEY` / `TEXT NOT NULL` untuk mendukung UUID luring string (`off_emp_...`).
+* **Abstraksi Vektor Master**: Implementasi `getAllMasterVectors()` yang konsisten di [sqliteService.ts](file:///d:/FACE%20VERIFICATION/src/services/sqliteService.ts) dan [db.js](file:///d:/FACE%20VERIFICATION/src/db.js).
+
+### 22.3 Auto-Sync Engine & Sequential 3-Tier Sync (`syncEngine.js`)
+* **Alur 3-Tier Sequential Push**:
+  1. Mengunggah data karyawan luring dari `employee_sync_queue`.
+  2. Mengambil ID Cloud resmi dari Supabase dan secara otomatis memperbarui `employee_id` pada antrean log absensi luring yang sebelumnya memakai ID sementara (`off_emp_...`).
+  3. Mengunggah antrean log absensi (`attendance_sync_queue`).
+  4. Mengunggah pengajuan admin (`attendance_requests`).
+* **Write-Ahead Log (WAL) Storage**: Mengintegrasikan `@capacitor/filesystem` untuk menuliskan berkas cadangan log absensi luring secara *append-only* ke `Directory.Documents`.
+
+### 22.4 Presisi WebGL & Penguncian Status Scanner (`humanSingleton.js` & `TabFaceVerification.jsx`)
+* **Presisi WebGL Normal**: Menetapkan `WEBGL_FORCE_F16_TEXTURES: true` pada [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) untuk menjamin nilai vektor biometrik 1024-dimensi konsisten di seluruh perangkat HP/tablet/laptop.
+* **Scan Lock**: Mengunci status pencocokan biometrik menggunakan `useRef` saat verifikasi berhasil (threshold >= 0.85) untuk mencegah *double-submission*.
+
+
 
