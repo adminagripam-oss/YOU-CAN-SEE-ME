@@ -41,7 +41,7 @@ export async function initSQLite(): Promise<void> {
     // Execute DDL to verify local tables exist
     const ddl = `
       CREATE TABLE IF NOT EXISTS local_employees (
-        id INTEGER PRIMARY KEY,
+        id TEXT PRIMARY KEY,
         nik TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
         department TEXT,
@@ -54,7 +54,7 @@ export async function initSQLite(): Promise<void> {
       );
 
       CREATE TABLE IF NOT EXISTS local_master_descriptors (
-        employee_id INTEGER PRIMARY KEY,
+        employee_id TEXT PRIMARY KEY,
         descriptor_json TEXT,
         geometric_descriptor_json TEXT,
         updated_at TEXT
@@ -62,7 +62,7 @@ export async function initSQLite(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS local_attendance_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL,
+        employee_id TEXT NOT NULL,
         nik TEXT,
         name TEXT,
         department TEXT,
@@ -79,7 +79,7 @@ export async function initSQLite(): Promise<void> {
       );
 
       CREATE TABLE IF NOT EXISTS local_today_attendance_cache (
-        employee_id INTEGER PRIMARY KEY,
+        employee_id TEXT PRIMARY KEY,
         has_checked_in INTEGER DEFAULT 0,
         has_checked_out INTEGER DEFAULT 0,
         checked_in INTEGER DEFAULT 0,
@@ -90,7 +90,7 @@ export async function initSQLite(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS local_attendance_logs (
         id TEXT PRIMARY KEY,
-        employee_id INTEGER NOT NULL,
+        employee_id TEXT NOT NULL,
         nik TEXT,
         name TEXT,
         department TEXT,
@@ -137,6 +137,156 @@ export async function initSQLite(): Promise<void> {
     `;
 
     await dbConnection.execute(ddl);
+
+    // Migration logic for existing databases with old INTEGER primary key schemas
+    try {
+      const empInfo = await dbConnection.query(`PRAGMA table_info(local_employees);`);
+      const idCol = empInfo.values?.find((c: any) => c.name === 'id');
+      if (idCol && idCol.type && idCol.type.toUpperCase().includes('INT')) {
+        console.log('[SQLite Service] Migrating local_employees id column from INTEGER to TEXT...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_employees_v2 (
+            id TEXT PRIMARY KEY,
+            nik TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            department TEXT,
+            afdeling TEXT,
+            nama_kebun TEXT,
+            status_tk TEXT,
+            jabatan TEXT,
+            status_perkawinan TEXT,
+            has_master_biometric INTEGER DEFAULT 0,
+            region TEXT,
+            is_synced INTEGER DEFAULT 1
+          );
+          INSERT OR IGNORE INTO local_employees_v2 (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
+            SELECT CAST(id AS TEXT), nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric FROM local_employees;
+          DROP TABLE local_employees;
+          ALTER TABLE local_employees_v2 RENAME TO local_employees;
+        `);
+        console.log('[SQLite Service] Migrated local_employees to TEXT primary key.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_employees warning:', e);
+    }
+
+    try {
+      const mdInfo = await dbConnection.query(`PRAGMA table_info(local_master_descriptors);`);
+      const empIdCol = mdInfo.values?.find((c: any) => c.name === 'employee_id');
+      if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
+        console.log('[SQLite Service] Migrating local_master_descriptors employee_id column from INTEGER to TEXT...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_master_descriptors_v2 (
+            employee_id TEXT PRIMARY KEY,
+            descriptor_json TEXT,
+            geometric_descriptor_json TEXT,
+            updated_at TEXT
+          );
+          INSERT OR IGNORE INTO local_master_descriptors_v2 (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
+            SELECT CAST(employee_id AS TEXT), descriptor_json, geometric_descriptor_json, updated_at FROM local_master_descriptors;
+          DROP TABLE local_master_descriptors;
+          ALTER TABLE local_master_descriptors_v2 RENAME TO local_master_descriptors;
+        `);
+        console.log('[SQLite Service] Migrated local_master_descriptors to TEXT primary key.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_master_descriptors warning:', e);
+    }
+
+    try {
+      const tacInfo = await dbConnection.query(`PRAGMA table_info(local_today_attendance_cache);`);
+      const empIdCol = tacInfo.values?.find((c: any) => c.name === 'employee_id');
+      if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
+        console.log('[SQLite Service] Migrating local_today_attendance_cache employee_id column from INTEGER to TEXT...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_today_attendance_cache_v2 (
+            employee_id TEXT PRIMARY KEY,
+            has_checked_in INTEGER DEFAULT 0,
+            has_checked_out INTEGER DEFAULT 0,
+            checked_in INTEGER DEFAULT 0,
+            check_in_time TEXT,
+            check_out_time TEXT,
+            cached_date TEXT
+          );
+          INSERT OR IGNORE INTO local_today_attendance_cache_v2 (employee_id, has_checked_in, has_checked_out, checked_in, check_in_time, check_out_time, cached_date)
+            SELECT CAST(employee_id AS TEXT), has_checked_in, has_checked_out, checked_in, check_in_time, check_out_time, cached_date FROM local_today_attendance_cache;
+          DROP TABLE local_today_attendance_cache;
+          ALTER TABLE local_today_attendance_cache_v2 RENAME TO local_today_attendance_cache;
+        `);
+        console.log('[SQLite Service] Migrated local_today_attendance_cache to TEXT primary key.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_today_attendance_cache warning:', e);
+    }
+
+    try {
+      const aqInfo = await dbConnection.query(`PRAGMA table_info(local_attendance_queue);`);
+      const empIdCol = aqInfo.values?.find((c: any) => c.name === 'employee_id');
+      if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
+        console.log('[SQLite Service] Migrating local_attendance_queue employee_id column from INTEGER to TEXT...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_attendance_queue_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id TEXT NOT NULL,
+            nik TEXT,
+            name TEXT,
+            department TEXT,
+            timestamp TEXT,
+            location TEXT,
+            lat REAL,
+            lng REAL,
+            status TEXT,
+            attendance_type TEXT,
+            euclidean_distance REAL,
+            is_synced INTEGER DEFAULT 0,
+            created_at TEXT,
+            kebun TEXT
+          );
+          INSERT OR IGNORE INTO local_attendance_queue_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+            SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_queue;
+          DROP TABLE local_attendance_queue;
+          ALTER TABLE local_attendance_queue_v2 RENAME TO local_attendance_queue;
+        `);
+        console.log('[SQLite Service] Migrated local_attendance_queue to TEXT employee_id.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_attendance_queue warning:', e);
+    }
+
+    try {
+      const alInfo = await dbConnection.query(`PRAGMA table_info(local_attendance_logs);`);
+      const empIdCol = alInfo.values?.find((c: any) => c.name === 'employee_id');
+      if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
+        console.log('[SQLite Service] Migrating local_attendance_logs employee_id column from INTEGER to TEXT...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_attendance_logs_v2 (
+            id TEXT PRIMARY KEY,
+            employee_id TEXT NOT NULL,
+            nik TEXT,
+            name TEXT,
+            department TEXT,
+            afdeling TEXT,
+            timestamp TEXT,
+            location TEXT,
+            lat REAL,
+            lng REAL,
+            status TEXT,
+            attendance_type TEXT,
+            euclidean_distance REAL,
+            is_synced INTEGER DEFAULT 0,
+            created_at TEXT,
+            kebun TEXT
+          );
+          INSERT OR IGNORE INTO local_attendance_logs_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
+            SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_logs;
+          DROP TABLE local_attendance_logs;
+          ALTER TABLE local_attendance_logs_v2 RENAME TO local_attendance_logs;
+        `);
+        console.log('[SQLite Service] Migrated local_attendance_logs to TEXT employee_id.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_attendance_logs warning:', e);
+    }
 
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN afdeling TEXT;`);
@@ -202,6 +352,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
   try {
     const empId = user.employee_id || user.id;
     if (!empId) return;
+    const empIdStr = String(empId);
 
     let vector = user.descriptor_json || user.descriptor || user.face_vector || null;
     let vectorStr: string | null = null;
@@ -227,7 +378,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
       `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        empId,
+        empIdStr,
         user.nik,
         user.name,
         user.department || user.jabatan || null,
@@ -245,7 +396,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
       `INSERT OR REPLACE INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
        VALUES (?, ?, ?, ?)`,
       [
-        empId,
+        empIdStr,
         vectorStr,
         gfvStr,
         new Date().toISOString()
@@ -260,14 +411,14 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 /**
  * Cache geometric descriptor (GFV 40-d) for an employee.
  */
-export async function sqliteCacheGeometricVector(employeeId: number, gfv: any): Promise<void> {
+export async function sqliteCacheGeometricVector(employeeId: number | string, gfv: any): Promise<void> {
   if (!dbConnection) return;
   try {
     if (!employeeId || !gfv) return;
     const gfvStr = JSON.stringify(gfv);
     await dbConnection.run(
       `UPDATE local_master_descriptors SET geometric_descriptor_json = ?, updated_at = ? WHERE employee_id = ?`,
-      [gfvStr, new Date().toISOString(), employeeId]
+      [gfvStr, new Date().toISOString(), String(employeeId)]
     );
     console.log(`[SQLite Service] Cached geometric vector for employee: ${employeeId}`);
   } catch (err: any) {
@@ -328,7 +479,7 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
         employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
-        logData.employee_id,
+        String(logData.employee_id),
         logData.nik,
         logData.name,
         logData.department,
@@ -436,7 +587,7 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
       statement: `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       values: [
-        emp.id,
+        String(emp.id),
         emp.nik,
         emp.name,
         emp.department || emp.jabatan || null,
@@ -503,17 +654,18 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
 /**
  * Deletes local employee data and master biometric descriptors.
  */
-export async function sqliteDeleteEmployeeBiometrics(employeeId: number): Promise<void> {
+export async function sqliteDeleteEmployeeBiometrics(employeeId: number | string): Promise<void> {
   if (!dbConnection) return;
   try {
+    const empIdStr = String(employeeId);
     const set = [
       {
         statement: `DELETE FROM local_master_descriptors WHERE employee_id = ?`,
-        values: [employeeId]
+        values: [empIdStr]
       },
       {
         statement: `DELETE FROM local_employees WHERE id = ?`,
-        values: [employeeId]
+        values: [empIdStr]
       }
     ];
     await dbConnection.executeSet(set);
@@ -545,7 +697,7 @@ export async function sqliteCacheTodayAttendance(statusMap: any, cachedDate: str
                     (employee_id, has_checked_in, has_checked_out, checked_in, check_in_time, check_out_time, cached_date)
                     VALUES (?, ?, ?, ?, ?, ?, ?)`,
         values: [
-          parseInt(empId),
+          String(empId),
           status.hasCheckedIn ? 1 : 0,
           status.hasCheckedOut ? 1 : 0,
           status.checked_in ? 1 : 0,
@@ -569,12 +721,12 @@ export async function sqliteCacheTodayAttendance(statusMap: any, cachedDate: str
 /**
  * Retrieves cached today's attendance status for a single employee from SQLite.
  */
-export async function sqliteGetTodayAttendance(empId: number, cachedDate: string): Promise<any | null> {
+export async function sqliteGetTodayAttendance(empId: number | string, cachedDate: string): Promise<any | null> {
   if (!dbConnection) return null;
   try {
     const res = await dbConnection.query(
       `SELECT * FROM local_today_attendance_cache WHERE employee_id = ? AND cached_date = ?`,
-      [empId, cachedDate]
+      [String(empId), cachedDate]
     );
     const rows = res.values || [];
     if (rows.length > 0) {
@@ -619,7 +771,7 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
-        Number(log.employee_id),
+        String(log.employee_id),
         log.nik || null,
         log.name || null,
         log.department || null,
@@ -653,7 +805,7 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       values: [
         String(log.id),
-        Number(log.employee_id),
+        String(log.employee_id),
         log.nik || null,
         log.name || null,
         log.department || null,
@@ -866,7 +1018,7 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, is_synced)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [
-        empData.id,
+        String(empData.id),
         empData.nik,
         empData.name,
         empData.department || empData.jabatan || null,

@@ -1413,8 +1413,9 @@ export default function TabFaceVerification({
 
     if (navigator.onLine) {
       try {
+        const parsedEmpId = isNaN(Number(selectedEmployeeId)) ? selectedEmployeeId : parseInt(selectedEmployeeId, 10);
         const apiPayload = {
-          employee_id: parseInt(selectedEmployeeId),
+          employee_id: parsedEmpId,
           nik: (targetEmp.nik || nikInput).trim() || null,
           name: targetEmp.name || null,
           department: targetEmp.department || null,
@@ -1458,7 +1459,7 @@ export default function TabFaceVerification({
           const logKebun = currentUser?.kebun || targetEmp.nama_kebun || '-';
           const logAfdeling = targetEmp.afdeling || '-';
           const logPayload = {
-            employee_id: parseInt(selectedEmployeeId),
+            employee_id: isNaN(Number(selectedEmployeeId)) ? selectedEmployeeId : parseInt(selectedEmployeeId, 10),
             nik: (targetEmp.nik || nikInput).trim() || null,
             name: targetEmp.name || null,
             department: targetEmp.department || null,

@@ -199,7 +199,7 @@ export const db = {
             const status = statusMap[empId];
             if (!status) continue;
             records.push({
-              employee_id: parseInt(empId),
+              employee_id: isNaN(Number(empId)) ? empId : Number(empId),
               hasCheckedIn: status.hasCheckedIn,
               hasCheckedOut: status.hasCheckedOut,
               checked_in: status.checked_in,
@@ -220,14 +220,15 @@ export const db = {
     async get(empId, cachedDate) {
       if (Capacitor.isNativePlatform()) {
         try {
-          return await sqliteGetTodayAttendance(Number(empId), cachedDate);
+          return await sqliteGetTodayAttendance(empId, cachedDate);
         } catch (e) {
           console.error('[db.js get error]:', e, e?.stack || '');
           return null;
         }
       } else {
         try {
-          const row = await dexieDb.today_attendance_cache.get(Number(empId));
+          const key = isNaN(Number(empId)) ? empId : Number(empId);
+          const row = await dexieDb.today_attendance_cache.get(key);
           if (row && row.cached_date === cachedDate) {
             return {
               hasCheckedIn: row.hasCheckedIn,
