@@ -839,5 +839,20 @@ Pembaruan versi **v4.0.0** merupakan rilis arsitektur utama yang mencakup empat 
 * **Presisi WebGL Normal**: Menetapkan `WEBGL_FORCE_F16_TEXTURES: true` pada [humanSingleton.js](file:///d:/FACE%20VERIFICATION/src/humanSingleton.js) untuk menjamin nilai vektor biometrik 1024-dimensi konsisten di seluruh perangkat HP/tablet/laptop.
 * **Scan Lock**: Mengunci status pencocokan biometrik menggunakan `useRef` saat verifikasi berhasil (threshold >= 0.85) untuk mencegah *double-submission*.
 
+---
+
+## 23. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v4.1.0)
+
+Pembaruan versi **v4.1.0** berfokus pada **Multi-Account Shared Device Handling** untuk keamanan data pada tablet/HP yang dipakai bersama oleh beberapa admin:
+
+### 23.1 Proteksi Pencegahan Kehilangan Data Offline Saat Logout (Data Loss Prevention)
+* **Logout Guard**: Sebelum proses logout dijalankan, fungsi `logout()` di [AuthContext.jsx](file:///d:/FACE%20VERIFICATION/src/context/AuthContext.jsx) memeriksa fungsi `getUnsyncedDataSummary()` di [db.js](file:///d:/FACE%20VERIFICATION/src/db.js).
+* **Abort Logout & Warning**: Jika ditemukan data offline yang belum tersinkronisasi (log absensi, karyawan baru, atau pengajuan admin), proses logout **dibatalkan secara otomatis** dan sistem memunculkan pesan peringatan eksplisit agar pengguna melakukan sinkronisasi (*Sync*) terlebih dahulu.
+
+### 23.2 Multi-Tenancy Lokal Non-Destruktif (Preserve Local Database)
+* **Tanpa Penghapusan Database Global**: Proses logout **tidak lagi menghapus database lokal** (`db.clear()`), sehingga data offline dari admin lain yang belum di-push tetap aman tersimpan di SQLite / Dexie.
+* **Isolasi Scope per Akun**: Seluruh kueri lokal dikunci secara ketat berdasarkan scope admin aktif (`kebun`, `region`, atau `role`), mencegah kebocoran data antar-kebun saat beberapa admin bergantian login di satu tablet yang sama.
+
+
 
 
