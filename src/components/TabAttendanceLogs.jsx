@@ -457,13 +457,13 @@ export default function TabAttendanceLogs({
             // Optimistic update: instantly remove from local state
             setDeletedLogIds(prev => [...prev, ...idsToDelete]);
 
-            // Klasifikasi ID: 'offline_' dan 'auto_out_' = lokal IndexedDB saja
+            // Klasifikasi ID: 'offline_', 'auto_out_', dan 'online_' = lokal IndexedDB saja
             // ID numerik murni = data online Supabase
             const localOnlyIds = idsToDelete.filter(id =>
-              String(id).startsWith('offline_') || String(id).startsWith('auto_out_')
+              String(id).startsWith('offline_') || String(id).startsWith('auto_out_') || String(id).startsWith('online_')
             );
             const onlineIds = idsToDelete.filter(id =>
-              !String(id).startsWith('offline_') && !String(id).startsWith('auto_out_')
+              !String(id).startsWith('offline_') && !String(id).startsWith('auto_out_') && !String(id).startsWith('online_')
             );
 
             const { db } = await import('../db');
