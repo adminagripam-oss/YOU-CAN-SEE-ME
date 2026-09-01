@@ -853,6 +853,9 @@ Pembaruan versi **v4.1.0** berfokus pada **Multi-Account Shared Device Handling*
 * **Tanpa Penghapusan Database Global**: Proses logout **tidak lagi menghapus database lokal** (`db.clear()`), sehingga data offline dari admin lain yang belum di-push tetap aman tersimpan di SQLite / Dexie.
 * **Isolasi Scope per Akun**: Seluruh kueri lokal dikunci secara ketat berdasarkan scope admin aktif (`kebun`, `region`, atau `role`), mencegah kebocoran data antar-kebun saat beberapa admin bergantian login di satu tablet yang sama.
 
-
+### 23.3 Perbaikan Bug Kritis Mode Offline (Offline Sync & Dual-Write Fixes)
+* **Pembersihan Dual-Write (Delete Local Online ID)**: Memperbaiki *bug* ketika pengguna menghapus data absensi online yang tersimpan secara lokal (Dual-Write) sehingga ID lokal (contoh: `online_17...`) tidak dikirimkan ke tabel Supabase yang berformat *BigInt*, mencegah error tipe data (`invalid input syntax for type bigint`).
+* **Koreksi Kolom Delta Sync**: Memperbaiki kueri *Delta Sync* pada `App.jsx` yang sebelumnya salah menargetkan kolom `created_at` (kolom yang tidak ada di Supabase untuk `attendance_logs`) menjadi kolom `timestamp`. Hal ini memastikan log terbaru selalu berhasil di-download setelah proses sinkronisasi offline selesai, mengatasi keluhan "data absensi menghilang setelah disinkronkan".
+* **Koreksi Constraint (CHECK-IN / CHECK-OUT)**: Memperbaiki format *fallback* pada `syncEngine.js` dan SQLite yang sebelumnya menggunakan garis bawah (`CHECK_IN`). Supabase memberlakukan aturan (*Constraint*) ketat menggunakan strip (`CHECK-IN`). Ketidaksesuaian ini sebelumnya mengakibatkan seluruh pengiriman data *offline* ke Supabase diblokir secara diam-diam. Proses normalisasi string menggunakan `.replace('_', '-')` diterapkan secara menyeluruh.
 
 
