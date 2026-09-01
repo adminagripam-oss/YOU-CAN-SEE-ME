@@ -441,7 +441,34 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       [empIdStr, employeeId]
     );
 
-    if (!res.values || res.values.length === 0) return null;
+    if (!res.values || res.values.length === 0) {
+      // Jika tidak ada di master_descriptors, coba cek apakah ini karyawan yang didaftarkan offline (belum di-sync)
+      const qRes = await dbConnection.query(
+        `SELECT * FROM local_employee_sync_queue WHERE CAST(id AS TEXT) = ? OR id = ? LIMIT 1`,
+        [empIdStr, employeeId]
+      );
+      if (qRes.values && qRes.values.length > 0) {
+        const row = qRes.values[0];
+        if (row.descriptor_json) {
+          return {
+            employee_id: row.id,
+            nik: row.nik,
+            name: row.name,
+            department: row.department,
+            afdeling: row.afdeling,
+            nama_kebun: row.nama_kebun,
+            status_tk: row.status_tk,
+            jabatan: row.jabatan,
+            status_perkawinan: row.status_perkawinan,
+            descriptor_json: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
+            face_vector: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
+            geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
+            updated_at: row.created_at
+          };
+        }
+      }
+      return null;
+    }
     const row = res.values[0];
 
     return {

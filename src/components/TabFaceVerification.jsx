@@ -1040,26 +1040,9 @@ export default function TabFaceVerification({
     setCurrentEAR(parseFloat(avgEAR.toFixed(3)));
 
     if (!livenessVerifiedRef.current) {
-      let passed = false;
+      // LOW ACCURACY / FAST MODE: Auto-pass liveness without blink/turn
+      let passed = true;
       const challenge = livenessChallengeRef.current;
-
-      if (challenge === 'BLINK') {
-        setLivenessStatusMsg('Tantangan Keamanan: Kedipkan / Tutup Mata Sejenak');
-        if (avgEAR < 0.23) {
-          eyeClosedRef.current = true;
-        } else if (eyeClosedRef.current && avgEAR > 0.25) {
-          passed = true;
-        }
-      } else if (challenge === 'TURN_LEFT' || challenge === 'TURN_RIGHT') {
-        setLivenessStatusMsg(
-          challenge === 'TURN_LEFT'
-            ? 'Tantangan Keamanan: Tolehkan Kepala ke KIRI'
-            : 'Tantangan Keamanan: Tolehkan Kepala ke KANAN'
-        );
-        const yaw = detection.rotation?.angle?.yaw || 0;
-        if (challenge === 'TURN_LEFT' && yaw > 0.15) passed = true;
-        if (challenge === 'TURN_RIGHT' && yaw < -0.15) passed = true;
-      }
 
       if (passed) {
         livenessVerifiedRef.current = true;

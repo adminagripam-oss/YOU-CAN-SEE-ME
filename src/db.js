@@ -531,7 +531,21 @@ export async function getCachedUserMasterVector(employeeId) {
   try {
     if (!employeeId) return null;
     const allMasters = await dexieDb.user_master.toArray();
-    return allMasters.find((m) => String(m.employee_id) === String(employeeId)) || null;
+    const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
+    if (existing) return existing;
+
+    // Fallback: check offline queue for offline registered employees
+    const offlineQueue = await dexieDb.attendance_sync_queue.toArray();
+    const offlineRegistered = offlineQueue.find((q) => String(q.id) === String(employeeId) && q.descriptor_json);
+    if (offlineRegistered) {
+      return {
+        ...offlineRegistered,
+        employee_id: offlineRegistered.id,
+        descriptor_json: typeof offlineRegistered.descriptor_json === 'string' ? JSON.parse(offlineRegistered.descriptor_json) : offlineRegistered.descriptor_json,
+      };
+    }
+
+    return null;
   } catch (err) {
     console.error('[IndexedDB Get Master Error]:', err);
     return null;
