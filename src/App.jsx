@@ -105,17 +105,39 @@ function AppContent() {
   };
 
   // Fetch Employees (2-Tier Fallback: Direct Supabase -> IndexedDB Cache)
-  const fetchEmployees = useCallback(async () => {
+  // Fetch Employees (Delta Sync + 2-Tier Fallback: Direct Supabase -> Local Cache)
+  const fetchEmployees = useCallback(async (isFullSync = false) => {
     // Tunggu admin user terotentikasi
     if (!user) return;
     const adminObj = user;
 
     let empData = null;
     let dataSource = 'supabase';
+    const lastSyncKey = `last_emp_sync_${adminObj.username}`;
 
-    // Tier 1: Direct Supabase Cloud Database Query (HTTPS)
+    // Preload existing cached employees to support Delta Sync
+    let localCachedEmps = [];
+    try {
+      const cached = await db.employees_cache.toArray();
+      if (cached) {
+        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+          localCachedEmps = cached.filter(e => e.nama_kebun === adminObj.kebun);
+        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+          localCachedEmps = cached.filter(e => e.region === adminObj.region);
+        } else {
+          localCachedEmps = cached;
+        }
+      }
+    } catch (e) {
+      console.warn('[FETCH EMPLOYEES LOCAL CACHE PRELOAD WARN]:', e);
+    }
+
+    // Tier 1: Direct Supabase Cloud Database Query (HTTPS) with Delta Sync
     if (!empData) {
       try {
+        const lastSyncTime = localStorage.getItem(lastSyncKey);
+        const useDeltaSync = !isFullSync && localCachedEmps.length > 0 && !!lastSyncTime;
+
         let query = supabase.from('employees').select('*');
 
         // Saring berdasarkan role
@@ -125,51 +147,73 @@ function AppContent() {
           query = query.eq('region', adminObj.region);
         }
 
+        if (useDeltaSync) {
+          query = query.gt('created_at', lastSyncTime);
+        }
+
         const { data, error } = await query.order('created_at', { ascending: false });
 
-        if (error || !data) {
+        if (error) {
           console.warn('[FETCH EMPLOYEES SUPABASE DIRECT ERROR]:', error?.message || 'No data');
           dataSource = 'indexeddb';
         } else {
-          let descData = [];
-          let allMasters = [];
-          try {
-            allMasters = await getAllMasterVectors();
-            const cachedEmpIds = new Set(allMasters.map(m => String(m.employee_id)));
-            const missingEmpIds = data.filter(e => e.has_master_biometric && !cachedEmpIds.has(String(e.id))).map(e => e.id);
+          const freshTime = new Date().toISOString();
+          localStorage.setItem(lastSyncKey, freshTime);
 
-            if (missingEmpIds.length > 0) {
-              console.log(`[Sync Pull] Mengunduh biometrics untuk ${missingEmpIds.length} karyawan baru/belum ter-cache dari cloud...`);
-              const { data: d, error: descErr } = await supabase
-                .from('master_descriptors')
-                .select('employee_id, descriptor_json, geometric_descriptor_json')
-                .in('employee_id', missingEmpIds);
-              if (!descErr && d) {
-                descData = d;
+          if (useDeltaSync && (!data || data.length === 0)) {
+            console.log(`[DELTA SYNC EMPLOYEES] 0 data baru dari cloud sejak ${lastSyncTime}. Menggunakan database lokal (0 byte diunduh).`);
+            empData = localCachedEmps;
+            dataSource = 'indexeddb';
+          } else {
+            console.log(`[${useDeltaSync ? 'DELTA SYNC' : 'FULL SYNC'} EMPLOYEES] Diunduh ${data.length} baris data dari cloud.`);
+
+            let descData = [];
+            let allMasters = [];
+            try {
+              allMasters = await getAllMasterVectors();
+              const cachedEmpIds = new Set(allMasters.map(m => String(m.employee_id)));
+              const missingEmpIds = data.filter(e => e.has_master_biometric && !cachedEmpIds.has(String(e.id))).map(e => e.id);
+
+              if (missingEmpIds.length > 0) {
+                console.log(`[Sync Pull] Mengunduh biometrics untuk ${missingEmpIds.length} karyawan baru/belum ter-cache dari cloud...`);
+                const { data: d, error: descErr } = await supabase
+                  .from('master_descriptors')
+                  .select('employee_id, descriptor_json, geometric_descriptor_json')
+                  .in('employee_id', missingEmpIds);
+                if (!descErr && d) {
+                  descData = d;
+                }
+              } else {
+                console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal (0 byte diunduh).');
               }
-            } else {
-              console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal (0 byte diunduh).');
+            } catch (e) {
+              console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
             }
-          } catch (e) {
-            console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
+
+            const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
+
+            const fetchedMapped = data.map(emp => {
+              const biometrics = descMap.get(String(emp.id));
+              const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
+
+              return {
+                ...emp,
+                nama_kebun: emp.kebun || emp.nama_kebun || '',
+                kebun: emp.kebun || emp.nama_kebun || '',
+                has_master_biometric: emp.has_master_biometric === true || !!biometrics || !!localMaster,
+                descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
+                geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
+              };
+            });
+
+            if (useDeltaSync) {
+              const mergedMap = new Map(localCachedEmps.map(e => [String(e.id), e]));
+              fetchedMapped.forEach(e => mergedMap.set(String(e.id), e));
+              empData = Array.from(mergedMap.values());
+            } else {
+              empData = fetchedMapped;
+            }
           }
-
-          const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
-
-          empData = data.map(emp => {
-            const biometrics = descMap.get(String(emp.id));
-            const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
-
-            return {
-              ...emp,
-              nama_kebun: emp.kebun || emp.nama_kebun || '',
-              kebun: emp.kebun || emp.nama_kebun || '',
-              has_master_biometric: emp.has_master_biometric === true || !!biometrics || !!localMaster,
-              descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
-              geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
-            };
-          });
-          console.log('[SUPABASE DIRECT] Fetched and resolved biometrics bulk for', empData.length, 'employees directly from cloud');
         }
       } catch (err) {
         const isOfflineErr = err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError');
@@ -182,24 +226,10 @@ function AppContent() {
       }
     }
 
-    // Tier 3: IndexedDB Local Offline Cache
+    // Tier 3: IndexedDB / SQLite Local Offline Cache Fallback
     if (!empData) {
-      try {
-        const cached = await db.employees_cache.toArray();
-        if (cached) {
-          // Saring secara lokal di tablet offline
-          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-            empData = cached.filter(e => e.nama_kebun === adminObj.kebun);
-          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
-            empData = cached.filter(e => e.region === adminObj.region);
-          } else {
-            empData = cached;
-          }
-          console.log(`[${Capacitor.isNativePlatform() ? 'SQLITE DATABASE' : 'INDEXEDDB CACHE'}] Loaded`, empData.length, 'cached employees offline');
-        }
-      } catch (err) {
-        console.error(`[FETCH EMPLOYEES ${Capacitor.isNativePlatform() ? 'SQLITE' : 'INDEXEDDB'} ERROR]:`, err.message);
-      }
+      empData = localCachedEmps;
+      console.log(`[${Capacitor.isNativePlatform() ? 'SQLITE DATABASE' : 'INDEXEDDB CACHE'}] Loaded`, empData.length, 'cached employees offline');
     }
 
     // Merge pending unsynced offline registered employees if any exist
@@ -230,16 +260,8 @@ function AppContent() {
       setEmployees(empData);
 
       // Persist to local cache for mobile offline support
-      // Only clear and rebuild if we got fresh data from API or Supabase
       if (dataSource !== 'indexeddb') {
         try {
-          let filter = null;
-          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-            filter = { kebun: adminObj.kebun };
-          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
-            filter = { region: adminObj.region };
-          }
-          await db.employees_cache.clear(filter);
           if (empData.length > 0) {
             await db.employees_cache.bulkPut(empData);
             for (const emp of empData) {
@@ -260,8 +282,8 @@ function AppContent() {
     }
   }, [user]);
 
-  // Fetch Attendance Logs (2-Tier: Supabase + Offline Local Queue with Deduplication)
-  const fetchLogs = useCallback(async () => {
+  // Fetch Attendance Logs (Delta Sync + 2-Tier: Supabase + Offline Local Queue)
+  const fetchLogs = useCallback(async (isFullSync = false) => {
     let onlineLogs = [];
 
     // Helper to normalize CHECK_IN / CHECK-IN / CHECKIN to CHECK-IN, etc.
@@ -296,16 +318,17 @@ function AppContent() {
     // Map of employees by ID
     const masterEmpMap = new Map(localEmployees.map(e => [String(e.id), e]));
 
-    console.log('[DEBUG fetchLogs] localEmployees loaded:', localEmployees.length, localEmployees.map(e => ({ id: e.id, name: e.name })));
-
-    // Step 1: Fetch latest online logs from Supabase and cache them in local database
+    // Step 1: Fetch latest online logs from Supabase with Delta Sync
     try {
+      const lastLogSyncKey = `last_log_sync_${user?.username || 'global'}`;
+      const lastLogSyncTime = localStorage.getItem(lastLogSyncKey);
+      const rawLocalCached = await db.attendance_logs.toArray();
+
       let query = supabase.from('attendance_logs').select('*');
 
       // Saring log online berdasarkan lingkup admin aktif
       if (user) {
         const adminObj = user;
-        console.log('[DEBUG fetchLogs] adminObj:', { role: adminObj.role, kebun: adminObj.kebun, region: adminObj.region });
 
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
           const empIds = localEmployees.map(e => e.id);
@@ -340,89 +363,100 @@ function AppContent() {
         }
       }
 
-      const { data: rawLogs, error } = await query
-        .order('timestamp', { ascending: false });
+      const useLogDeltaSync = !isFullSync && rawLocalCached && rawLocalCached.length > 0 && !!lastLogSyncTime;
+      if (useLogDeltaSync) {
+        query = query.gt('created_at', lastLogSyncTime);
+      }
+
+      const { data: rawLogs, error } = await query.order('timestamp', { ascending: false });
 
       if (error) {
         const isOfflineErr = error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError');
         if (isOfflineErr) {
           console.log('[OFFLINE MODE] Log Cloud Supabase tidak terjangkau (Offline).');
         } else {
-          console.warn('[DEBUG fetchLogs] Supabase error:', error.message);
+          console.warn('[FETCH LOGS SUPABASE DIRECT WARN]:', error.message);
         }
-      } else {
-        console.log('[DEBUG fetchLogs] Supabase rawLogs fetched count:', rawLogs ? rawLogs.length : 0);
-      }
+      } else if (rawLogs) {
+        const freshTime = new Date().toISOString();
+        localStorage.setItem(lastLogSyncKey, freshTime);
 
-      if (!error && rawLogs) {
-        const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
-        if (empIds.length > 0) {
-          const { data: empData } = await supabase
-            .from('employees')
-            .select('id, nik, name, department, afdeling, nama_kebun')
-            .in('id', empIds);
-          if (empData) {
-            empData.forEach(e => {
-              masterEmpMap.set(String(e.id), e);
-            });
-          }
-        }
+        if (useLogDeltaSync && rawLogs.length === 0) {
+          console.log(`[DELTA SYNC LOGS] 0 log baru dari cloud sejak ${lastLogSyncTime}. Menggunakan database lokal (0 byte diunduh).`);
+        } else {
+          console.log(`[${useLogDeltaSync ? 'DELTA SYNC' : 'FULL SYNC'} LOGS] Diunduh ${rawLogs.length} baris log dari cloud.`);
 
-        onlineLogs = rawLogs.map((log) => {
-          const emp = masterEmpMap.get(String(log.employee_id)) || {};
-          const typeLabel = normalizeType(
-            log.attendance_type ||
-            (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
-          );
-
-          let parsedKebun = null;
-          let parsedAfdeling = null;
-          let cleanLocation = log.location || '';
-
-          if (cleanLocation.includes(' | ')) {
-            const parts = cleanLocation.split(' | ');
-            if (parts.length >= 3) {
-              parsedKebun = parts[0] === '-' ? null : parts[0];
-              parsedAfdeling = parts[1] === '-' ? null : parts[1];
-              cleanLocation = parts.slice(2).join(' | ');
+          const empIds = [...new Set(rawLogs.map((l) => l.employee_id))].filter(Boolean);
+          if (empIds.length > 0) {
+            const { data: empData } = await supabase
+              .from('employees')
+              .select('id, nik, name, department, afdeling, nama_kebun')
+              .in('id', empIds);
+            if (empData) {
+              empData.forEach(e => {
+                masterEmpMap.set(String(e.id), e);
+              });
             }
           }
 
-          return {
-            id: String(log.id),
-            employee_id: log.employee_id,
-            nik: emp.nik || log.nik || '-',
-            name: emp.name || log.name || `Karyawan #${log.employee_id}`,
-            department: emp.department || log.department || '-',
-            afdeling: parsedAfdeling || log.afdeling || emp.afdeling || '-',
-            nama_kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
-            kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
-            timestamp: log.timestamp,
-            location: cleanLocation,
-            lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
-            lng: log.longitude !== undefined && log.longitude !== null ? log.longitude : (log.lng !== undefined ? log.lng : null),
-            status: log.status,
-            attendance_type: typeLabel,
-            euclidean_distance: log.euclidean_distance,
-            is_synced: true,
-            created_at: log.created_at
-          };
-        });
+          onlineLogs = rawLogs.map((log) => {
+            const emp = masterEmpMap.get(String(log.employee_id)) || {};
+            const typeLabel = normalizeType(
+              log.attendance_type ||
+              (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
+            );
 
-        // Save fresh online logs to local database
-        try {
-          const localLogs = await db.attendance_logs.toArray();
-          for (let i = 0; i < localLogs.length; i++) {
-            if (localLogs[i].is_synced) {
-              await db.attendance_logs.delete(localLogs[i].id);
+            let parsedKebun = null;
+            let parsedAfdeling = null;
+            let cleanLocation = log.location || '';
+
+            if (cleanLocation.includes(' | ')) {
+              const parts = cleanLocation.split(' | ');
+              if (parts.length >= 3) {
+                parsedKebun = parts[0] === '-' ? null : parts[0];
+                parsedAfdeling = parts[1] === '-' ? null : parts[1];
+                cleanLocation = parts.slice(2).join(' | ');
+              }
             }
+
+            return {
+              id: String(log.id),
+              employee_id: log.employee_id,
+              nik: emp.nik || log.nik || '-',
+              name: emp.name || log.name || `Karyawan #${log.employee_id}`,
+              department: emp.department || log.department || '-',
+              afdeling: parsedAfdeling || log.afdeling || emp.afdeling || '-',
+              nama_kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
+              kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
+              timestamp: log.timestamp,
+              location: cleanLocation,
+              lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
+              lng: log.longitude !== undefined && log.longitude !== null ? log.longitude : (log.lng !== undefined ? log.lng : null),
+              status: log.status,
+              attendance_type: typeLabel,
+              euclidean_distance: log.euclidean_distance,
+              is_synced: true,
+              created_at: log.created_at
+            };
+          });
+
+          // Save fresh online logs to local database
+          try {
+            if (!useLogDeltaSync) {
+              const localLogs = await db.attendance_logs.toArray();
+              for (let i = 0; i < localLogs.length; i++) {
+                if (localLogs[i].is_synced) {
+                  await db.attendance_logs.delete(localLogs[i].id);
+                }
+              }
+            }
+            if (onlineLogs.length > 0) {
+              await db.attendance_logs.bulkPut(onlineLogs);
+            }
+            console.log(`[Local Database] Synchronized ${onlineLogs.length} online logs to local storage`);
+          } catch (dbErr) {
+            console.warn('[Local Database] Failed to cache online logs:', dbErr);
           }
-          if (onlineLogs.length > 0) {
-            await db.attendance_logs.bulkPut(onlineLogs);
-          }
-          console.log(`[Local Database] Synchronized ${onlineLogs.length} online logs to local storage`);
-        } catch (dbErr) {
-          console.warn('[Local Database] Failed to cache online logs:', dbErr);
         }
       }
     } catch (err) {
@@ -639,14 +673,14 @@ function AppContent() {
 
     // 4. Pull fresh employees & missing biometrics descriptors
     try {
-      await fetchEmployees();
+      await fetchEmployees(true);
     } catch (e) {
       console.warn('[Manual Sync Pull Employees Error]:', e);
     }
 
     // 5. Pull fresh attendance logs
     try {
-      await fetchLogs();
+      await fetchLogs(true);
     } catch (e) {
       console.warn('[Manual Sync Pull Logs Error]:', e);
     }

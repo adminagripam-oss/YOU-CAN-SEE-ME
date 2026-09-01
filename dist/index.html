@@ -6,14 +6,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgriFace - Sistem Absensi Biometrik Wajah Perkebunan (1-to-1 Engine)</title>
 
-  <!-- Script untuk membersihkan PWA Service Worker otomatis -->
+  <!-- PWA Service Worker (Dengan Aturan Bypass Cache *.supabase.co) -->
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function (registrations) {
-        for (let registration of registrations) {
-          registration.unregister();
-          console.log('ServiceWorker unregistered automatically to clear cache.');
-        }
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').then(function (reg) {
+          console.log('[PWA SW] Service Worker registered with scope:', reg.scope);
+        }).catch(function (err) {
+          console.warn('[PWA SW] Service Worker registration failed:', err);
+        });
       });
     }
   </script>
@@ -42,7 +43,7 @@
   <!-- Developer Console Virtual (Eruda) untuk debugging langsung di layar HP/Tablet -->
   <script src="/eruda.js"></script>
   <script>eruda.init();</script>
-  <script type="module" crossorigin src="/assets/index-BciiNVXq.js"></script>
+  <script type="module" crossorigin src="/assets/index-CI4fsh9V.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-CqhTw-w8.css">
 </head>
 
