@@ -462,10 +462,13 @@ export async function sqliteCacheGeometricVector(employeeId: number | string, gf
  * Retrieves cached master vectors and employee info from SQLite.
  */
 export async function sqliteGetCachedUserMasterVector(employeeId: number | string): Promise<any | null> {
-  if (!dbConnection) return null;
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return null;
+  }
   try {
     const empIdStr = String(employeeId);
-    const res = await dbConnection.query(
+    const res = await dbConnection!.query(
       `SELECT md.*, e.nik, e.name, e.department, e.afdeling, e.nama_kebun, e.status_tk, e.jabatan, e.status_perkawinan
        FROM local_master_descriptors md
        LEFT JOIN local_employees e ON CAST(md.employee_id AS TEXT) = CAST(e.id AS TEXT)
@@ -475,7 +478,7 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
 
     if (!res.values || res.values.length === 0) {
       // Jika tidak ada di master_descriptors, coba cek apakah ini karyawan yang didaftarkan offline (belum di-sync)
-      const qRes = await dbConnection.query(
+      const qRes = await dbConnection!.query(
         `SELECT * FROM local_employee_sync_queue WHERE CAST(id AS TEXT) = ? OR id = ? LIMIT 1`,
         [empIdStr, employeeId]
       );
@@ -528,12 +531,15 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
  * Queue an offline attendance log.
  */
 export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
-  if (!dbConnection) throw new Error('Database SQLite tidak terhubung.');
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) throw new Error('Database SQLite tidak terhubung.');
+  }
   try {
     const createdAt = new Date().toISOString();
     const timestamp = logData.timestamp || createdAt;
 
-    await dbConnection.run(
+    await dbConnection!.run(
       `INSERT INTO local_attendance_queue (
         employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
@@ -555,7 +561,7 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
       ]
     );
 
-    const lastIdRes = await dbConnection.query('SELECT last_insert_rowid() as id');
+    const lastIdRes = await dbConnection!.query('SELECT last_insert_rowid() as id');
     const id = lastIdRes.values?.[0]?.id || null;
 
     const queuedItem = {
@@ -577,9 +583,12 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
  * Retrieve all unsynced logs.
  */
 export async function sqliteGetUnsyncedLogs(): Promise<any[]> {
-  if (!dbConnection) return [];
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return [];
+  }
   try {
-    const res = await dbConnection.query(
+    const res = await dbConnection!.query(
       `SELECT * FROM local_attendance_queue WHERE is_synced = 0`
     );
     return res.values || [];
@@ -593,13 +602,17 @@ export async function sqliteGetUnsyncedLogs(): Promise<any[]> {
  * Delete synced logs by IDs.
  */
 export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
-  if (!dbConnection || !ids || ids.length === 0) return;
+  if (!ids || ids.length === 0) return;
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
   try {
     const set = ids.map(id => ({
       statement: `DELETE FROM local_attendance_queue WHERE id = ?`,
       values: [id]
     }));
-    await dbConnection.executeSet(set);
+    await dbConnection!.executeSet(set);
     console.log(`[SQLite Service] Successfully removed ${ids.length} synced logs from queue.`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemoveSyncedLogs Error]:', err?.message || err);
@@ -1127,9 +1140,12 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
  * Retrieve all unsynced pending employees
  */
 export async function sqliteGetPendingEmployees(): Promise<any[]> {
-  if (!dbConnection) return [];
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return [];
+  }
   try {
-    const res = await dbConnection.query(`SELECT * FROM local_employee_sync_queue WHERE is_synced = 0`);
+    const res = await dbConnection!.query(`SELECT * FROM local_employee_sync_queue WHERE is_synced = 0`);
     return res.values || [];
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetPendingEmployees Error]:', err?.message || err);
@@ -1141,12 +1157,34 @@ export async function sqliteGetPendingEmployees(): Promise<any[]> {
  * Remove a synced employee from pending queue
  */
 export async function sqliteRemovePendingEmployee(id: string | number): Promise<void> {
-  if (!dbConnection) return;
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
   try {
-    await dbConnection.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
+    await dbConnection!.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Removed pending employee from queue: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemovePendingEmployee Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Update employee_id in pending attendance queue when temp employee ID is replaced by real ID from Supabase
+ */
+export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: string | number, newRealEmpId: string | number): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(
+      `UPDATE local_attendance_queue SET employee_id = ? WHERE employee_id = ?`,
+      [String(newRealEmpId), String(oldTempEmpId)]
+    );
+    console.log(`[SQLite Service] Updated pending attendance employee_id from ${oldTempEmpId} to ${newRealEmpId}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteUpdatePendingAttendanceEmployeeId Error]:', err?.message || err);
   }
 }
 

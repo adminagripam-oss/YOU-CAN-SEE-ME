@@ -217,6 +217,8 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
     for (const emp of pendingEmps) {
       try {
+        let realEmpId = null;
+
         // 1. Insert employee record to Supabase
         const { data: createdEmp, error: empErr } = await supabase
           .from('employees')
@@ -234,11 +236,26 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           .single();
 
         if (empErr) {
-          console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, empErr.message);
-          continue;
+          if (empErr.code === '23505' || empErr.message?.includes('duplicate key') || empErr.message?.includes('already exists')) {
+            console.warn(`[Sync Employee] NIK ${emp.nik} sudah ada di Supabase. Mengambil ID karyawan yang ada...`);
+            const { data: existingEmp } = await supabase
+              .from('employees')
+              .select('id')
+              .eq('nik', emp.nik)
+              .single();
+            if (existingEmp) {
+              realEmpId = existingEmp.id;
+            } else {
+              console.warn(`[Sync Employee Fail] Gagal menemukan ID untuk NIK duplikat ${emp.nik}`);
+              continue;
+            }
+          } else {
+            console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, empErr.message);
+            continue;
+          }
+        } else {
+          realEmpId = createdEmp.id;
         }
-
-        const realEmpId = createdEmp.id;
 
         // 2. Insert master biometrics descriptor if present
         let descObj = emp.descriptor_json;
@@ -257,14 +274,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
           await cacheUserMasterVector({
             employee_id: realEmpId,
-            nik: createdEmp.nik,
-            name: createdEmp.name,
-            department: createdEmp.department || createdEmp.jabatan,
-            afdeling: createdEmp.afdeling,
-            nama_kebun: createdEmp.nama_kebun,
-            status_tk: createdEmp.status_tk,
-            jabatan: createdEmp.jabatan,
-            status_perkawinan: createdEmp.status_perkawinan,
+            nik: emp.nik,
+            name: emp.name,
+            department: emp.department || emp.jabatan,
+            afdeling: emp.afdeling,
+            nama_kebun: emp.nama_kebun,
+            status_tk: emp.status_tk,
+            jabatan: emp.jabatan,
+            status_perkawinan: emp.status_perkawinan,
             descriptor_json: descObj
           });
         }
@@ -276,14 +293,9 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
             if (String(pendingLog.employee_id) === String(emp.id)) {
               console.log(`[Sync Engine FK Update] Updating pending log #${pendingLog.id} employee_id from ${emp.id} to ${realEmpId}`);
               pendingLog.employee_id = realEmpId;
-              if (Capacitor.isNativePlatform()) {
-                const { dbConnection } = await import('./services/sqliteService');
-                if (dbConnection) {
-                  await dbConnection.run(
-                    `UPDATE local_attendance_queue SET employee_id = ? WHERE id = ?`,
-                    [String(realEmpId), pendingLog.id]
-                  );
-                }
+              if (isNative) {
+                const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
+                await sqliteUpdatePendingAttendanceEmployeeId(emp.id, realEmpId);
               } else {
                 await db.attendance_sync_queue.put(pendingLog);
               }
