@@ -5,6 +5,23 @@ const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbConnection: SQLiteDBConnection | null = null;
 
 /**
+ * Utility: Menunggu hingga dbConnection siap (maks 10 x 300ms = 3 detik).
+ * Mencegah Race Condition antara initSQLite() dan pemanggilan fungsi DB awal.
+ */
+async function waitForConnection(): Promise<boolean> {
+  if (dbConnection) return true;
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (dbConnection) {
+      console.log(`[SQLite Service] Connection ready after ${(i + 1) * 300}ms wait.`);
+      return true;
+    }
+  }
+  console.error('[SQLite Service] Timeout: dbConnection still null after 3s. Is initSQLite() called?');
+  return false;
+}
+
+/**
  * Initializes the SQLite Database connection and creates tables if they don't exist.
  */
 export async function initSQLite(): Promise<void> {
@@ -348,7 +365,13 @@ export function getSQLiteConnection(): SQLiteDBConnection | null {
  * Cache master descriptor for a single employee.
  */
 export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
-  if (!dbConnection) return;
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) {
+      console.error('[SQLite Service sqliteCacheUserMasterVector] dbConnection null even after wait. Skipping cache.');
+      return;
+    }
+  }
   try {
     const empId = user.employee_id || user.id;
     if (!empId) return;
@@ -1038,7 +1061,13 @@ export async function sqliteGetAdmin(username: string): Promise<any | null> {
  * Save an offline registered employee to pending sync queue
  */
 export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
-  if (!dbConnection) return;
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) {
+      console.error('[SQLite Service sqliteSavePendingEmployee] dbConnection null even after wait. Skipping save.');
+      return;
+    }
+  }
   try {
     const sql = `
       INSERT OR REPLACE INTO local_employee_sync_queue 
