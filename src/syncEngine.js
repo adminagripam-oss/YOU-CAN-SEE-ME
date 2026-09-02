@@ -8,7 +8,7 @@ let isSyncing = false;
 /**
  * Checks if the device is currently online (handles native and web fallback)
  */
-async function checkOnline() {
+export async function checkOnline() {
   if (Capacitor.isNativePlatform()) {
     try {
       const status = await Network.getStatus();
@@ -198,9 +198,19 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
   if (!isOnline) return { count: 0 };
 
   try {
-    const { db, cacheUserMasterVector } = await import('./db');
-    const pendingEmps = await db.employee_sync_queue.toArray();
+    const isNative = Capacitor.isNativePlatform();
+    let pendingEmps = [];
+
+    if (isNative) {
+      const { sqliteGetPendingEmployees } = await import('./services/sqliteService');
+      pendingEmps = await sqliteGetPendingEmployees();
+    } else {
+      const { db } = await import('./db');
+      pendingEmps = await db.employee_sync_queue.toArray();
+    }
+
     if (!pendingEmps || pendingEmps.length === 0) return { count: 0 };
+    const { cacheUserMasterVector, db } = await import('./db');
 
     console.log(`[Auto-Sync Employees] Attempting to sync ${pendingEmps.length} offline registered employees...`);
     let syncedCount = 0;
@@ -284,7 +294,12 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         }
 
         // 4. Remove temp ID from local employee sync queue
-        await db.employee_sync_queue.delete(emp.id);
+        if (isNative) {
+          const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
+          await sqliteRemovePendingEmployee(emp.id);
+        } else {
+          await db.employee_sync_queue.delete(emp.id);
+        }
 
         syncedCount++;
         console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);

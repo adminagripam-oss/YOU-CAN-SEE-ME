@@ -5,6 +5,8 @@ import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosin
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
+import { Capacitor } from '@capacitor/core';
+import { checkOnline } from '../syncEngine';
 
 
 
@@ -284,7 +286,8 @@ export default function TabEmployeeManagement({
 
     // Helper: deteksi semua jenis error jaringan di Android Capacitor / WebView
     const isNetworkError = (msg = '') => {
-      const lower = msg.toLowerCase();
+      const lower = String(msg || '').toLowerCase();
+      if (!lower) return true; // treat empty/undefined message as network error
       return (
         lower.includes('failed to fetch') ||
         lower.includes('networkerror') ||
@@ -296,37 +299,58 @@ export default function TabEmployeeManagement({
         lower.includes('econnrefused') ||
         lower.includes('etimedout') ||
         lower.includes('no internet') ||
-        lower.includes('fetch') && lower.includes('fail')
+        lower.includes('load failed') ||
+        lower.includes('timeout') ||
+        lower.includes('err_connection') ||
+        (lower.includes('fetch') && lower.includes('fail'))
       );
     };
 
-    try {
-      const { data, error } = await supabase
-        .from('employees')
-        .insert([empPayload])
-        .select()
-        .single();
+    // 1. Cek koneksi jaringan via checkOnline()
+    const online = await checkOnline();
+    if (!online) {
+      console.log('[TabEmployeeManagement] Device is offline (checkOnline === false). Switching directly to offline flow.');
+      isOffline = true;
+    } else {
+      try {
+        const { data, error } = await supabase
+          .from('employees')
+          .insert([empPayload])
+          .select()
+          .single();
 
-      if (error) {
-        if (isNetworkError(error.message)) {
+        if (error) {
+          console.warn('[TabEmployeeManagement] Supabase insert error:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            json: JSON.stringify(error)
+          });
+          if (isNetworkError(error.message)) {
+            isOffline = true;
+          } else {
+            showToast('Gagal Menambah Karyawan', error.message || 'Gagal menambahkan karyawan.', 'error');
+            setIsSubmitting(false);
+            return;
+          }
+        } else {
+          createdEmp = data;
+          createdEmpId = data.id;
+        }
+      } catch (netErr) {
+        console.error('[TabEmployeeManagement] Supabase insert exception:', {
+          message: netErr?.message,
+          code: netErr?.code,
+          json: JSON.stringify(netErr)
+        });
+        if (isNetworkError(netErr?.message) || netErr instanceof TypeError) {
           isOffline = true;
         } else {
-          showToast('Gagal Menambah Karyawan', error.message, 'error');
+          showToast('Gagal Menambah Karyawan', netErr?.message || 'Error tidak diketahui', 'error');
           setIsSubmitting(false);
           return;
         }
-      } else {
-        createdEmp = data;
-        createdEmpId = data.id;
-      }
-    } catch (netErr) {
-      // Semua exception saat offline (TypeError, dll) → masuk offline mode
-      if (isNetworkError(netErr?.message) || netErr instanceof TypeError) {
-        isOffline = true;
-      } else {
-        showToast('Gagal Menambah Karyawan', netErr?.message || 'Error tidak diketahui', 'error');
-        setIsSubmitting(false);
-        return;
       }
     }
 
@@ -343,12 +367,19 @@ export default function TabEmployeeManagement({
           created_at: new Date().toISOString()
         };
 
-        const { db } = await import('../db');
-        await db.employee_sync_queue.add({
+        const empQueueRecord = {
           ...createdEmp,
           descriptor_json: currentEmpDescriptorRef.current || null,
           geometric_descriptor_json: currentEmpGFVRef.current || null
-        });
+        };
+
+        if (Capacitor.isNativePlatform()) {
+          const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
+          await sqliteSavePendingEmployee(empQueueRecord);
+        } else {
+          const { db } = await import('../db');
+          await db.employee_sync_queue.add(empQueueRecord);
+        }
 
         if (currentEmpDescriptorRef.current) {
           await cacheUserMasterVector({
@@ -365,7 +396,11 @@ export default function TabEmployeeManagement({
           'success'
         );
       } catch (offlineErr) {
-        console.error('[Offline Save Error]:', offlineErr);
+        console.error('[Offline Save Error]:', {
+          message: offlineErr?.message,
+          code: offlineErr?.code,
+          json: JSON.stringify(offlineErr)
+        });
         showToast('Gagal Simpan Offline', offlineErr?.message || 'Gagal menyimpan data karyawan secara lokal.', 'error');
         setIsSubmitting(false);
         return;

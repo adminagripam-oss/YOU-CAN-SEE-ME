@@ -4,21 +4,27 @@ import { SQLiteConnection, SQLiteDBConnection, CapacitorSQLite } from '@capacito
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbConnection: SQLiteDBConnection | null = null;
 
+// Promise-based init guard — eliminates race condition completely.
+// All DB functions await this before executing.
+let _initResolve: (() => void) | null = null;
+let _initReject: ((e: any) => void) | null = null;
+const _dbReadyPromise: Promise<void> = new Promise((res, rej) => {
+  _initResolve = res;
+  _initReject = rej;
+});
+
 /**
- * Utility: Menunggu hingga dbConnection siap (maks 10 x 300ms = 3 detik).
- * Mencegah Race Condition antara initSQLite() dan pemanggilan fungsi DB awal.
+ * Await this before any DB operation to guarantee initSQLite has finished.
+ * On non-native platforms it resolves immediately (no-op).
  */
 async function waitForConnection(): Promise<boolean> {
-  if (dbConnection) return true;
-  for (let i = 0; i < 10; i++) {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    if (dbConnection) {
-      console.log(`[SQLite Service] Connection ready after ${(i + 1) * 300}ms wait.`);
-      return true;
-    }
+  if (!Capacitor.isNativePlatform()) return false; // web — SQLite not used
+  try {
+    await _dbReadyPromise;
+    return !!dbConnection;
+  } catch {
+    return false;
   }
-  console.error('[SQLite Service] Timeout: dbConnection still null after 3s. Is initSQLite() called?');
-  return false;
 }
 
 /**
@@ -27,6 +33,7 @@ async function waitForConnection(): Promise<boolean> {
 export async function initSQLite(): Promise<void> {
   if (!Capacitor.isNativePlatform()) {
     console.log('[SQLite Service] Web platform detected. Skipping SQLite initialization.');
+    _initResolve?.(); // resolve immediately on web so waitForConnection never hangs
     return;
   }
 
@@ -349,8 +356,10 @@ export async function initSQLite(): Promise<void> {
     }
 
     console.log('[SQLite Service] SQLite tables verified and ready.');
+    _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
   } catch (err: any) {
     console.error('[SQLite Service Init Error]:', err?.message || err);
+    _initReject?.(err); // Signal: DB failed — waitForConnection() will return false
   }
 }
 
@@ -397,7 +406,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
     const gfvStr = gfv ? JSON.stringify(gfv) : null;
 
     // 1. Cache to local_employees
-    await dbConnection.run(
+    await dbConnection!.run(
       `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -415,7 +424,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
     );
 
     // 2. Cache to local_master_descriptors
-    await dbConnection.run(
+    await dbConnection!.run(
       `INSERT OR REPLACE INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
        VALUES (?, ?, ?, ?)`,
       [
@@ -1088,10 +1097,10 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.geometric_descriptor_json ? (typeof empData.geometric_descriptor_json === 'string' ? empData.geometric_descriptor_json : JSON.stringify(empData.geometric_descriptor_json)) : null,
       empData.created_at || new Date().toISOString()
     ];
-    await dbConnection.run(sql, params);
+    await dbConnection!.run(sql, params);
 
     // Also insert to local_employees so they show up offline immediately
-    await dbConnection.run(
+    await dbConnection!.run(
       `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
