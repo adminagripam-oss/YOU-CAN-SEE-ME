@@ -610,24 +610,45 @@ export async function sqliteClearEmployeesCache(filter?: { kebun?: string | null
 export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void> {
   if (!dbConnection || !empData || empData.length === 0) return;
   try {
-    const set = empData.map(emp => ({
-      statement: `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      values: [
-        String(emp.id),
-        emp.nik,
-        emp.name,
-        emp.department || emp.jabatan || null,
-        emp.afdeling || null,
-        emp.nama_kebun || null,
-        emp.status_tk || null,
-        emp.jabatan || null,
-        emp.status_perkawinan || null,
-        emp.has_master_biometric ? 1 : 0
-      ]
-    }));
+    const set: any[] = [];
+    empData.forEach(emp => {
+      // 1. Employee query
+      set.push({
+        statement: `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          String(emp.id),
+          emp.nik,
+          emp.name,
+          emp.department || emp.jabatan || null,
+          emp.afdeling || null,
+          emp.nama_kebun || null,
+          emp.status_tk || null,
+          emp.jabatan || null,
+          emp.status_perkawinan || null,
+          emp.has_master_biometric ? 1 : 0
+        ]
+      });
+
+      // 2. Master Descriptor query (jika ada data biometrik yang ikut turun saat sinkronisasi)
+      if (emp.descriptor_json || emp.geometric_descriptor_json || emp.face_vector || emp.facial_descriptor) {
+        const descJson = emp.descriptor_json || emp.face_vector || emp.facial_descriptor;
+        const geoDescJson = emp.geometric_descriptor_json;
+        set.push({
+          statement: `INSERT OR REPLACE INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
+                      VALUES (?, ?, ?, ?)`,
+          values: [
+            String(emp.id),
+            descJson ? (typeof descJson === 'string' ? descJson : JSON.stringify(descJson)) : null,
+            geoDescJson ? (typeof geoDescJson === 'string' ? geoDescJson : JSON.stringify(geoDescJson)) : null,
+            new Date().toISOString()
+          ]
+        });
+      }
+    });
+
     await dbConnection.executeSet(set);
-    console.log(`[SQLite Service] Bulk put ${empData.length} employees into cache.`);
+    console.log(`[SQLite Service] Bulk put ${empData.length} employees (and their descriptors) into cache.`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteBulkPutEmployeesCache Error]:', err?.message || err);
   }
