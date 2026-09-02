@@ -1063,8 +1063,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
 
     // Also insert to local_employees so they show up offline immediately
     await dbConnection.run(
-      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, is_synced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(empData.id),
         empData.nik,
