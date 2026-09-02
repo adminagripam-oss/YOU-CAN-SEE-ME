@@ -282,6 +282,24 @@ export default function TabEmployeeManagement({
     let createdEmpId = null;
     let createdEmp = null;
 
+    // Helper: deteksi semua jenis error jaringan di Android Capacitor / WebView
+    const isNetworkError = (msg = '') => {
+      const lower = msg.toLowerCase();
+      return (
+        lower.includes('failed to fetch') ||
+        lower.includes('networkerror') ||
+        lower.includes('network request failed') ||
+        lower.includes('err_internet_disconnected') ||
+        lower.includes('err_name_not_resolved') ||
+        lower.includes('err_network_changed') ||
+        lower.includes('unable to resolve host') ||
+        lower.includes('econnrefused') ||
+        lower.includes('etimedout') ||
+        lower.includes('no internet') ||
+        lower.includes('fetch') && lower.includes('fail')
+      );
+    };
+
     try {
       const { data, error } = await supabase
         .from('employees')
@@ -290,7 +308,7 @@ export default function TabEmployeeManagement({
         .single();
 
       if (error) {
-        if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+        if (isNetworkError(error.message)) {
           isOffline = true;
         } else {
           showToast('Gagal Menambah Karyawan', error.message, 'error');
@@ -302,42 +320,56 @@ export default function TabEmployeeManagement({
         createdEmpId = data.id;
       }
     } catch (netErr) {
-      isOffline = true;
+      // Semua exception saat offline (TypeError, dll) → masuk offline mode
+      if (isNetworkError(netErr?.message) || netErr instanceof TypeError) {
+        isOffline = true;
+      } else {
+        showToast('Gagal Menambah Karyawan', netErr?.message || 'Error tidak diketahui', 'error');
+        setIsSubmitting(false);
+        return;
+      }
     }
 
     if (isOffline) {
-      // Offline fallback handling
-      const tempId = 'off_emp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-      createdEmpId = tempId;
-      createdEmp = {
-        id: tempId,
-        ...empPayload,
-        has_master_biometric: !!currentEmpDescriptorRef.current,
-        is_synced: false,
-        created_at: new Date().toISOString()
-      };
+      try {
+        // Offline fallback handling
+        const tempId = 'off_emp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        createdEmpId = tempId;
+        createdEmp = {
+          id: tempId,
+          ...empPayload,
+          has_master_biometric: !!currentEmpDescriptorRef.current,
+          is_synced: false,
+          created_at: new Date().toISOString()
+        };
 
-      const { db } = await import('../db');
-      await db.employee_sync_queue.add({
-        ...createdEmp,
-        descriptor_json: currentEmpDescriptorRef.current || null,
-        geometric_descriptor_json: currentEmpGFVRef.current || null
-      });
-
-      if (currentEmpDescriptorRef.current) {
-        await cacheUserMasterVector({
-          employee_id: tempId,
+        const { db } = await import('../db');
+        await db.employee_sync_queue.add({
           ...createdEmp,
-          descriptor_json: currentEmpDescriptorRef.current,
+          descriptor_json: currentEmpDescriptorRef.current || null,
           geometric_descriptor_json: currentEmpGFVRef.current || null
         });
-      }
 
-      showToast(
-        'Karyawan Berhasil Disimpan (Offline)',
-        `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan akan di-sync otomatis saat online!`,
-        'success'
-      );
+        if (currentEmpDescriptorRef.current) {
+          await cacheUserMasterVector({
+            employee_id: tempId,
+            ...createdEmp,
+            descriptor_json: currentEmpDescriptorRef.current,
+            geometric_descriptor_json: currentEmpGFVRef.current || null
+          });
+        }
+
+        showToast(
+          'Karyawan Berhasil Disimpan (Offline)',
+          `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan akan di-sync otomatis saat online!`,
+          'success'
+        );
+      } catch (offlineErr) {
+        console.error('[Offline Save Error]:', offlineErr);
+        showToast('Gagal Simpan Offline', offlineErr?.message || 'Gagal menyimpan data karyawan secara lokal.', 'error');
+        setIsSubmitting(false);
+        return;
+      }
     } else {
       // Online flow
       if (currentEmpDescriptorRef.current) {
