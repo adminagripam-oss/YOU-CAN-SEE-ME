@@ -314,19 +314,27 @@ function AppContent() {
     // Step 0: Load local cached employees for offline details mapping (always showing afdeling)
     let localEmployees = [];
     try {
-      const cached = await db.employees_cache.toArray();
-      if (cached) {
-        if (user) {
-          const adminObj = user;
-          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-            localEmployees = cached.filter(e => e.nama_kebun === adminObj.kebun);
-          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
-            localEmployees = cached.filter(e => e.region === adminObj.region);
+      if (Capacitor.isNativePlatform()) {
+        const { sqliteGetEmployeesCache } = await import('./services/sqliteService');
+        localEmployees = await sqliteGetEmployeesCache({
+          kebun: user?.role === 'estate_admin' ? user.kebun : null,
+          region: user?.role === 'regional_admin' ? user.region : null
+        });
+      } else {
+        const cached = await db.employees_cache.toArray();
+        if (cached) {
+          if (user) {
+            const adminObj = user;
+            if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+              localEmployees = cached.filter(e => e.nama_kebun === adminObj.kebun);
+            } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+              localEmployees = cached.filter(e => e.region === adminObj.region);
+            } else {
+              localEmployees = cached;
+            }
           } else {
             localEmployees = cached;
           }
-        } else {
-          localEmployees = cached;
         }
       }
     } catch (e) {
@@ -488,7 +496,12 @@ function AppContent() {
         const adminObj = user;
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
           const empIds = new Set(localEmployees.map(e => String(e.id)));
-          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)) || l.kebun === adminObj.kebun || l.nama_kebun === adminObj.kebun);
+          allLocalLogs = rawLocal.filter(l => 
+            empIds.has(String(l.employee_id)) || 
+            l.kebun === adminObj.kebun || 
+            l.nama_kebun === adminObj.kebun ||
+            (l.location && l.location.toLowerCase().includes(adminObj.kebun.toLowerCase()))
+          );
         } else if (adminObj.role === 'regional_admin' && adminObj.region) {
           const regionKebuns = {
             'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
@@ -496,9 +509,15 @@ function AppContent() {
             'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
             'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
           };
-          const allowed = new Set(regionKebuns[adminObj.region] || []);
+          const allowedList = regionKebuns[adminObj.region] || [];
+          const allowed = new Set(allowedList);
           const empIds = new Set(localEmployees.map(e => String(e.id)));
-          allLocalLogs = rawLocal.filter(l => empIds.has(String(l.employee_id)) || allowed.has(l.kebun) || allowed.has(l.nama_kebun));
+          allLocalLogs = rawLocal.filter(l => 
+            empIds.has(String(l.employee_id)) || 
+            allowed.has(l.kebun) || 
+            allowed.has(l.nama_kebun) ||
+            (l.location && allowedList.some(k => l.location.toLowerCase().includes(k.toLowerCase())))
+          );
         } else {
           allLocalLogs = rawLocal;
         }
@@ -517,7 +536,12 @@ function AppContent() {
         const adminObj = user;
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
           const empIds = new Set(localEmployees.map(e => String(e.id)));
-          unsyncedQueue = rawQueue.filter(q => q.employee_id && (empIds.has(String(q.employee_id)) || q.kebun === adminObj.kebun || q.nama_kebun === adminObj.kebun));
+          unsyncedQueue = rawQueue.filter(q => q.employee_id && (
+            empIds.has(String(q.employee_id)) || 
+            q.kebun === adminObj.kebun || 
+            q.nama_kebun === adminObj.kebun ||
+            (q.location && q.location.toLowerCase().includes(adminObj.kebun.toLowerCase()))
+          ));
         } else if (adminObj.role === 'regional_admin' && adminObj.region) {
           const regionKebuns = {
             'Sumut 2': ['Bukit Harapan I', 'Bukit Harapan II', 'Parsub', 'Patogu Janji'],
@@ -525,9 +549,15 @@ function AppContent() {
             'Kalbar 1A': ['Bukit Jago Indah (BJI)', 'Kaliau Mas Perkasa A (KMP A)', 'Kaliau Mas Perkasa B (KMP B)', 'Teluk Keramat (TKR)', 'Wana Hijau Semesta I (WHS I)', 'Wana Hijau Semesta II (L1)', 'Wana Hijau Semesta II (L2)', 'Wana Hijau Semesta II (WHS II)', 'Wana Hijau Semesta III (WHS III)', 'Wana Hijau Semesta IV'],
             'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
           };
-          const allowed = new Set(regionKebuns[adminObj.region] || []);
+          const allowedList = regionKebuns[adminObj.region] || [];
+          const allowed = new Set(allowedList);
           const empIds = new Set(localEmployees.map(e => String(e.id)));
-          unsyncedQueue = rawQueue.filter(q => q.employee_id && (empIds.has(String(q.employee_id)) || allowed.has(q.kebun) || allowed.has(q.nama_kebun)));
+          unsyncedQueue = rawQueue.filter(q => q.employee_id && (
+            empIds.has(String(q.employee_id)) || 
+            allowed.has(q.kebun) || 
+            allowed.has(q.nama_kebun) ||
+            (q.location && allowedList.some(k => q.location.toLowerCase().includes(k.toLowerCase())))
+          ));
         } else {
           unsyncedQueue = rawQueue;
         }
