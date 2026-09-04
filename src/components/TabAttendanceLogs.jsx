@@ -478,14 +478,18 @@ export default function TabAttendanceLogs({
               console.log('[DELETE LOCAL] Hapus dari IndexedDB:', localId);
             }
 
-            // Hapus Supabase online IDs (hanya ID numerik murni)
+            // Hapus Supabase online IDs (hanya ID numerik murni) melalui backend proxy (Bypass RLS)
             if (onlineIds.length > 0) {
-              const { error: sbErr } = await supabase
-                .from('attendance_logs')
-                .delete()
-                .in('id', onlineIds);
-
-              if (sbErr) throw sbErr;
+              const response = await fetch(`${API_BASE_URL}/api/attendance/logs`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: onlineIds })
+              });
+              
+              const result = await response.json();
+              if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Gagal menghapus data dari server');
+              }
 
               // Juga hapus dari cache lokal
               for (const onlineId of onlineIds) {

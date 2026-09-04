@@ -23,36 +23,7 @@ app.use((err, req, res, next) => {
   }
   next();
 });
-const apiRouter = express.Router();
-apiRouter.use('/auth', authRoutes);
-
-app.use('/api', apiRouter);
-app.use('/YOU-CAN-SEE-ME/api', apiRouter);
-
-const fs = require('fs');
-const distPath = path.join(__dirname, 'dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-}
-app.use(express.static(path.join(__dirname, 'public')));
-
-// ── SPA Catch-All Route ────────────────────────────────────────────────────
-// Wajib untuk React Router: setiap route non-API yang tidak ditemukan sebagai
-// file statis akan dikembalikan ke index.html agar React Router handle routing.
-// Tanpa ini, refresh di halaman /dashboard atau /absensi akan 404 di Hostinger.
-app.get('*', (req, res, next) => {
-  // Jangan intercept API routes
-  if (req.path.startsWith('/api/')) return next();
-  const indexPath = path.join(__dirname, 'dist', 'index.html');
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(404).send('Build belum tersedia. Jalankan: npm run build');
-  }
-});
-
-
-// Supabase Database Connection
+// ── Supabase Database Connection ──────────────────────────────────────────────
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -81,7 +52,58 @@ if (supabaseServiceRoleKey) {
 }
 console.log(`[SUPABASE] Connected to Supabase Cloud Database at: ${supabaseUrl}`);
 
-// Database connection successfully verified
+const apiRouter = express.Router();
+apiRouter.use('/auth', authRoutes);
+
+apiRouter.delete('/attendance/logs', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'Invalid or missing ids array' });
+    }
+    
+    // We must use supabaseAdmin to bypass RLS since headoffice_admin needs to force delete
+    const { error } = await supabaseAdmin
+      .from('attendance_logs')
+      .delete()
+      .in('id', ids);
+      
+    if (error) {
+      console.error('[API DELETE LOGS] Supabase Error:', error.message);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+    
+    return res.json({ success: true, message: 'Logs deleted successfully' });
+  } catch (err) {
+    console.error('[API DELETE LOGS] Server Error:', err);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+});
+
+app.use('/api', apiRouter);
+app.use('/YOU-CAN-SEE-ME/api', apiRouter);
+
+const fs = require('fs');
+const distPath = path.join(__dirname, 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── SPA Catch-All Route ────────────────────────────────────────────────────
+// Wajib untuk React Router: setiap route non-API yang tidak ditemukan sebagai
+// file statis akan dikembalikan ke index.html agar React Router handle routing.
+// Tanpa ini, refresh di halaman /dashboard atau /absensi akan 404 di Hostinger.
+app.get('*', (req, res, next) => {
+  // Jangan intercept API routes
+  if (req.path.startsWith('/api/')) return next();
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Build belum tersedia. Jalankan: npm run build');
+  }
+});
 
 // ==========================================
 // HELPER FUNCTIONS & UTILITIES
