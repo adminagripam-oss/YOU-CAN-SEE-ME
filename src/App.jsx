@@ -978,16 +978,29 @@ function AppContent() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'employees' },
-        (payload) => {
+        async (payload) => {
           console.log('[Realtime] employees change detected:', payload.eventType);
+          // Seamless Web <-> APK Integration:
+          // If deleted on Web App, immediately remove from local device cache
+          if (payload.eventType === 'DELETE' && payload.old_record?.id) {
+            const { deleteLocalEmployee } = await import('./db');
+            await deleteLocalEmployee(payload.old_record.id);
+          } else if (payload.eventType === 'UPDATE' && payload.new?.deleted_at) {
+            const { deleteLocalEmployee } = await import('./db');
+            await deleteLocalEmployee(payload.new.id);
+          }
           fetchEmployees();
         }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'attendance_logs' },
-        (payload) => {
+        async (payload) => {
           console.log('[Realtime] attendance_logs change detected:', payload.eventType);
+          if (payload.eventType === 'DELETE' && payload.old_record?.id) {
+            const { db } = await import('./db');
+            await db.attendance_logs.delete(String(payload.old_record.id));
+          }
           fetchLogs();
         }
       )
@@ -1009,11 +1022,17 @@ function AppContent() {
       });
 
     // 2. Fallback Polling 30 detik — backup jika WebSocket tidak tersedia
-    const pollingInterval = setInterval(() => {
+    const pollingInterval = setInterval(async () => {
       if (navigator.onLine) {
-        console.log('[Polling] Auto-refresh data setiap 30 detik...');
+        console.log('[Polling] Auto-refresh data & push offline data setiap 30 detik...');
         fetchEmployees();
         fetchLogs();
+        try {
+          const { triggerAutoSync } = await import('./syncEngine');
+          await triggerAutoSync();
+        } catch (err) {
+          console.warn('[Polling] Background Auto-Sync gagal:', err);
+        }
       }
     }, 30000);
 

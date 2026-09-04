@@ -60,14 +60,46 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       };
     });
 
+    let syncedIds = [];
+    let successfulData = [];
+
     const { data, error } = await supabase
       .from('attendance_logs')
       .insert(logsToInsert)
       .select();
 
-    if (error) throw error;
+    if (error) {
+      console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to individual inserts:', error.message || error);
+      // Fallback to one-by-one insert so valid logs can still sync
+      for (let i = 0; i < logsToInsert.length; i++) {
+        const singleLog = logsToInsert[i];
+        const { data: singleData, error: singleError } = await supabase
+          .from('attendance_logs')
+          .insert([singleLog])
+          .select();
+        
+        if (singleError) {
+          console.error(`[Auto-Sync] Failed to sync log for employee_id ${singleLog.employee_id}:`, singleError.message || singleError);
+          // If the employee doesn't exist on the server (Foreign Key Violation 23503), 
+          // we must discard this log from the queue otherwise it will block sync forever.
+          if (singleError.code === '23503') {
+            console.warn(`[Auto-Sync] Discarding invalid log for non-existent employee_id: ${singleLog.employee_id}`);
+            syncedIds.push(pendingLogs[i].id); // Push to syncedIds so it gets deleted from local queue
+          }
+        } else if (singleData && singleData.length > 0) {
+          syncedIds.push(pendingLogs[i].id);
+          successfulData.push(singleData[0]);
+        }
+      }
+    } else {
+      syncedIds = pendingLogs.map(log => log.id);
+      successfulData = data || [];
+    }
 
-    const syncedIds = pendingLogs.map(log => log.id);
+    if (syncedIds.length === 0) {
+      console.log('[Auto-Sync] No logs were successfully synced.');
+      return { count: 0 };
+    }
 
     // Remove synced records from local DB queue
     await removeSyncedLogs(syncedIds);
@@ -80,8 +112,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
         await db.attendance_logs.delete('offline_' + oldId);
       }
       
-      if (data && data.length > 0) {
-        const localRecords = data.map(record => ({
+      if (successfulData && successfulData.length > 0) {
+        const localRecords = successfulData.map(record => ({
           id: String(record.id),
           employee_id: record.employee_id,
           nik: record.nik,
@@ -127,7 +159,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     return { count: syncedIds.length };
   } catch (err) {
-    console.error('[Auto-Sync Error]:', err);
+    console.error('[Auto-Sync Error]:', err.message || err, err.details || '', err.hint || '', err.code || '');
   } finally {
     isSyncing = false;
   }
@@ -336,18 +368,22 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
   }
 }
 
+export async function triggerAutoSync(showToast, onSyncComplete) {
+  // Tier 1: Upload offline employees first & update FKs
+  await syncPendingEmployees(showToast, onSyncComplete);
+  // Tier 2: Upload offline attendance logs
+  await syncPendingAttendanceLogs(showToast, onSyncComplete);
+  // Tier 3: Upload offline admin requests
+  await syncPendingAttendanceRequests();
+}
+
 /**
  * Setup Realtime Online Network Listener for Sequential 3-Tier Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
   const handleOnline = async () => {
     console.log('[Network Status] Device is ONLINE. Triggering Sequential 3-Tier Auto-Sync...');
-    // Tier 1: Upload offline employees first & update FKs
-    await syncPendingEmployees(showToast, onSyncComplete);
-    // Tier 2: Upload offline attendance logs
-    await syncPendingAttendanceLogs(showToast, onSyncComplete);
-    // Tier 3: Upload offline admin requests
-    await syncPendingAttendanceRequests();
+    await triggerAutoSync(showToast, onSyncComplete);
   };
 
   let networkListener = null;
@@ -356,9 +392,7 @@ export function initAutoSyncListener(showToast, onSyncComplete) {
     Network.addListener('networkStatusChange', async (status) => {
       if (status.connected) {
         console.log('[Network Status] Device is ONLINE (Native). Triggering Sequential 3-Tier Auto-Sync...');
-        await syncPendingEmployees(showToast, onSyncComplete);
-        await syncPendingAttendanceLogs(showToast, onSyncComplete);
-        await syncPendingAttendanceRequests();
+        await triggerAutoSync(showToast, onSyncComplete);
       }
     }).then(handle => {
       networkListener = handle;
