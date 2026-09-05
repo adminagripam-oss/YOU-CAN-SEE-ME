@@ -1094,8 +1094,8 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     </div>
                     {editFormMode === 'camera' ? (
                       <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
-                        <video ref={editVideoRef} autoPlay muted playsInline></video>
-                        <canvas ref={editCanvasRef} className="overlay-canvas"></canvas>
+                        <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: 'scaleX(-1)' }}></video>
+                        <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: 'scaleX(-1)' }}></canvas>
                       </div>
                     ) : (
                       <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border-color)', padding: '1rem', borderRadius: '10px', textAlign: 'center' }}>
