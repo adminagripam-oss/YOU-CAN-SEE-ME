@@ -71,8 +71,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     if (error) {
       console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to individual inserts:', error.message || error);
       // Fallback to one-by-one insert so valid logs can still sync
-      for (let i = 0; i < logsToInsert.length; i++) {
-        const singleLog = logsToInsert[i];
+      // Fallback to one-by-one insert concurrently so valid logs can still sync faster
+      const fallbackPromises = logsToInsert.map(async (singleLog, i) => {
         const { data: singleData, error: singleError } = await supabase
           .from('attendance_logs')
           .insert([singleLog])
@@ -84,13 +84,22 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           // we must discard this log from the queue otherwise it will block sync forever.
           if (singleError.code === '23503') {
             console.warn(`[Auto-Sync] Discarding invalid log for non-existent employee_id: ${singleLog.employee_id}`);
-            syncedIds.push(pendingLogs[i].id); // Push to syncedIds so it gets deleted from local queue
+            return { id: pendingLogs[i].id, discard: true }; // Push to syncedIds so it gets deleted from local queue
           }
+          return null;
         } else if (singleData && singleData.length > 0) {
-          syncedIds.push(pendingLogs[i].id);
-          successfulData.push(singleData[0]);
+          return { id: pendingLogs[i].id, data: singleData[0] };
         }
-      }
+        return null;
+      });
+
+      const fallbackResults = await Promise.all(fallbackPromises);
+      fallbackResults.forEach(res => {
+        if (res) {
+          syncedIds.push(res.id);
+          if (res.data) successfulData.push(res.data);
+        }
+      });
     } else {
       syncedIds = pendingLogs.map(log => log.id);
       successfulData = data || [];
@@ -106,11 +115,10 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     // Update local attendance logs table: remove offline entries and put synced ones
     try {
-      for (let i = 0; i < pendingLogs.length; i++) {
-        const oldId = pendingLogs[i].id;
-        // Delete the temporary offline log from the logs table using correct prefix
-        await db.attendance_logs.delete('offline_' + oldId);
-      }
+      // Execute local DB deletion in parallel
+      await Promise.all(pendingLogs.map(log => 
+        db.attendance_logs.delete('offline_' + log.id)
+      ));
       
       if (successfulData && successfulData.length > 0) {
         const localRecords = successfulData.map(record => ({
@@ -209,10 +217,10 @@ export async function syncPendingAttendanceRequests() {
       throw error;
     }
 
-    // Mark as synced locally
-    for (const r of unsyncedReqs) {
-      await db.attendance_requests.put({ ...r, is_synced: true });
-    }
+    // Mark as synced locally in parallel
+    await Promise.all(unsyncedReqs.map(r => 
+      db.attendance_requests.put({ ...r, is_synced: true })
+    ));
 
     console.log(`[Auto-Sync Requests Success] Successfully synced ${unsyncedReqs.length} admin requests!`);
     return { count: unsyncedReqs.length };
@@ -245,9 +253,11 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
     const { cacheUserMasterVector, db } = await import('./db');
 
     console.log(`[Auto-Sync Employees] Attempting to sync ${pendingEmps.length} offline registered employees...`);
-    let syncedCount = 0;
+    
+    // FETCH PENDING LOGS ONCE OUTSIDE THE LOOP! (Massive performance boost)
+    const allPendingLogs = await getUnsyncedLogs();
 
-    for (const emp of pendingEmps) {
+    const employeePromises = pendingEmps.map(async (emp) => {
       try {
         let realEmpId = null;
 
@@ -279,11 +289,11 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               realEmpId = existingEmp.id;
             } else {
               console.warn(`[Sync Employee Fail] Gagal menemukan ID untuk NIK duplikat ${emp.nik}`);
-              continue;
+              return false;
             }
           } else {
             console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, empErr.message);
-            continue;
+            return false;
           }
         } else {
           realEmpId = createdEmp.id;
@@ -320,19 +330,18 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         // 3. Update any pending offline attendance logs that used this temporary employee ID
         try {
-          const allPendingLogs = await getUnsyncedLogs();
-          for (const pendingLog of allPendingLogs) {
-            if (String(pendingLog.employee_id) === String(emp.id)) {
-              console.log(`[Sync Engine FK Update] Updating pending log #${pendingLog.id} employee_id from ${emp.id} to ${realEmpId}`);
-              pendingLog.employee_id = realEmpId;
-              if (isNative) {
-                const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
-                await sqliteUpdatePendingAttendanceEmployeeId(emp.id, realEmpId);
-              } else {
-                await db.attendance_sync_queue.put(pendingLog);
-              }
+          const logsToUpdate = allPendingLogs.filter(log => String(log.employee_id) === String(emp.id));
+          const updateLogPromises = logsToUpdate.map(async (pendingLog) => {
+            console.log(`[Sync Engine FK Update] Updating pending log #${pendingLog.id} employee_id from ${emp.id} to ${realEmpId}`);
+            pendingLog.employee_id = realEmpId;
+            if (isNative) {
+              const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
+              await sqliteUpdatePendingAttendanceEmployeeId(emp.id, realEmpId);
+            } else {
+              await db.attendance_sync_queue.put(pendingLog);
             }
-          }
+          });
+          await Promise.all(updateLogPromises);
         } catch (fkErr) {
           console.warn('[Sync Engine FK Mapping Error]:', fkErr);
         }
@@ -345,12 +354,16 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           await db.employee_sync_queue.delete(emp.id);
         }
 
-        syncedCount++;
         console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);
+        return true;
       } catch (singleErr) {
         console.error(`[Sync Single Employee Exception]`, singleErr);
+        return false;
       }
-    }
+    });
+
+    const syncResults = await Promise.all(employeePromises);
+    const syncedCount = syncResults.filter(Boolean).length;
 
     if (syncedCount > 0) {
       if (showToast) {
