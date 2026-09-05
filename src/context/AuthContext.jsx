@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
 import { db, getUnsyncedDataSummary } from '../db';
+import { checkOnline, triggerAutoSync } from '../syncEngine';
 
 // Helper function to hash a string to SHA-256 for local offline credential matching
 async function hashPassword(password) {
@@ -191,30 +192,57 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Logout handler (dengan proteksi cegah kehilangan data offline & tanpa penghapusan database non-destruktif)
+  // Logout handler: Syncs data if online, then destroys local database caches to prevent sticky data
   const logout = async (force = false, showToast = null) => {
     try {
-      const summary = await getUnsyncedDataSummary();
+      let summary = await getUnsyncedDataSummary();
 
       if (summary.total > 0 && !force) {
-        const detailParts = [];
-        if (summary.unsyncedLogsCount > 0) detailParts.push(`${summary.unsyncedLogsCount} log absensi`);
-        if (summary.unsyncedEmployeesCount > 0) detailParts.push(`${summary.unsyncedEmployeesCount} karyawan baru`);
-        if (summary.unsyncedRequestsCount > 0) detailParts.push(`${summary.unsyncedRequestsCount} pengajuan admin`);
-
-        const errorMsg = `Gagal Keluar (Logout Dibatalkan): Terdapat ${summary.total} data offline yang belum tersinkronisasi (${detailParts.join(', ')}). Silakan lakukan sinkronisasi (Sync) terlebih dahulu sebelum keluar!`;
-
-        console.warn('[LOGOUT PREVENTED - UNSYNCED DATA]:', errorMsg);
-        if (showToast) {
-          showToast('Logout Dibatalkan', errorMsg, 'error');
+        const isOnline = await checkOnline();
+        
+        // Attempt to sync before blocking if online
+        if (isOnline) {
+          if (showToast) {
+            showToast('Menyinkronkan Data', 'Mengirim data offline ke server sebelum logout...', 'info');
+          }
+          console.log('[LOGOUT] Attempting auto-sync before logout...');
+          await triggerAutoSync();
+          // Re-check summary after sync attempt
+          summary = await getUnsyncedDataSummary();
         }
-        return {
-          success: false,
-          blocked: true,
-          summary,
-          message: errorMsg
-        };
+
+        if (summary.total > 0) {
+          const detailParts = [];
+          if (summary.unsyncedLogsCount > 0) detailParts.push(`${summary.unsyncedLogsCount} log absensi`);
+          if (summary.unsyncedEmployeesCount > 0) detailParts.push(`${summary.unsyncedEmployeesCount} karyawan baru`);
+          if (summary.unsyncedRequestsCount > 0) detailParts.push(`${summary.unsyncedRequestsCount} pengajuan admin`);
+
+          const errorMsg = `Gagal Keluar: Masih ada ${summary.total} data offline yang belum tersinkronisasi ke server (${detailParts.join(', ')}). Pastikan perangkat online.`;
+
+          console.warn('[LOGOUT PREVENTED - UNSYNCED DATA]:', errorMsg);
+          if (showToast) {
+            showToast('Logout Dibatalkan', errorMsg, 'error');
+          }
+          return {
+            success: false,
+            blocked: true,
+            summary,
+            message: errorMsg
+          };
+        }
       }
+
+      // DESTROY LOCAL DATA on successful logout to prevent sticky data
+      try {
+        console.log('[LOGOUT] Destroying local session data (Caches, Logs, Employees)...');
+        await db.employees_cache.clear(); // This also clears user_master in db.js
+        await db.today_attendance_cache.clear();
+        await db.attendance_logs.clear();
+        await db.attendance_requests.clear();
+      } catch (clearErr) {
+        console.warn('[LOGOUT DATA CLEAR WARN]:', clearErr);
+      }
+
     } catch (checkErr) {
       console.warn('[LOGOUT CHECK WARN]:', checkErr);
     }
