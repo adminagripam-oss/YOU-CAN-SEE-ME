@@ -859,4 +859,20 @@ Pembaruan versi **v4.1.0** berfokus pada **Multi-Account Shared Device Handling*
 * **Koreksi Logika Delta Sync (Penonaktifan Sementara)**: Memperbaiki *Logic Flaw* pada fitur *Delta Sync* di `App.jsx` yang sebelumnya bergantung pada perbandingan kolom `timestamp` dengan `lastLogSyncTime`. Mekanisme ini gagal mendeteksi absensi *offline* (karena jam absen seringkali lebih lawas atau *backdated* dari waktu sinkronisasi). Aplikasi kini menggunakan **Full Sync** secara eksplisit (`limit(2000)`) agar data absensi *offline* terjamin selalu tertari sempurna saat perangkat berganti akun atau dimuat ulang.
 * **Koreksi Constraint (CHECK-IN / CHECK-OUT)**: Memperbaiki format *fallback* pada `syncEngine.js` dan SQLite yang sebelumnya menggunakan garis bawah (`CHECK_IN`). Supabase memberlakukan aturan (*Constraint*) ketat menggunakan strip (`CHECK-IN`). Ketidaksesuaian ini sebelumnya mengakibatkan seluruh pengiriman data *offline* ke Supabase diblokir secara diam-diam. Proses normalisasi string menggunakan `.replace('_', '-')` diterapkan secara menyeluruh.
 
+---
 
+## 24. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v4.2.0)
+
+Pembaruan versi **v4.2.0** berfokus pada penyempurnaan UI/UX (*User Experience*), optimasi performa sinkronisasi, dan pengamanan sesi data lokal:
+
+### 24.1 Optimasi Performa Mesin Auto-Sync (`syncEngine.js`)
+* **Parallel Cloud Push & Query Optimization**: Memodifikasi algoritma sinkronisasi karyawan (`syncPendingEmployees`) dan log absensi (`syncPendingAttendanceLogs`). Kueri pengambilan data (`db.employees_cache.toArray()`) kini ditarik keluar dari dalam struktur *looping*. Selain itu, pengiriman data ke Supabase API kini dieksekusi secara paralel menggunakan `Promise.all()` alih-alih proses berurutan (sekuensial), sehingga mempercepat durasi *upload* secara signifikan, khususnya pada saat jaringan tidak stabil.
+
+### 24.2 Keamanan Data Antar-Akun & Sinkronisasi Pra-Logout (`AuthContext.jsx`)
+* **Pre-Logout Auto-Sync**: Sistem kini memaksa eksekusi fungsi `syncAll()` secara mutlak apabila terdeteksi data luring yang belum terkirim (`getUnsyncedDataSummary`) sebelum proses *logout* diizinkan berjalan.
+* **Destruksi Sesi Lokal Presisi**: Setelah sinkronisasi prapeluncuran berhasil 100%, sistem akan mengeksekusi `db.xxx.clear()` secara menyeluruh (kecuali log harian yang relevan) untuk memusnahkan jejak data lokal. Hal ini menjamin privasi maksimal dan mencegah terjadinya fenomena "Data Leakage" (kebocoran data) antar-akun manajer ketika tablet digunakan secara bergantian (Shared Device).
+
+### 24.3 Penyempurnaan UX Kamera & Dev Tools
+* **Konsistensi Mirror Effect (Kamera Re-Scan)**: Menambahkan implementasi CSS `style={{ transform: 'scaleX(-1)' }}` pada `<video>` dan `<canvas>` di modal Edit Data Karyawan (Re-Scan) pada `DaftarKaryawanPage.jsx`. Pergerakan pengguna saat proses pengambilan biometrik ulang kini terasa natural selayaknya bercermin, persis sama dengan halaman Tambah Karyawan utama.
+* **Bypass Geofencing Statis (Tunda Sementara)**: Mematikan validasi paksa jarak statis kantor (`OFFICE_LAT` & `OFFICE_LNG`) pada fitur absensi (`TabFaceVerification.jsx`). Sistem tidak lagi memblokir absensi dengan error `Di luar jangkauan (Batas: 100000m)`. Logika geofencing akan diganti dengan validasi berbasis lokasi kebun dinamis di rilis mendatang.
+* **Node Watch (HMR Backend)**: Skrip `run-dev.bat` diperbarui menggunakan parameter `node --watch server.js` agar Server Node.js (port 8080) dapat memuat ulang kode otomatis secara instan setiap ada perubahan *script* saat masa pengembangan.
