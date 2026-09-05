@@ -1342,9 +1342,11 @@ export default function TabFaceVerification({
         }
 
         // ── Validasi Geofencing ──
-        const distanceToOffice = calculateHaversineDistance(userLat, userLng, OFFICE_LAT, OFFICE_LON);
-        console.log(`[FRONTEND GEOFENCE] Jarak ke Kantor: ${distanceToOffice.toFixed(2)}m (Batas: ${MAX_RADIUS_METERS}m)`);
+        // SEMENTARA DINONAKTIFKAN: Nanti akan diubah agar dinamis per-kebun.
+        const distanceToOffice = 0; // calculateHaversineDistance(userLat, userLng, OFFICE_LAT, OFFICE_LON);
+        // console.log(`[FRONTEND GEOFENCE] Jarak ke Kantor: ${distanceToOffice.toFixed(2)}m (Batas: ${MAX_RADIUS_METERS}m)`);
 
+        /* --- SEMENTARA DINONAKTIFKAN ATAS PERMINTAAN USER ---
         if (distanceToOffice > MAX_RADIUS_METERS) {
           showToast(
             'Absensi Ditolak',
@@ -1355,6 +1357,7 @@ export default function TabFaceVerification({
           setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
           return;
         }
+        ----------------------------------------------------- */
 
         locationStr = `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)}) [Jarak: ${distanceToOffice.toFixed(0)}m]`;
       } catch (gpsError) {
