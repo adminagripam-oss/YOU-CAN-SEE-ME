@@ -5,8 +5,8 @@ echo 🚀 Memulai Backend API Server (Port 8080) dan Frontend Vite (Port 5173)..
 echo 🌐 Aplikasi akan terbuka otomatis di http://localhost:5173
 echo =====================================================================
 
-:: Jalankan Express Backend Server di window command prompt terpisah
-start cmd /k "title AGRIPAM Backend Server && echo Memulai Backend API... && node server.js"
+:: Jalankan Express Backend Server di window command prompt terpisah (menggunakan --watch untuk auto-update)
+start cmd /k "title AGRIPAM Backend Server && echo Memulai Backend API... && node --watch server.js"
 
 :: Jalankan Vite Frontend Dev Server di window command prompt terpisah
 start cmd /k "title AGRIPAM Frontend Vite && echo Memulai Frontend Vite... && cmd /c npm run dev"
