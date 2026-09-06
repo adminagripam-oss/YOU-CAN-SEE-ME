@@ -21,9 +21,16 @@ Karena Anda memilih **Opsi 2 (Self-Hosted Supabase)**, berikut adalah langkah-la
 
 ### Langkah 2: Lakukan Build & Zip Kode Terbaru
 Setiap kali Anda selesai melakukan *coding* fitur baru, ikuti urutan ini:
-1. Buka terminal proyek, jalankan `npm run build`
-2. Buka folder proyek Anda di File Explorer, cari folder bernama `dist`.
-3. Kompres folder `dist` tersebut menjadi file `.zip` (misalnya: `dist-1.0.1.zip`).
+1. Buka terminal proyek di VSCode, pastikan Anda berada di dalam folder proyek (`FACE VERIFICATION`).
+2. Jalankan perintah `npm.cmd run build` (gunakan `.cmd` jika Anda menggunakan Windows PowerShell untuk menghindari *error*).
+3. Buka File Explorer (Windows), lalu masuk ke dalam folder hasil *build* bernama **`dist`**.
+4. Di dalam folder `dist` tersebut, tekan `Ctrl + A` untuk memilih **semua isi file dan folder** (termasuk `index.html` dan `assets`).
+5. Klik kanan pada file-file yang terblok tersebut > pilih **"Compress to ZIP file"** (atau "Add to archive..." format ZIP).
+6. Beri nama file zip tersebut, misalnya `dist-1.0.1.zip`.
+
+> [!TIP]
+> **Di mana sebaiknya menyimpan file ZIP ini?** 
+> Anda bisa memindahkannya keluar (misalnya ke folder utama `FACE VERIFICATION` atau folder `Downloads`/`Documents`). Hindari menyimpannya terus-menerus di dalam folder `dist`, karena folder `dist` akan dihapus dan dibuat ulang secara otomatis oleh sistem setiap kali Anda menjalankan perintah `npm.cmd run build` di masa mendatang.
 
 ### Langkah 3: Unggah ke Supabase & Ubah Versi
 1. Unggah file `dist-1.0.1.zip` yang baru Anda buat ke dalam *bucket* `ota-updates` di Supabase.
