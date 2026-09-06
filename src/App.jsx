@@ -104,14 +104,14 @@ function AppContent() {
 
   // OTA Update Logic (Self-Hosted Supabase)
   const checkForUpdates = async () => {
+    if (Capacitor.getPlatform() === 'web') {
+      showToast('Info Pembaruan', 'Fitur pembaruan OTA (Over-The-Air) ini hanya berjalan pada aplikasi Native Android (APK), bukan di Web Browser.', 'info');
+      return;
+    }
     try {
-      showToast('Mengecek pembaruan...', '', 'info');
-      
-      const { data } = supabase.storage.from('ota-updates').getPublicUrl('version.json');
-      const response = await fetch(data.publicUrl + '?t=' + new Date().getTime()); // Bypass cache
-      
+      const response = await fetch('https://qrtvawixmlekbitvfuav.supabase.co/storage/v1/object/public/ota-updates/version.json');
       if (!response.ok) {
-        throw new Error('version.json tidak ditemukan di bucket ota-updates');
+        throw new Error('Tidak dapat terhubung ke server pembaruan');
       }
       
       const versionInfo = await response.json(); // { version: "1.0.1", url: "https://..." }
@@ -136,6 +136,12 @@ function AppContent() {
   };
 
   const performUpdate = async () => {
+    if (Capacitor.getPlatform() === 'web') {
+      showToast('Pembaruan Dibatalkan', 'Pembaruan OTA hanya bisa dilakukan di dalam aplikasi Android.', 'error');
+      setUpdateModalOpen(false);
+      return;
+    }
+    
     if (!updateAvailableInfo) return;
     try {
       setUpdateProgress(10); // Menandakan mulai
