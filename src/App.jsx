@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicRoute from './components/PublicRoute';
 import AuthLayout from './layouts/AuthLayout';
@@ -24,6 +25,7 @@ import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
+import OTAUpdateModal from './components/OTAUpdateModal';
 
 function AppContent() {
   const { user } = useAuth();
@@ -33,6 +35,13 @@ function AppContent() {
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelStatusText, setModelStatusText] = useState('Memuat Model AI Biometrik Wajah...');
+  
+  // OTA Update States
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState('');
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateAvailableInfo, setUpdateAvailableInfo] = useState(null);
+  
   const [toasts, setToasts] = useState([]);
 
   // Theme State (Dark / Light)
@@ -57,6 +66,13 @@ function AppContent() {
 
   // SQLite Native Initializer
   useEffect(() => {
+    // Beri tahu Capgo Updater bahwa aplikasi telah berhasil dijalankan agar tidak rollback
+    try {
+      CapacitorUpdater.notifyAppReady();
+    } catch (err) {
+      console.warn('[OTA] Capgo Updater not available natively', err);
+    }
+
     async function setupStorage() {
       try {
         await initSQLite();
@@ -85,6 +101,61 @@ function AppContent() {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 4500);
   }, []);
+
+  // OTA Update Logic (Self-Hosted Supabase)
+  const checkForUpdates = async () => {
+    try {
+      showToast('Mengecek pembaruan...', '', 'info');
+      
+      const { data } = supabase.storage.from('ota-updates').getPublicUrl('version.json');
+      const response = await fetch(data.publicUrl + '?t=' + new Date().getTime()); // Bypass cache
+      
+      if (!response.ok) {
+        throw new Error('version.json tidak ditemukan di bucket ota-updates');
+      }
+      
+      const versionInfo = await response.json(); // { version: "1.0.1", url: "https://..." }
+      
+      let currentVersion = '1.0.0';
+      try {
+        const current = await CapacitorUpdater.current();
+        if (current && current.version) currentVersion = current.version;
+      } catch (err) {} // ignore on web
+      
+      if (versionInfo.version !== currentVersion) {
+        setUpdateVersion(versionInfo.version);
+        setUpdateAvailableInfo(versionInfo);
+        setUpdateModalOpen(true);
+      } else {
+        showToast('Aplikasi sudah versi terbaru', '', 'success');
+      }
+    } catch (e) {
+      console.warn('Check update error:', e);
+      showToast('Pembaruan OTA', e.message || 'Gagal mengecek pembaruan', 'error');
+    }
+  };
+
+  const performUpdate = async () => {
+    if (!updateAvailableInfo) return;
+    try {
+      setUpdateProgress(10); // Menandakan mulai
+      
+      const version = await CapacitorUpdater.download({
+        version: updateAvailableInfo.version,
+        url: updateAvailableInfo.url,
+      });
+      
+      setUpdateProgress(100);
+      
+      // Memasang pembaruan dan restart otomatis
+      await CapacitorUpdater.set({ id: version.id });
+    } catch (e) {
+      console.error('Update failed', e);
+      showToast('Pembaruan Gagal', e.message, 'error');
+      setUpdateProgress(0);
+      setUpdateModalOpen(false);
+    }
+  };
 
   // Confirm Modal Helper
   const openConfirmModal = useCallback(({ title, message, confirmText, onConfirm }) => {
@@ -1059,6 +1130,13 @@ function AppContent() {
               onConfirm={confirmModalConfig.onConfirm}
               onCancel={closeConfirmModal}
             />
+
+            <OTAUpdateModal
+              isOpen={updateModalOpen}
+              version={updateVersion}
+              progress={updateProgress}
+              onUpdate={performUpdate}
+            />
             <Outlet />
           </>
         ),
@@ -1108,6 +1186,7 @@ function AppContent() {
                 toggleTheme={toggleTheme}
                 pendingCheckOutsCount={pendingCheckOutsCount}
                 isPastShiftEnd={isPastShiftEnd}
+                onCheckUpdate={checkForUpdates}
               />
             ),
             children: [
@@ -1141,6 +1220,7 @@ function AppContent() {
                     toggleTheme={toggleTheme}
                     pendingCheckOutsCount={pendingCheckOutsCount}
                     isPastShiftEnd={isPastShiftEnd}
+                    onCheckUpdate={checkForUpdates}
                   />
                 ),
                 children: [

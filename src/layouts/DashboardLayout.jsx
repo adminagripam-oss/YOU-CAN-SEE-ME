@@ -3,7 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 
-export default function DashboardLayout({ isOnline, unsyncedCount, isSyncing, onManualSync, theme, toggleTheme }) {
+export default function DashboardLayout({ isOnline, unsyncedCount, isSyncing, onManualSync, onCheckUpdate, theme, toggleTheme }) {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('sidebar-open');
@@ -135,6 +135,7 @@ export default function DashboardLayout({ isOnline, unsyncedCount, isSyncing, on
             unsyncedCount={unsyncedCount}
             isSyncing={isSyncing}
             onManualSync={onManualSync}
+            onCheckUpdate={onCheckUpdate}
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           />

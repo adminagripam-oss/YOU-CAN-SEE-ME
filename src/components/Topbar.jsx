@@ -13,6 +13,7 @@ export default function Topbar({
   onToggleSidebar,
   pendingCheckOutsCount = 0,
   isPastShiftEnd = false,
+  onCheckUpdate,
 }) {
   const { user } = useAuth();
 
@@ -51,6 +52,20 @@ export default function Topbar({
           >
             <i className={`fa-solid ${isSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}`}></i>
             <span>{isSyncing ? 'Syncing...' : `${unsyncedCount} Pending`}</span>
+          </button>
+        )}
+
+        {/* OTA Update Button */}
+        {isOnline && onCheckUpdate && (
+          <button
+            type="button"
+            className="topbar-sync-btn"
+            onClick={onCheckUpdate}
+            title="Cek Pembaruan Aplikasi (OTA)"
+            style={{ background: 'var(--accent-primary)', color: 'white', border: 'none' }}
+          >
+            <i className="fa-solid fa-cloud-arrow-down"></i>
+            <span style={{ marginLeft: '6px' }}>Cek Pembaruan</span>
           </button>
         )}
 
