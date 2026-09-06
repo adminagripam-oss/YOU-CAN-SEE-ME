@@ -705,13 +705,26 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
 export async function sqliteGetEmployeesCache(): Promise<any[]> {
   if (!dbConnection) return [];
   try {
-    const res = await dbConnection.query(`SELECT * FROM local_employees`);
+    const res = await dbConnection.query(`
+      SELECT e.*, md.descriptor_json 
+      FROM local_employees e
+      LEFT JOIN local_master_descriptors md ON e.id = md.employee_id
+    `);
     const rows = res.values || [];
-    return rows.map(row => ({
-      ...row,
-      kebun: row.nama_kebun,
-      has_master_biometric: row.has_master_biometric === 1
-    }));
+    return rows.map(row => {
+      let parsedDesc = null;
+      if (row.descriptor_json) {
+        try {
+          parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
+        } catch (e) {}
+      }
+      return {
+        ...row,
+        kebun: row.nama_kebun,
+        has_master_biometric: row.has_master_biometric == 1 || row.has_master_biometric === 'true' || !!parsedDesc,
+        descriptor_json: parsedDesc
+      };
+    });
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetEmployeesCache Error]:', err?.message || err);
     return [];
@@ -732,12 +745,20 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
        WHERE md.descriptor_json IS NOT NULL`
     );
     const rows = res.values || [];
-    return rows.map(row => ({
-      employee_id: row.employee_id,
-      nik: row.nik,
-      name: row.name,
-      descriptor_json: row.descriptor_json ? JSON.parse(row.descriptor_json) : null,
-    }));
+    return rows.map(row => {
+      let parsedDesc = null;
+      if (row.descriptor_json) {
+        try {
+          parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
+        } catch (e) {}
+      }
+      return {
+        employee_id: row.employee_id,
+        nik: row.nik,
+        name: row.name,
+        descriptor_json: parsedDesc,
+      };
+    });
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetAllMasterVectors Error]:', err?.message || err);
     return [];
