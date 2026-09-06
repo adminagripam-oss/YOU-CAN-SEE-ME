@@ -147,7 +147,7 @@ function AppContent() {
         const lastSyncTime = localStorage.getItem(lastSyncKey);
         const useDeltaSync = !isFullSync && localCachedEmps.length > 0 && !!lastSyncTime;
 
-        let query = supabase.from('employees').select('*');
+        let query = supabase.from('employees').select('*').is('deleted_at', null);
 
         // Saring berdasarkan role
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
@@ -350,7 +350,7 @@ function AppContent() {
       const lastLogSyncTime = localStorage.getItem(lastLogSyncKey);
       const rawLocalCached = await db.attendance_logs.toArray();
 
-      let query = supabase.from('attendance_logs').select('*');
+      let query = supabase.from('attendance_logs').select('*').is('deleted_at', null);
 
       // Saring log online berdasarkan lingkup admin aktif
       if (user) {
