@@ -440,7 +440,6 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Data',
       onConfirm: async () => {
         try {
-          // Kumpulkan ID yang akan dihapus
           const idsToDelete = [];
           if (group.inLog?.id) idsToDelete.push(group.inLog.id);
           if (group.outLog?.id) idsToDelete.push(group.outLog.id);
@@ -450,15 +449,9 @@ export default function TabAttendanceLogs({
             return;
           }
 
-          console.log('[DELETE] Menghapus IDs:', idsToDelete);
-
-          // Hapus data (SQLite/IndexedDB jika offline log, atau Supabase jika online log)
           try {
-            // Optimistic update: instantly remove from local state
             setDeletedLogIds(prev => [...prev, ...idsToDelete]);
 
-            // Klasifikasi ID: 'offline_', 'auto_out_', dan 'online_' = lokal IndexedDB saja
-            // ID numerik murni = data online Supabase
             const localOnlyIds = idsToDelete.filter(id =>
               String(id).startsWith('offline_') || String(id).startsWith('auto_out_') || String(id).startsWith('online_')
             );
@@ -468,30 +461,33 @@ export default function TabAttendanceLogs({
 
             const { db } = await import('../db');
 
-            // Hapus local-only IDs dari IndexedDB saja (TIDAK ke Supabase)
             for (const localId of localOnlyIds) {
               if (String(localId).startsWith('offline_')) {
                 const rawQueueId = localId.replace('offline_', '');
                 await db.attendance_sync_queue.delete(rawQueueId);
               }
               await db.attendance_logs.delete(String(localId));
-              console.log('[DELETE LOCAL] Hapus dari IndexedDB:', localId);
             }
 
-            // Hapus Supabase online IDs (hanya ID numerik murni) melalui backend proxy (Bypass RLS)
             if (onlineIds.length > 0) {
-              const response = await fetch(`${API_BASE_URL}/api/attendance/logs`, {
-                method: 'DELETE',
+              const response = await fetch(`${API_BASE_URL}/api/attendance/logs/delete`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ids: onlineIds })
               });
               
-              const result = await response.json();
-              if (!response.ok || !result.success) {
-                throw new Error(result.message || 'Gagal menghapus data dari server');
+              let result;
+              try {
+                const text = await response.text();
+                result = text ? JSON.parse(text) : {};
+              } catch (e) {
+                if (!response.ok) throw new Error(`Server API Error (${response.status})`);
               }
 
-              // Juga hapus dari cache lokal
+              if (!response.ok || (result && !result.success)) {
+                throw new Error((result && result.message) || 'Gagal menghapus data dari server');
+              }
+
               for (const onlineId of onlineIds) {
                 await db.attendance_logs.delete(String(onlineId));
               }
@@ -499,13 +495,10 @@ export default function TabAttendanceLogs({
 
             showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
           } catch (sbEx) {
-            console.error('[DELETE EXCEPTION]:', sbEx?.message || sbEx);
-            // Revert optimistic update on failure
             setDeletedLogIds(prev => prev.filter(id => !idsToDelete.includes(id)));
             showToast('Gagal Menghapus', 'Gagal menghapus data.', 'error');
           }
 
-          // Refresh tabel setelah operasi (berhasil atau tidak)
           refreshLogs();
         } catch (err) {
           console.error('[DELETE LOG ERROR]:', err);
@@ -586,7 +579,6 @@ export default function TabAttendanceLogs({
 
       // Update inLog if it exists and checkIn changed
       if (editData.inLog && editData.editCheckIn) {
-        // Construct new timestamp
         const oldDate = new Date(editData.inLog.timestamp);
         const [hours, minutes, seconds] = editData.editCheckIn.split(':');
         oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));

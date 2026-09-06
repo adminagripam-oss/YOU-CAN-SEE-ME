@@ -55,7 +55,7 @@ console.log(`[SUPABASE] Connected to Supabase Cloud Database at: ${supabaseUrl}`
 const apiRouter = express.Router();
 apiRouter.use('/auth', authRoutes);
 
-apiRouter.delete('/attendance/logs', async (req, res) => {
+apiRouter.post('/attendance/logs/delete', async (req, res) => {
   try {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -827,8 +827,8 @@ apiRouter.delete('/attendance/logs/:id', async (req, res) => {
   }
 });
 
-// 8. DELETE /api/attendance/logs - Clear ALL attendance logs from Supabase
-apiRouter.delete('/attendance/logs', async (req, res) => {
+// 8. DELETE /api/attendance/logs/clear - Clear ALL attendance logs from Supabase
+apiRouter.delete('/attendance/logs/clear', async (req, res) => {
   try {
     // Gunakan supabaseAdmin untuk bypass RLS
     const { error } = await supabaseAdmin
