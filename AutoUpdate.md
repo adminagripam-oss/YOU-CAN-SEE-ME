@@ -35,13 +35,23 @@ Setiap kali Anda selesai melakukan *coding* fitur baru, ikuti urutan ini:
 ### Langkah 3: Unggah ke Supabase & Ubah Versi
 1. Unggah file `dist-1.0.1.zip` yang baru Anda buat ke dalam *bucket* `ota-updates` di Supabase.
 2. Salin *URL Public* dari file zip tersebut.
-3. Buat file baru di komputer Anda bernama `version.json` yang isinya seperti ini:
+3. Buka file `version.json` di komputer Anda, lalu perbarui `version` dan `url`-nya:
 ```json
 {
   "version": "1.0.1",
   "url": "https://[SUPABASE-PROJECT-ID].supabase.co/storage/v1/object/public/ota-updates/dist-1.0.1.zip"
 }
 ```
-4. Unggah/timpa file `version.json` tersebut ke dalam *bucket* `ota-updates`.
+4. **PENTING: Unggah/timpa file `version.json` tersebut ke dalam *bucket* `ota-updates`.**
+
+> [!IMPORTANT]
+> **RANGKUMAN WAJIB SETIAP KALI ADA PEMBARUAN APLIKASI:**
+> <u>Secara konkrit, rutinitas Anda setiap kali merilis fitur baru adalah:</u>
+> 1. `npm.cmd run build`
+> 2. Blok semua isi folder `dist`, lalu **Compress to ZIP** (Pastikan namanya *tidak* double ekstensi `.zip.zip`).
+> 3. Buka file **`version.json`** di VSCode, naikkan angkanya (misal `1.0.2`), dan arahkan URL-nya ke nama file ZIP Anda yang baru.
+> 4. Buka **Supabase Storage**, lalu **UNGGAH KEDUA FILE TERSEBUT** (file `.zip` terbaru **DAN** file `version.json` yang baru saja di-save). 
+> 
+> *Aplikasi di HP hanya akan menyadari ada pembaruan jika file `version.json` di Supabase berhasil ditimpa dengan versi yang lebih tinggi!*
 
 Selesai! Sekarang, saat mandor/pengguna menekan tombol **"Cek Pembaruan"** di aplikasi Android, modal pembaruan akan langsung muncul dan mengunduh ZIP terbaru yang Anda unggah. 🎯
