@@ -689,6 +689,11 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
             new Date().toISOString()
           ]
         });
+      } else {
+        set.push({
+          statement: `DELETE FROM local_master_descriptors WHERE employee_id = ?`,
+          values: [String(emp.id)]
+        });
       }
     });
 
@@ -697,7 +702,7 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
   } catch (err: any) {
     console.error('[SQLite Service sqliteBulkPutEmployeesCache Error]:', err?.message || err);
   }
-}
+
 
 /**
  * Gets all cached employees.

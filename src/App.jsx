@@ -201,6 +201,18 @@ function AppContent() {
       console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
     }
 
+    // WIPE STALE CACHE BEFORE FULL SYNC
+    if (isFullSync) {
+      try {
+        const filterObj = adminObj.role === 'estate_admin' ? { kebun: adminObj.kebun } : 
+                          adminObj.role === 'regional_admin' ? { region: adminObj.region } : undefined;
+        await db.employees_cache.clear(filterObj);
+        console.log('[Full Sync] Wiped old local cache to prevent stale data conflicts.');
+      } catch (clearErr) {
+        console.warn('[Full Sync] Failed to clear cache:', clearErr);
+      }
+    }
+
     // Preload existing cached employees to support Delta Sync
     let localCachedEmps = [];
     try {
@@ -281,12 +293,15 @@ function AppContent() {
             const fetchedMapped = data.map(emp => {
               const biometrics = descMap.get(String(emp.id));
               const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
+              
+              const rawHasBio = emp.has_master_biometric;
+              const isBioTrue = rawHasBio === true || rawHasBio === 1 || rawHasBio === '1' || rawHasBio === 'true';
 
               return {
                 ...emp,
                 nama_kebun: emp.kebun || emp.nama_kebun || '',
                 kebun: emp.kebun || emp.nama_kebun || '',
-                has_master_biometric: emp.has_master_biometric === true || !!biometrics || !!localMaster,
+                has_master_biometric: isBioTrue || !!biometrics || !!localMaster,
                 descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
                 geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
               };
