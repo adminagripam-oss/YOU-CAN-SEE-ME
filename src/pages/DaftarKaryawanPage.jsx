@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -902,8 +902,11 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
         <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', marginBottom: '1.5rem', alignItems: 'flex-end' }}>
           
           {/* Export & Action Buttons */}
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn" onClick={exportToCSV} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-outline" onClick={() => refreshEmployees(true)} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }} title="Tarik ulang data dari server">
+              <RefreshCw size={16} /> Sync Data
+            </button>
+            <button type="button" className="btn btn-outline" onClick={exportToCSV} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <FileSpreadsheet size={16} color="#107C41" /> Export Excel
             </button>
             <button type="button" className="btn" onClick={exportToPDF} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
