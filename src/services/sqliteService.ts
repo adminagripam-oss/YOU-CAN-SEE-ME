@@ -702,6 +702,7 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
   } catch (err: any) {
     console.error('[SQLite Service sqliteBulkPutEmployeesCache Error]:', err?.message || err);
   }
+}
 
 
 /**
