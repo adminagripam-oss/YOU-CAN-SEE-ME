@@ -1318,7 +1318,7 @@ export default function TabFaceVerification({
       try {
         let pos = null;
         try {
-          // Hanya gunakan Low Accuracy GPS sesuai permintaan agar lebih cepat
+          // Pertama coba dengan Low Accuracy untuk kecepatan jika ada internet
           pos = await new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: false,
@@ -1327,10 +1327,22 @@ export default function TabFaceVerification({
             });
           });
         } catch (err) {
-          console.warn('[FRONTEND GPS ERROR] Gagal mendapatkan lokasi GPS:', err?.message || err);
-          showToast('GPS Gagal', 'Gagal melacak lokasi GPS Anda.', 'error');
-          setIsSubmitting(false);
-          return;
+          console.warn('[FRONTEND GPS] Low accuracy gagal, mencoba High Accuracy (Offline Mode Fallback)...');
+          try {
+            // Jika offline, low accuracy akan gagal. Gunakan satelit GPS murni (High Accuracy)
+            pos = await new Promise((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0
+              });
+            });
+          } catch (highErr) {
+            console.warn('[FRONTEND GPS ERROR] Gagal mendapatkan lokasi GPS:', highErr?.message || highErr);
+            showToast('GPS Gagal', 'Gagal melacak lokasi GPS Anda.', 'error');
+            setIsSubmitting(false);
+            return;
+          }
         }
 
         userLat = pos.coords.latitude;
