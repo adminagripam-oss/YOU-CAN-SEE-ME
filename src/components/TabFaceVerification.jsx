@@ -1306,17 +1306,7 @@ export default function TabFaceVerification({
       try {
         let pos = null;
         try {
-          // Coba 1: High Accuracy, timeout 10 detik, maximumAge 30 detik
-          pos = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 30000
-            });
-          });
-        } catch (err1) {
-          console.warn('[FRONTEND GPS WARNING] High accuracy failed, retrying with low accuracy...', err1?.message || err1);
-          // Coba 2: Low Accuracy, timeout 10 detik, maximumAge 5 menit
+          // Hanya gunakan Low Accuracy GPS sesuai permintaan agar lebih cepat
           pos = await new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: false,
@@ -1324,6 +1314,11 @@ export default function TabFaceVerification({
               maximumAge: 300000
             });
           });
+        } catch (err) {
+          console.warn('[FRONTEND GPS ERROR] Gagal mendapatkan lokasi GPS:', err?.message || err);
+          showToast('GPS Gagal', 'Gagal melacak lokasi GPS Anda.', 'error');
+          setIsSubmitting(false);
+          return;
         }
 
         userLat = pos.coords.latitude;
@@ -1332,14 +1327,7 @@ export default function TabFaceVerification({
 
         console.log(`[FRONTEND GPS] Lat: ${userLat}, Lng: ${userLng}, Accuracy: ${userAccuracy}m`);
 
-        // Jika akurasi sangat buruk (> 150m) dan bukan simulasi fallback
-        if (userAccuracy > 150) {
-          showToast(
-            'Akurasi GPS Kurang Baik',
-            `Akurasi GPS Anda (${userAccuracy.toFixed(1)}m) agak rendah. Menggunakan lokasi saat ini.`,
-            'info'
-          );
-        }
+        // Peringatan akurasi dihilangkan karena menggunakan mode low accuracy
 
         // ── Validasi Geofencing ──
         // SEMENTARA DINONAKTIFKAN: Nanti akan diubah agar dinamis per-kebun.
