@@ -806,6 +806,18 @@ export default function TabFaceVerification({
           }
         }
 
+        // Cache locally if it was fetched from Tier 2 or 4 (not Tier 1)
+        if (isValidVector(parsedVec)) {
+          const { cacheUserMasterVector } = await import('../db');
+          const empObj = employees.find((it) => String(it.id) === String(empIdKey)) || {};
+          await cacheUserMasterVector({
+            employee_id: empIdKey,
+            nik: empObj.nik,
+            name: empObj.name,
+            descriptor_json: parsedVec
+          }).catch(err => console.warn('[LOAD MASTER CACHE] Failed to cache vector locally:', err));
+        }
+
         // Validasi tipe data ketat sebelum disimpan ke ref
         if (Array.isArray(parsedVec)) {
           // Kasus ideal: sudah berupa Array angka
@@ -1385,141 +1397,37 @@ export default function TabFaceVerification({
       }
     }
 
-    if (navigator.onLine) {
-      try {
-        const parsedEmpId = isNaN(Number(selectedEmployeeId)) ? selectedEmployeeId : parseInt(selectedEmployeeId, 10);
-        const apiPayload = {
-          employee_id: parsedEmpId,
-          nik: (targetEmp.nik || nikInput).trim() || null,
-          name: targetEmp.name || null,
-          department: targetEmp.department || null,
-          kebun: currentUser?.kebun || targetEmp.nama_kebun || null,
-          afdeling: targetEmp.afdeling || null,
-          scan_descriptor: currentDescRef.current, // Send face embedding to the server
-          location: `${locationStr} - GeoMesh Scanner`,
-          attendance_type: attendanceTypeDash,
-          status: selectedStatus,
-          ...(durasiDetik !== null && { durasi: durasiDetik }),
-          latitude: userLat,
-          longitude: userLng,
-        };
+    // ── MENGGUNAKAN OUTBOX QUEUE PATTERN (CORE ARCHITECTURE) ──
+    // UI tidak lagi menembak API atau Supabase secara langsung.
+    // Semua data absensi baru akan dimasukkan ke antrean lokal (SQLite).
+    // SyncEngine di latar belakang yang bertugas mengirimkannya secara asinkron.
 
-        // Call the serverless / Express API first (Tier 1)
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/attendance/verify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(apiPayload),
-          timeout: 4000 // 4 seconds timeout for API
-        });
+    try {
+      await queueOfflineAttendance({
+        employee_id: targetEmp.id,
+        nik: targetEmp.nik,
+        name: targetEmp.name,
+        department: targetEmp.department,
+        afdeling: targetEmp.afdeling || null,
+        kebun: currentUser?.kebun || targetEmp.nama_kebun || null,
+        timestamp: recordTimestamp,
+        location: `${locationStr} - GeoMesh Scanner`,
+        lat: userLat,
+        lng: userLng,
+        attendance_type: attendanceTypeDash,
+        status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+        euclidean_distance: euclideanDist,
+        ...(durasiDetik !== null && { durasi: durasiDetik }),
+      });
 
-        const resData = await response.json();
-
-        if (response.ok && resData.success) {
-          isSuccess = true;
-          successMsg = resData.message || `Absensi ${typeLabel} berhasil dicatat di Server!`;
-          if (resData.timestamp) {
-            recordTimestamp = resData.timestamp;
-          }
-        } else {
-          throw new Error(resData.message || 'API verification failed');
-        }
-      } catch (apiErr) {
-        console.warn('[SERVER API WARN – FALLBACK TO DIRECT SUPABASE]:', apiErr.message);
-
-        // Tier 2: Direct Supabase Cloud insert fallback
-        try {
-          const logKebun = currentUser?.kebun || targetEmp.nama_kebun || '-';
-          const logAfdeling = targetEmp.afdeling || '-';
-          const logPayload = {
-            employee_id: isNaN(Number(selectedEmployeeId)) ? selectedEmployeeId : parseInt(selectedEmployeeId, 10),
-            nik: (targetEmp.nik || nikInput).trim() || null,
-            name: targetEmp.name || null,
-            department: targetEmp.department || null,
-            location: `${logKebun} | ${logAfdeling} | ${locationStr} - GeoMesh Scanner (Direct Fallback)`,
-            attendance_type: attendanceTypeDash,
-            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
-            euclidean_distance: euclideanDist,
-            timestamp: recordTimestamp,
-            ...(durasiDetik !== null && { durasi: durasiDetik }),
-            latitude: userLat,
-            longitude: userLng,
-          };
-
-          const { error: sbErr } = await supabase.from('attendance_logs').insert(logPayload);
-          if (!sbErr) {
-            isSuccess = true;
-            successMsg = `Absensi ${typeLabel} berhasil dicatat langsung (Fallback)!`;
-          } else {
-            throw new Error(sbErr.message);
-          }
-        } catch (sbEx) {
-          console.warn('[SUPABASE DIRECT WARN – FALLBACK TO DEXIE QUEUE]:', sbEx.message);
-        }
-      }
+      isSuccess = true;
+      successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;
+    } catch (err) {
+      console.error('[QUEUE ERROR]:', err);
     }
 
-    // Fallback B: Offline Dexie.js Sync Queue
-    if (!isSuccess) {
-      try {
-        await queueOfflineAttendance({
-          employee_id: targetEmp.id,
-          nik: targetEmp.nik,
-          name: targetEmp.name,
-          department: targetEmp.department,
-          afdeling: targetEmp.afdeling || null,
-          kebun: currentUser?.kebun || targetEmp.nama_kebun || null,
-          timestamp: recordTimestamp,
-          location: `${locationStr} [OFFLINE DEXIE]`,
-          lat: userLat,
-          lng: userLng,
-          attendance_type: attendanceTypeDash,   // 'CHECK-IN' atau 'CHECK-OUT'
-          status: selectedStatus === 'Hadir' ? 'Hadir (Verified) [OFFLINE]' : selectedStatus,
-          euclidean_distance: euclideanDist,
-          // Sertakan durasi kerja (detik) jika ini adalah CHECK-OUT
-          ...(durasiDetik !== null && { durasi: durasiDetik }),
-        });
-
-        isSuccess = true;
-        successMsg = `Absensi ${typeLabel} berhasil disimpan di penyimpanan offline!`;
-      } catch (dexieErr) {
-        console.error('[DEXIE QUEUE ERROR]:', dexieErr);
-      }
-    }
-
-    // 3. JANGAN update Toast/State sebelum Database Benar-Benar Sukses
     if (isSuccess) {
       showToast('Absensi Berhasil', successMsg, 'success');
-
-      // Dual-write online log locally for immediate state update
-      if (navigator.onLine) {
-        try {
-          const onlineLogRecord = {
-            id: 'online_' + new Date(recordTimestamp).getTime(),
-            employee_id: targetEmp.id,
-            nik: targetEmp.nik || nikInput,
-            name: targetEmp.name,
-            department: targetEmp.department,
-            afdeling: targetEmp.afdeling || null,
-            nama_kebun: targetEmp.nama_kebun || currentUser?.kebun || null,
-            kebun: targetEmp.nama_kebun || currentUser?.kebun || null,
-            timestamp: recordTimestamp,
-            location: `${locationStr} - GeoMesh Scanner`,
-            lat: userLat,
-            lng: userLng,
-            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
-            attendance_type: attendanceTypeDash,
-            euclidean_distance: euclideanDist,
-            is_synced: true,
-            created_at: recordTimestamp
-          };
-          await db.attendance_logs.put(onlineLogRecord);
-          console.log('[Local Database] Saved online log locally:', onlineLogRecord);
-        } catch (dbErr) {
-          console.warn('[Local Database] Failed to write online log locally:', dbErr);
-        }
-      }
 
       setAttendanceStatus((prev) => ({
         checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),

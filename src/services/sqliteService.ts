@@ -689,7 +689,8 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
             new Date().toISOString()
           ]
         });
-      } else {
+      } else if (!emp.has_master_biometric) {
+        // Jika dari cloud menyatakan karyawan ini TIDAK PUNYA biometrik lagi, hapus cache lokalnya
         set.push({
           statement: `DELETE FROM local_master_descriptors WHERE employee_id = ?`,
           values: [String(emp.id)]
@@ -1137,6 +1138,10 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     }
   }
   try {
+    const descJson = empData.descriptor_json ? (typeof empData.descriptor_json === 'string' ? empData.descriptor_json : JSON.stringify(empData.descriptor_json)) : null;
+    const geomJson = empData.geometric_descriptor_json ? (typeof empData.geometric_descriptor_json === 'string' ? empData.geometric_descriptor_json : JSON.stringify(empData.geometric_descriptor_json)) : null;
+
+    // 1. Simpan ke Antrean Sync (Outbox)
     const sql = `
       INSERT OR REPLACE INTO local_employee_sync_queue 
       (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, descriptor_json, geometric_descriptor_json, is_synced, created_at)
@@ -1152,31 +1157,33 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.status_tk || null,
       empData.jabatan || null,
       empData.status_perkawinan || null,
-      empData.descriptor_json ? (typeof empData.descriptor_json === 'string' ? empData.descriptor_json : JSON.stringify(empData.descriptor_json)) : null,
-      empData.geometric_descriptor_json ? (typeof empData.geometric_descriptor_json === 'string' ? empData.geometric_descriptor_json : JSON.stringify(empData.geometric_descriptor_json)) : null,
+      descJson,
+      geomJson,
       empData.created_at || new Date().toISOString()
     ];
     await dbConnection!.run(sql, params);
 
-    // Also insert to local_employees so they show up offline immediately
-    await dbConnection!.run(
-      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        String(empData.id),
-        empData.nik,
-        empData.name,
-        empData.department || empData.jabatan || null,
-        empData.afdeling || null,
-        empData.nama_kebun || null,
-        empData.status_tk || null,
-        empData.jabatan || null,
-        empData.status_perkawinan || null,
-        empData.descriptor_json ? 1 : 0
-      ]
-    );
+    // 2. Simpan juga ke Cache Karyawan agar langsung muncul di UI dengan status lengkap (konsisten dengan Web/IndexedDB)
+    const cacheSql = `
+      INSERT OR REPLACE INTO local_employees 
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `;
+    const cacheParams = [
+      String(empData.id),
+      empData.nik,
+      empData.name,
+      empData.department || empData.jabatan || null,
+      empData.afdeling || null,
+      empData.nama_kebun || null,
+      empData.status_tk || null,
+      empData.jabatan || null,
+      empData.status_perkawinan || null,
+      empData.has_master_biometric ? 1 : 0
+    ];
+    await dbConnection!.run(cacheSql, cacheParams);
 
-    console.log(`[SQLite Service] Saved pending offline employee: ${empData.name} (${empData.id})`);
+    console.log(`[SQLite Service] Saved pending offline employee: ${empData.name} (${empData.id}) into queue and cache.`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSavePendingEmployee Error]:', err?.message || err);
   }

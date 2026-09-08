@@ -270,196 +270,83 @@ export default function TabEmployeeManagement({
 
     try {
       const empPayload = {
-      nik: empNik.trim(),
-      name: empName.trim(),
-      department: empJabatan.trim(),
-      afdeling: empAfdeling.trim(),
-      nama_kebun: empNamaKebun.trim(),
-      status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
-      jabatan: empJabatan.trim(),
-      status_perkawinan: empStatusPerkawinan,
-    };
+        nik: empNik.trim(),
+        name: empName.trim(),
+        department: empJabatan.trim(),
+        afdeling: empAfdeling.trim(),
+        nama_kebun: empNamaKebun.trim(),
+        status_tk: empStatusTk === 'Lainnya...' ? empStatusTkCustom.trim() : empStatusTk,
+        jabatan: empJabatan.trim(),
+        status_perkawinan: empStatusPerkawinan,
+      };
 
-    let isOffline = false;
-    let createdEmpId = null;
-    let createdEmp = null;
+      // ── MENGGUNAKAN OUTBOX QUEUE PATTERN (CORE ARCHITECTURE) ──
+      // UI tidak lagi menembak API secara langsung. Semua data baru masuk ke antrean lokal (SQLite).
+      // SyncEngine di latar belakang yang akan memproses ini ke Server.
 
-    // Helper: deteksi semua jenis error jaringan di Android Capacitor / WebView
-    const isNetworkError = (msg = '') => {
-      const lower = String(msg || '').toLowerCase();
-      if (!lower) return true; // treat empty/undefined message as network error
-      return (
-        lower.includes('failed to fetch') ||
-        lower.includes('networkerror') ||
-        lower.includes('network request failed') ||
-        lower.includes('err_internet_disconnected') ||
-        lower.includes('err_name_not_resolved') ||
-        lower.includes('err_network_changed') ||
-        lower.includes('unable to resolve host') ||
-        lower.includes('econnrefused') ||
-        lower.includes('etimedout') ||
-        lower.includes('no internet') ||
-        lower.includes('load failed') ||
-        lower.includes('timeout') ||
-        lower.includes('err_connection') ||
-        (lower.includes('fetch') && lower.includes('fail'))
-      );
-    };
+      const tempId = 'off_emp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const createdEmp = {
+        id: tempId,
+        ...empPayload,
+        has_master_biometric: !!currentEmpDescriptorRef.current,
+        is_synced: false,
+        created_at: new Date().toISOString()
+      };
 
-    // 1. Cek koneksi jaringan via checkOnline()
-    const online = await checkOnline();
-    if (!online) {
-      console.log('[TabEmployeeManagement] Device is offline (checkOnline === false). Switching directly to offline flow.');
-      isOffline = true;
-    } else {
-      try {
-        const { data, error } = await supabase
-          .from('employees')
-          .insert([empPayload])
-          .select()
-          .single();
+      const empQueueRecord = {
+        ...createdEmp,
+        descriptor_json: currentEmpDescriptorRef.current || null,
+        geometric_descriptor_json: currentEmpGFVRef.current || null
+      };
 
-        if (error) {
-          console.warn('[TabEmployeeManagement] Supabase insert error:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint,
-            json: JSON.stringify(error)
-          });
-          if (isNetworkError(error.message)) {
-            isOffline = true;
-          } else {
-            showToast('Gagal Menambah Karyawan', error.message || 'Gagal menambahkan karyawan.', 'error');
-            setIsSubmitting(false);
-            return;
-          }
-        } else {
-          createdEmp = data;
-          createdEmpId = data.id;
-        }
-      } catch (netErr) {
-        console.error('[TabEmployeeManagement] Supabase insert exception:', {
-          message: netErr?.message,
-          code: netErr?.code,
-          json: JSON.stringify(netErr)
-        });
-        if (isNetworkError(netErr?.message) || netErr instanceof TypeError) {
-          isOffline = true;
-        } else {
-          showToast('Gagal Menambah Karyawan', netErr?.message || 'Error tidak diketahui', 'error');
-          setIsSubmitting(false);
-          return;
-        }
+      if (Capacitor.isNativePlatform()) {
+        const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
+        await sqliteSavePendingEmployee(empQueueRecord);
+      } else {
+        const { db } = await import('../db');
+        await db.employee_sync_queue.add(empQueueRecord);
       }
-    }
 
-    if (isOffline) {
-      try {
-        // Offline fallback handling
-        const tempId = 'off_emp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-        createdEmpId = tempId;
-        createdEmp = {
-          id: tempId,
-          ...empPayload,
-          has_master_biometric: !!currentEmpDescriptorRef.current,
-          is_synced: false,
-          created_at: new Date().toISOString()
-        };
-
-        const empQueueRecord = {
-          ...createdEmp,
-          descriptor_json: currentEmpDescriptorRef.current || null,
-          geometric_descriptor_json: currentEmpGFVRef.current || null
-        };
-
-        if (Capacitor.isNativePlatform()) {
-          const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
-          await sqliteSavePendingEmployee(empQueueRecord);
-        } else {
-          const { db } = await import('../db');
-          await db.employee_sync_queue.add(empQueueRecord);
-        }
-
-        if (currentEmpDescriptorRef.current) {
-          await cacheUserMasterVector({
-            employee_id: tempId,
-            ...createdEmp,
-            descriptor_json: currentEmpDescriptorRef.current,
-            geometric_descriptor_json: currentEmpGFVRef.current || null
-          });
-        }
-
-        showToast(
-          'Karyawan Berhasil Disimpan (Offline)',
-          `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan akan di-sync otomatis saat online!`,
-          'success'
-        );
-      } catch (offlineErr) {
-        console.error('[Offline Save Error]:', {
-          message: offlineErr?.message,
-          code: offlineErr?.code,
-          json: JSON.stringify(offlineErr)
-        });
-        showToast('Gagal Simpan Offline', offlineErr?.message || 'Gagal menyimpan data karyawan secara lokal.', 'error');
-        setIsSubmitting(false);
-        return;
-      }
-    } else {
-      // Online flow
+      // Simpan Vektor Wajah (Biometrik) secara lokal
       if (currentEmpDescriptorRef.current) {
-        const descJson = JSON.stringify(currentEmpDescriptorRef.current);
-        await supabase
-          .from('master_descriptors')
-          .upsert({
-            employee_id: createdEmpId,
-            descriptor_json: descJson,
-          }, { onConflict: 'employee_id' });
-
+        const { cacheUserMasterVector } = await import('../db');
         await cacheUserMasterVector({
-          employee_id: createdEmpId,
-          nik: createdEmp.nik,
-          name: createdEmp.name,
-          department: createdEmp.department || createdEmp.jabatan,
-          afdeling: createdEmp.afdeling,
-          nama_kebun: createdEmp.nama_kebun,
-          status_tk: createdEmp.status_tk,
-          jabatan: createdEmp.jabatan,
-          status_perkawinan: createdEmp.status_perkawinan,
+          employee_id: tempId,
+          ...createdEmp,
           descriptor_json: currentEmpDescriptorRef.current,
-          geometric_descriptor_json: currentEmpGFVRef.current || null,
+          geometric_descriptor_json: currentEmpGFVRef.current || null
         });
       }
 
       showToast(
         'Karyawan Berhasil Disimpan',
-        `Karyawan ${empName.trim()} (${empNik.trim()}) telah berhasil ditambahkan ke database!`,
+        `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan otomatis masuk antrean sinkronisasi.`,
         'success'
       );
+
+      // Reset Form
+      setEmpNik('');
+      setEmpName('');
+      setEmpAfdeling('');
+      setEmpNamaKebun(user?.role === 'estate_admin' && user?.kebun ? user.kebun : '');
+      setEmpStatusTk('');
+      setEmpStatusTkCustom('');
+      setEmpJabatan('');
+      setEmpStatusPerkawinan('');
+      setPhotoPreview(null);
+      setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
+      currentEmpDescriptorRef.current = null;
+      currentEmpGFVRef.current = null;
+      setFaceCheckResult(null);
+
+      refreshEmployees();
+    } catch (err) {
+      console.error('[ADD EMP ERROR]:', err);
+      showToast('Gagal Simpan', err.message || 'Terjadi kesalahan sistem.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setEmpNik('');
-    setEmpName('');
-    setEmpAfdeling('');
-    setEmpNamaKebun(user?.role === 'estate_admin' && user?.kebun ? user.kebun : '');
-    setEmpStatusTk('');
-    setEmpStatusTkCustom('');
-    setEmpJabatan('');
-    setEmpStatusPerkawinan('');
-    setPhotoPreview(null);
-    setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
-    currentEmpDescriptorRef.current = null;
-    currentEmpGFVRef.current = null;
-    setFaceCheckResult(null);
-
-    refreshEmployees();
-  } catch (err) {
-    console.error('[ADD EMP ERROR]:', err);
-    showToast('Error Sistem', 'Terjadi kesalahan: ' + err.message, 'error');
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   return (
     <div className="grid-2">

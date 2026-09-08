@@ -396,17 +396,9 @@ export default function TabAttendanceLogs({
               old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
             };
 
-            const { error } = await supabase.from('attendance_requests').insert(reqPayload);
-            
-            const { db } = await import('../db');
-            if (error) {
-              console.warn('[Supabase] Gagal menyimpan request ke awan, menyimpan lokal:', error.message);
+              const { db } = await import('../db');
               await db.attendance_requests.put({ ...reqPayload, is_synced: false });
-              showToast('Request Disimpan Lokal', 'Permohonan penghapusan disimpan secara offline.', 'warning');
-            } else {
-              await db.attendance_requests.put({ ...reqPayload, is_synced: true });
-              showToast('Request Terkirim', 'Permohonan penghapusan berhasil diajukan ke Head Office.', 'success');
-            }
+              showToast('Request Disimpan', 'Permohonan penghapusan disimpan dan masuk antrean sinkronisasi.', 'success');
           } catch (err) {
             console.error('[DELETE REQUEST ERROR]:', err);
             try {
@@ -554,17 +546,9 @@ export default function TabAttendanceLogs({
           }
         };
 
-        const { error } = await supabase.from('attendance_requests').insert(reqPayload);
-        
         const { db } = await import('../db');
-        if (error) {
-          console.warn('[Supabase] Gagal menyimpan request edit ke awan, menyimpan lokal:', error.message);
-          await db.attendance_requests.put({ ...reqPayload, is_synced: false });
-          showToast('Request Disimpan Lokal', 'Permohonan perubahan disimpan secara offline.', 'warning');
-        } else {
-          await db.attendance_requests.put({ ...reqPayload, is_synced: true });
-          showToast('Request Terkirim', 'Permohonan perubahan berhasil diajukan ke Head Office.', 'success');
-        }
+        await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+        showToast('Request Disimpan', 'Permohonan perubahan disimpan dan masuk antrean sinkronisasi.', 'success');
         setIsEditModalOpen(false);
       } catch (err) {
         console.error('[EDIT REQUEST ERROR]:', err);
