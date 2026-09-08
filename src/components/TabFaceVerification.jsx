@@ -1330,10 +1330,11 @@ export default function TabFaceVerification({
           console.warn('[FRONTEND GPS] Low accuracy gagal, mencoba High Accuracy (Offline Mode Fallback)...');
           try {
             // Jika offline, low accuracy akan gagal. Gunakan satelit GPS murni (High Accuracy)
+            // Timeout diset 5 detik demi kecepatan, jika gagal akan langsung error.
             pos = await new Promise((resolve, reject) => {
               navigator.geolocation.getCurrentPosition(resolve, reject, {
                 enableHighAccuracy: true,
-                timeout: 15000,
+                timeout: 5000,
                 maximumAge: 0
               });
             });
