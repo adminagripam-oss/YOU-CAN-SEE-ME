@@ -176,7 +176,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 }
 
 /**
- * Executes Auto-Sync of offline admin approval requests to Supabase
+ * Executes Auto-Sync of offline admin approval requests to Supabase.
+ * Also handles DELETE_LOG requests: deletes from Supabase attendance_logs when online.
  */
 export async function syncPendingAttendanceRequests() {
   const isOnline = await checkOnline();
@@ -191,38 +192,68 @@ export async function syncPendingAttendanceRequests() {
 
     console.log(`[Auto-Sync Requests] Attempting to sync ${unsyncedReqs.length} pending offline admin requests...`);
 
-    const reqsToInsert = unsyncedReqs.map(r => ({
-      id: r.id,
-      request_type: r.request_type,
-      log_id: r.log_id,
-      nik: r.nik || null,
-      name: r.name || null,
-      nama_kebun: r.nama_kebun || null,
-      requested_by: r.requested_by,
-      requested_at: r.requested_at || new Date().toISOString(),
-      status: r.status || 'PENDING',
-      old_value: r.old_value || null,
-      new_value: r.new_value || null
-    }));
+    // ── Pisahkan DELETE requests dari approval requests biasa ──
+    const deleteLogReqs = unsyncedReqs.filter(r => r.request_type === 'DELETE');
+    const approvalReqs = unsyncedReqs.filter(r => r.request_type !== 'DELETE');
 
-    const { error } = await supabase
-      .from('attendance_requests')
-      .insert(reqsToInsert);
-
-    if (error) {
-      if (error.message.includes('relation "public.attendance_requests" does not exist')) {
-        console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
-        return { count: 0 };
-      }
-      throw error;
+    // 1. Proses semua permintaan penghapusan log ke Supabase
+    if (deleteLogReqs.length > 0) {
+      const deletePromises = deleteLogReqs.map(async (r) => {
+        try {
+          const logId = r.log_id;
+          if (!logId) return;
+          const { error: delErr } = await supabase
+            .from('attendance_logs')
+            .delete()
+            .eq('id', logId);
+          if (delErr) {
+            console.error(`[Sync Engine] Failed to delete log #${logId} from Supabase:`, delErr.message);
+          } else {
+            console.log(`[Sync Engine] Log #${logId} berhasil dihapus dari Supabase.`);
+            await db.attendance_requests.put({ ...r, is_synced: true });
+          }
+        } catch (e) {
+          console.error('[Sync Engine DELETE_LOG Error]:', e);
+        }
+      });
+      await Promise.all(deletePromises);
     }
 
-    // Mark as synced locally in parallel
-    await Promise.all(unsyncedReqs.map(r => 
-      db.attendance_requests.put({ ...r, is_synced: true })
-    ));
+    // 2. Proses approval requests biasa (INSERT ke attendance_requests)
+    if (approvalReqs.length > 0) {
+      const reqsToInsert = approvalReqs.map(r => ({
+        id: r.id,
+        request_type: r.request_type,
+        log_id: r.log_id,
+        nik: r.nik || null,
+        name: r.name || null,
+        nama_kebun: r.nama_kebun || null,
+        requested_by: r.requested_by,
+        requested_at: r.requested_at || new Date().toISOString(),
+        status: r.status || 'PENDING',
+        old_value: r.old_value || null,
+        new_value: r.new_value || null
+      }));
 
-    console.log(`[Auto-Sync Requests Success] Successfully synced ${unsyncedReqs.length} admin requests!`);
+      const { error } = await supabase
+        .from('attendance_requests')
+        .insert(reqsToInsert);
+
+      if (error) {
+        if (error.message.includes('relation "public.attendance_requests" does not exist')) {
+          console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
+        } else {
+          throw error;
+        }
+      } else {
+        // Mark as synced locally
+        await Promise.all(approvalReqs.map(r => 
+          db.attendance_requests.put({ ...r, is_synced: true })
+        ));
+      }
+    }
+
+    console.log(`[Auto-Sync Requests Success] Processed ${unsyncedReqs.length} admin requests!`);
     return { count: unsyncedReqs.length };
   } catch (err) {
     console.error('[Sync Engine Requests Error]:', err.message || err);
@@ -346,7 +377,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           console.warn('[Sync Engine FK Mapping Error]:', fkErr);
         }
 
-        // 4. Remove temp ID from local employee sync queue & purge ghost employee from main cache
+        // 4. Remove temp ID from local employee sync queue
         if (isNative) {
           const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
           await sqliteRemovePendingEmployee(emp.id);
@@ -354,10 +385,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           await db.employee_sync_queue.delete(emp.id);
         }
         
-        // PURGE the ghost employee from local_employees and local_master_descriptors!
-        // Supabase will send the real employee ID down during the next fetchEmployees cycle.
-        const { deleteLocalEmployee } = await import('./db');
-        await deleteLocalEmployee(emp.id);
+        // PURGE ghost employee dari local cache HANYA jika ID-nya adalah temporary offline ID.
+        // Karyawan real (ID numerik dari Supabase) TIDAK boleh dihapus di sini.
+        const tempIdStr = String(emp.id);
+        if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
+          const { deleteLocalEmployee } = await import('./db');
+          await deleteLocalEmployee(emp.id);
+          console.log(`[Sync Employee] Ghost employee ${tempIdStr} dihapus dari cache lokal.`);
+        }
 
         console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);
         return true;

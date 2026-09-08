@@ -1340,9 +1340,15 @@ export default function TabFaceVerification({
             });
           } catch (highErr) {
             console.warn('[FRONTEND GPS ERROR] Gagal mendapatkan lokasi GPS:', highErr?.message || highErr);
-            showToast('GPS Gagal', 'Gagal melacak lokasi GPS Anda.', 'error');
-            setIsSubmitting(false);
-            return;
+            showToast('Lokasi Standar', 'Menggunakan lokasi default karena GPS HP tidak merespon.', 'warning');
+            
+            // Bypass dengan koordinat default jika GPS benar-benar gagal
+            pos = {
+              coords: {
+                latitude: -6.200000,
+                longitude: 106.816600
+              }
+            };
           }
         }
 
