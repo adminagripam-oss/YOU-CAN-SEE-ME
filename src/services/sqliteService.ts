@@ -1183,6 +1183,22 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     ];
     await dbConnection!.run(cacheSql, cacheParams);
 
+    // 3. Simpan Vektor Wajah ke local_master_descriptors agar bisa langsung dipakai absen offline
+    if (descJson || geomJson) {
+      const descSql = `
+        INSERT OR REPLACE INTO local_master_descriptors 
+        (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
+        VALUES (?, ?, ?, ?)
+      `;
+      const descParams = [
+        String(empData.id),
+        descJson,
+        geomJson,
+        new Date().toISOString()
+      ];
+      await dbConnection!.run(descSql, descParams);
+    }
+
     console.log(`[SQLite Service] Saved pending offline employee: ${empData.name} (${empData.id}) into queue and cache.`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSavePendingEmployee Error]:', err?.message || err);
