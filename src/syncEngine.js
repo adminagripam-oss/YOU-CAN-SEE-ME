@@ -346,13 +346,18 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           console.warn('[Sync Engine FK Mapping Error]:', fkErr);
         }
 
-        // 4. Remove temp ID from local employee sync queue
+        // 4. Remove temp ID from local employee sync queue & purge ghost employee from main cache
         if (isNative) {
           const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
           await sqliteRemovePendingEmployee(emp.id);
         } else {
           await db.employee_sync_queue.delete(emp.id);
         }
+        
+        // PURGE the ghost employee from local_employees and local_master_descriptors!
+        // Supabase will send the real employee ID down during the next fetchEmployees cycle.
+        const { deleteLocalEmployee } = await import('./db');
+        await deleteLocalEmployee(emp.id);
 
         console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);
         return true;
