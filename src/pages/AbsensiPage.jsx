@@ -110,7 +110,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
               startGpsWatcher();
               if (showToast) showToast('Lokasi Standar', 'Menggunakan lokasi default karena GPS HP tidak merespon.', 'warning');
             },
-            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
           );
         }
       },
