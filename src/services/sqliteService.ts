@@ -66,7 +66,7 @@ export async function initSQLite(): Promise<void> {
     const ddl = `
       CREATE TABLE IF NOT EXISTS local_employees (
         id TEXT PRIMARY KEY,
-        nik TEXT UNIQUE NOT NULL,
+        nik TEXT NOT NULL,
         name TEXT NOT NULL,
         department TEXT,
         afdeling TEXT,
@@ -74,7 +74,9 @@ export async function initSQLite(): Promise<void> {
         status_tk TEXT,
         jabatan TEXT,
         status_perkawinan TEXT,
-        has_master_biometric INTEGER DEFAULT 0
+        has_master_biometric INTEGER DEFAULT 0,
+        region TEXT,
+        is_synced INTEGER DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS local_master_descriptors (
@@ -171,7 +173,7 @@ export async function initSQLite(): Promise<void> {
         await dbConnection.execute(`
           CREATE TABLE IF NOT EXISTS local_employees_v2 (
             id TEXT PRIMARY KEY,
-            nik TEXT UNIQUE NOT NULL,
+            nik TEXT NOT NULL,
             name TEXT NOT NULL,
             department TEXT,
             afdeling TEXT,
@@ -241,6 +243,66 @@ export async function initSQLite(): Promise<void> {
       }
     } catch (e) {
       console.warn('[SQLite Service] Migration local_today_attendance_cache warning:', e);
+    }
+
+    // Migration to remove UNIQUE constraint from nik (if it exists) and add missing columns
+    try {
+      const empInfo = await dbConnection.query(`PRAGMA table_info(local_employees);`);
+      const hasRegion = empInfo.values?.some((c: any) => c.name === 'region');
+      
+      const indexList = await dbConnection.query(`PRAGMA index_list(local_employees);`);
+      let hasUniqueNik = false;
+      if (indexList.values) {
+        for (const idx of indexList.values) {
+          if (idx.unique === 1) {
+            const indexInfo = await dbConnection.query(`PRAGMA index_info('${idx.name}');`);
+            if (indexInfo.values && indexInfo.values.some((col: any) => col.name === 'nik')) {
+              hasUniqueNik = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (hasUniqueNik || !hasRegion) {
+        console.log('[SQLite Service] Migrating local_employees to remove UNIQUE nik and ensure all columns exist...');
+        await dbConnection.execute(`
+          CREATE TABLE IF NOT EXISTS local_employees_v3 (
+            id TEXT PRIMARY KEY,
+            nik TEXT NOT NULL,
+            name TEXT NOT NULL,
+            department TEXT,
+            afdeling TEXT,
+            nama_kebun TEXT,
+            status_tk TEXT,
+            jabatan TEXT,
+            status_perkawinan TEXT,
+            has_master_biometric INTEGER DEFAULT 0,
+            region TEXT,
+            is_synced INTEGER DEFAULT 1
+          );
+        `);
+        
+        if (!hasRegion) {
+          await dbConnection.execute(`
+            INSERT OR IGNORE INTO local_employees_v3 (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
+              SELECT id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric FROM local_employees;
+          `);
+        } else {
+          await dbConnection.execute(`
+            INSERT OR IGNORE INTO local_employees_v3 (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
+              SELECT id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced FROM local_employees;
+          `);
+        }
+        
+        await dbConnection.execute(`
+          DROP TABLE local_employees;
+          ALTER TABLE local_employees_v3 RENAME TO local_employees;
+        `);
+        console.log('[SQLite Service] Migrated local_employees to remove UNIQUE nik successfully.');
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_employees v3 warning:', e);
     }
 
     try {
