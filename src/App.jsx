@@ -60,6 +60,7 @@ function AppContent() {
 
   // Offline PWA & Auto-Sync State
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const prevOnlineToastStateRef = useRef(null);
   const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [dbReady, setDbReady] = useState(false);
@@ -832,10 +833,13 @@ function AppContent() {
   useEffect(() => {
     const handleStatusChange = (isConnected) => {
       setIsOnline(isConnected);
-      if (isConnected) {
-        showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
-      } else {
-        showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
+      if (prevOnlineToastStateRef.current !== isConnected) {
+        prevOnlineToastStateRef.current = isConnected;
+        if (isConnected) {
+          showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
+        } else {
+          showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
+        }
       }
     };
 
@@ -851,10 +855,13 @@ function AppContent() {
         }
       }
       setIsOnline(isConnected);
-      if (isConnected) {
-        showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
-      } else {
-        showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
+      if (prevOnlineToastStateRef.current !== isConnected) {
+        prevOnlineToastStateRef.current = isConnected;
+        if (isConnected) {
+          showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
+        } else {
+          showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
+        }
       }
     };
     checkInitialConnection();

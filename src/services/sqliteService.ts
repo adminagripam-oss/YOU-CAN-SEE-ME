@@ -249,7 +249,7 @@ export async function initSQLite(): Promise<void> {
     try {
       const empInfo = await dbConnection.query(`PRAGMA table_info(local_employees);`);
       const hasRegion = empInfo.values?.some((c: any) => c.name === 'region');
-      
+
       const indexList = await dbConnection.query(`PRAGMA index_list(local_employees);`);
       let hasUniqueNik = false;
       if (indexList.values) {
@@ -282,7 +282,7 @@ export async function initSQLite(): Promise<void> {
             is_synced INTEGER DEFAULT 1
           );
         `);
-        
+
         if (!hasRegion) {
           await dbConnection.execute(`
             INSERT OR IGNORE INTO local_employees_v3 (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
@@ -294,7 +294,7 @@ export async function initSQLite(): Promise<void> {
               SELECT id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced FROM local_employees;
           `);
         }
-        
+
         await dbConnection.execute(`
           DROP TABLE local_employees;
           ALTER TABLE local_employees_v3 RENAME TO local_employees;
@@ -785,7 +785,7 @@ export async function sqliteGetEmployeesCache(): Promise<any[]> {
       if (row.descriptor_json) {
         try {
           parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
-        } catch (e) {}
+        } catch (e) { }
       }
       return {
         ...row,
@@ -819,7 +819,7 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
       if (row.descriptor_json) {
         try {
           parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
-        } catch (e) {}
+        } catch (e) { }
       }
       return {
         employee_id: row.employee_id,
