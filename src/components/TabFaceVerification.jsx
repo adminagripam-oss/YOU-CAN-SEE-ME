@@ -1496,9 +1496,9 @@ export default function TabFaceVerification({
 
 
 
-  const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.department).map(e => e.department))).sort();
+  const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.afdeling).map(e => e.afdeling))).sort();
   const filteredEmployees = selectedAfdelingFilter 
-    ? employees.filter(e => e.department === selectedAfdelingFilter) 
+    ? employees.filter(e => e.afdeling === selectedAfdelingFilter) 
     : employees;
 
   return (
@@ -1577,7 +1577,7 @@ export default function TabFaceVerification({
               <option value="">-- Pilih Karyawan Absen --</option>
               {filteredEmployees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
-                  {emp.nik} — {emp.name} ({emp.department})
+                  {emp.nik} — {emp.name} ({emp.afdeling ? `Afdeling: ${emp.afdeling}` : emp.department})
                 </option>
               ))}
             </select>
