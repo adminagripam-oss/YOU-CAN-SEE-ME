@@ -331,6 +331,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     };
 
     const descriptorJson = editUpdateBiometrics ? JSON.stringify(editCurrentDescriptorRef.current) : null;
+    if (descriptorJson) {
+      payload.has_master_biometric = true;
+    }
 
     try {
       const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);

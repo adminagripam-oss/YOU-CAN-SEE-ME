@@ -320,7 +320,8 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
             nama_kebun: emp.nama_kebun,
             status_tk: emp.status_tk,
             jabatan: emp.jabatan,
-            status_perkawinan: emp.status_perkawinan
+            status_perkawinan: emp.status_perkawinan,
+            has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true
           }])
           .select()
           .single();
