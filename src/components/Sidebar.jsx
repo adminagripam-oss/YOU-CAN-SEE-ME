@@ -86,9 +86,12 @@ export default function Sidebar({ isOpen, onClose }) {
                   color: 'var(--accent-red, #ef4444)',
                 }}
                 onClick={async () => {
-                  const res = await logout();
+                  const res = await logout(false);
                   if (res && res.blocked) {
-                    alert(res.message);
+                    const force = window.confirm(res.message + '\n\nPERINGATAN: Apakah Anda yakin ingin melakukan Logout Paksa? (Data offline yang belum tersinkron akan TERHAPUS permanen dan tidak bisa dikembalikan).');
+                    if (force) {
+                      await logout(true);
+                    }
                   } else {
                     navigate('/login');
                   }
