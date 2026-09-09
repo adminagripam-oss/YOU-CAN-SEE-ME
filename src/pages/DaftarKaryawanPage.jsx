@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -28,6 +28,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const [filterStatusTk, setFilterStatusTk] = useState('');
   const [filterStatusPerkawinan, setFilterStatusPerkawinan] = useState('');
   const [filterKebun, setFilterKebun] = useState('');
+  const [filterAfdeling, setFilterAfdeling] = useState('');
 
   // List of all kebuns from regional CSV data
   const allKebunsFromCSV = useMemo(() => [
@@ -82,6 +83,13 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     dynamicKebuns.sort();
     return dynamicKebuns;
   }, [employees, user, allKebunsFromCSV]);
+
+  const uniqueAfdelings = useMemo(() => {
+    const afdelings = employees.map(e => e.afdeling).filter(Boolean);
+    const unique = [...new Set(afdelings)];
+    return unique.sort();
+  }, [employees]);
+
   // Edit Modal State
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState({ id: '', nik: '', name: '', department: '', afdeling: '', nama_kebun: '', status_tk: '', jabatan: '', status_perkawinan: '' });
@@ -100,6 +108,149 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const editCanvasRef = useRef(null);
   const editStreamRef = useRef(null);
   const editFileInputRef = useRef(null);
+
+  // --- Scan Modal State ---
+  const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [scanEmp, setScanEmp] = useState(null);
+  const [scanFacingMode, setScanFacingMode] = useState('user');
+  const [scanCameraStatusText, setScanCameraStatusText] = useState('Menunggu Wajah di Kamera...');
+  const [scanCameraStatusColor, setScanCameraStatusColor] = useState('var(--accent-warning)');
+  const [scanFaceCheckResult, setScanFaceCheckResult] = useState(null);
+  const [isScanningSubmit, setIsScanningSubmit] = useState(false);
+
+  const scanCurrentDescriptorRef = useRef(null);
+  const scanVideoRef = useRef(null);
+  const scanCanvasRef = useRef(null);
+
+  const detectScanFacesCallback = React.useCallback(async (croppedCanvas) => {
+    if (!modelsLoaded) return null;
+    if (human.config?.face?.description) {
+      human.config.face.description.enabled = true;
+    }
+    const result = await human.detect(croppedCanvas);
+    return result?.face?.[0] ?? null;
+  }, [modelsLoaded]);
+
+  const onScanFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
+    if (detection.embedding) {
+      const newVec = Array.from(detection.embedding);
+      scanCurrentDescriptorRef.current = newVec;
+
+      (async () => {
+        try {
+          const allMasters = await getAllMasterVectors();
+          let bestSim = 0, bestName = '';
+          for (const m of allMasters) {
+            if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
+            const vec = m.descriptor_json;
+            if (!Array.isArray(vec) || vec.length !== 1024) continue;
+            const sim = cosineSimilarity(newVec, vec);
+            if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+          }
+          if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+            setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+            setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+            setScanCameraStatusColor('var(--accent-error)');
+          } else {
+            setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+            setScanCameraStatusText(`✓ Wajah Baru Valid`);
+            setScanCameraStatusColor('var(--accent-success)');
+          }
+        } catch (_) {
+          setScanFaceCheckResult(null);
+          setScanCameraStatusText(`✓ Wajah Terdeteksi`);
+          setScanCameraStatusColor('var(--accent-success)');
+        }
+      })();
+    }
+
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    if (smoothedMesh && smoothedMesh.length > 0) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.85)';
+      for (const pt of smoothedMesh) {
+        if (!pt) continue;
+        const px = Array.isArray(pt) ? (pt[0] ?? 0) : (pt.x ?? 0);
+        const py = Array.isArray(pt) ? (pt[1] ?? 0) : (pt.y ?? 0);
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }, [scanEmp, EDIT_DUPLICATE_THRESHOLD]);
+
+  const onScanNoFace = React.useCallback(() => {
+    scanCurrentDescriptorRef.current = null;
+    setScanFaceCheckResult(null);
+    setScanCameraStatusText('Menunggu Wajah di Kamera...');
+    setScanCameraStatusColor('var(--accent-warning)');
+  }, []);
+
+  const onScanCameraError = React.useCallback((err) => {
+    setScanCameraStatusText('Kamera Tidak Bisa Diakses');
+    setScanCameraStatusColor('var(--accent-danger)');
+  }, []);
+
+  useNormalizedFaceMesh({
+    videoRef: scanVideoRef,
+    canvasRef: scanCanvasRef,
+    active: scanModalOpen && modelsLoaded,
+    facingMode: scanFacingMode,
+    smoothAlpha: 0.35,
+    detectFaces: detectScanFacesCallback,
+    onFaceProcessed: onScanFaceProcessed,
+    onNoFace: onScanNoFace,
+    onCameraError: onScanCameraError,
+  });
+
+  const openScanModal = (emp) => {
+    setScanEmp(emp);
+    setScanFacingMode('user');
+    setScanFaceCheckResult(null);
+    scanCurrentDescriptorRef.current = null;
+    setScanModalOpen(true);
+  };
+
+  const handleScanSubmit = async (e) => {
+    e.preventDefault();
+    if (!scanCurrentDescriptorRef.current) {
+      showToast('Peringatan', 'Wajah belum terdeteksi.', 'error');
+      return;
+    }
+    if (scanFaceCheckResult?.isDuplicate) {
+      showToast('Wajah Terdaftar', `Wajah ini sudah digunakan oleh "${scanFaceCheckResult.matchedName}".`, 'error');
+      return;
+    }
+
+    setIsScanningSubmit(true);
+    const descriptorJson = JSON.stringify(scanCurrentDescriptorRef.current);
+    try {
+      const { error: empErr } = await supabase.from('employees').update({ has_master_biometric: true }).eq('id', scanEmp.id);
+      if (empErr) throw empErr;
+
+      const { error: descErr } = await supabase
+        .from('master_descriptors')
+        .upsert({ employee_id: scanEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+      if (descErr) throw descErr;
+
+      await cacheUserMasterVector({
+        employee_id: scanEmp.id,
+        nik: scanEmp.nik || '',
+        name: scanEmp.name || '',
+        department: scanEmp.department || scanEmp.jabatan || '',
+        descriptor_json: scanCurrentDescriptorRef.current,
+        has_master_biometric: true
+      });
+
+      showToast('Berhasil', 'Biometrik wajah berhasil disimpan.', 'success');
+      setScanModalOpen(false);
+      refreshEmployees();
+    } catch (err) {
+      showToast('Error', err.message, 'error');
+    } finally {
+      setIsScanningSubmit(false);
+    }
+  };
+  // -------------------------
 
   // Injected detection callback untuk human.js di mode Edit Kamera
   const detectEditFacesCallback = React.useCallback(async (croppedCanvas) => {
@@ -581,8 +732,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     const matchesStatusTk = filterStatusTk ? emp.status_tk === filterStatusTk : true;
     const matchesStatusPerkawinan = filterStatusPerkawinan ? emp.status_perkawinan === filterStatusPerkawinan : true;
     const matchesKebun = filterKebun ? emp.nama_kebun === filterKebun : true;
+    const matchesAfdeling = filterAfdeling ? emp.afdeling === filterAfdeling : true;
 
-    return matchesSearch && matchesStatusTk && matchesStatusPerkawinan && matchesKebun;
+    return matchesSearch && matchesStatusTk && matchesStatusPerkawinan && matchesKebun && matchesAfdeling;
   });
 
   // ---------------------------------
@@ -947,6 +1099,17 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             )}
 
             <select 
+              value={filterAfdeling} 
+              onChange={(e) => setFilterAfdeling(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            >
+              <option value="" style={{ color: '#000' }}>Filter Afdeling (Semua)</option>
+              {uniqueAfdelings.map(a => (
+                <option key={a} value={a} style={{ color: '#000' }}>{a}</option>
+              ))}
+            </select>
+
+            <select 
               value={filterStatusTk} 
               onChange={(e) => setFilterStatusTk(e.target.value)}
               style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
@@ -1016,6 +1179,11 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     </TableCell>
                     <TableCell className="no-print">
                       <div style={{ display: 'flex', gap: '8px' }}>
+                        {!emp.has_master_biometric && (
+                          <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Scan Wajah">
+                            <Camera size={18} color="var(--accent-primary)" />
+                          </button>
+                        )}
                         <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit">
                           <Edit2 size={18} color="var(--accent-cyan)" />
                         </button>
@@ -1031,6 +1199,57 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           </Table>
         </div>
       </div>
+
+      {/* Modal Scan Wajah */}
+      {scanModalOpen && scanEmp && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+          <div className="glass-card" style={{ maxWidth: '400px', width: '100%', border: '1px solid var(--accent-primary)' }}>
+            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Scan Wajah: {scanEmp.name}</span>
+              <button type="button" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.2rem', cursor: 'pointer' }} onClick={() => setScanModalOpen(false)}>
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleScanSubmit}>
+              <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.85rem' }}>NIK: {scanEmp.nik}</span>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setScanFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '0.75rem',
+                    background: 'rgba(255,255,255,0.1)',
+                    border: '1px solid var(--border-color)',
+                    width: 'auto',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  title="Ganti Kamera Depan/Belakang"
+                >
+                  <i className="fa-solid fa-rotate"></i> Tukar Kamera
+                </button>
+              </div>
+              <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
+                <video ref={scanVideoRef} autoPlay muted playsInline style={{ transform: scanFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
+                <canvas ref={scanCanvasRef} className="overlay-canvas" style={{ transform: scanFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px' }}>
+                <span>Status:</span>
+                <strong style={{ color: scanCameraStatusColor }}>{scanCameraStatusText}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
+                <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setScanModalOpen(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isScanningSubmit}>
+                  {isScanningSubmit ? 'Menyimpan...' : 'Simpan Biometrik'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Edit Data Karyawan (Sama seperti sebelumnya) */}
       {editModalOpen && (

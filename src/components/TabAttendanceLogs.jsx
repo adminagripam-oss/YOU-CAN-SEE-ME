@@ -77,6 +77,8 @@ export default function TabAttendanceLogs({
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterKebun, setFilterKebun] = useState('');
+  const [filterAfdeling, setFilterAfdeling] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
@@ -363,14 +365,25 @@ export default function TabAttendanceLogs({
   const filteredLogs = useMemo(() => {
     return groupedLogs.filter(log => {
       const q = searchQuery.toLowerCase();
-      return (
+      const matchSearch = (
         log.name.toLowerCase().includes(q) ||
         log.nik.toLowerCase().includes(q) ||
         (log.afdeling || '').toLowerCase().includes(q) ||
         (log.department || '').toLowerCase().includes(q)
       );
+      const matchKebun = filterKebun ? log.nama_kebun === filterKebun : true;
+      const matchAfdeling = filterAfdeling ? (log.afdeling === filterAfdeling) : true;
+      return matchSearch && matchKebun && matchAfdeling;
     });
-  }, [groupedLogs, searchQuery]);
+  }, [groupedLogs, searchQuery, filterKebun, filterAfdeling]);
+
+  const uniqueKebuns = useMemo(() => {
+    return [...new Set(groupedLogs.map(g => g.nama_kebun).filter(Boolean))].sort();
+  }, [groupedLogs]);
+  
+  const uniqueAfdelings = useMemo(() => {
+    return [...new Set(groupedLogs.map(g => g.afdeling).filter(Boolean))].sort();
+  }, [groupedLogs]);
 
 
   const handleDeleteGroup = (group) => {
@@ -1021,16 +1034,40 @@ export default function TabAttendanceLogs({
           </div>
         )}
 
-        {/* Search Bar */}
-        <div className="no-print" style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-          <Search size={18} color="var(--text-muted)" />
-          <input
-            type="text"
-            placeholder="Cari berdasarkan Nama atau NIK..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ border: 'none', background: 'transparent', color: 'var(--text-main)', width: '100%', outline: 'none', fontSize: '0.9rem' }}
-          />
+        {/* Search & Filters */}
+        <div className="no-print" style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 200px', minWidth: '200px' }}>
+            <Search size={18} color="var(--text-muted)" />
+            <input
+              type="text"
+              placeholder="Cari berdasarkan Nama atau NIK..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ border: 'none', background: 'transparent', color: 'var(--text-main)', width: '100%', outline: 'none', fontSize: '0.9rem' }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <select
+              value={filterKebun}
+              onChange={(e) => setFilterKebun(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            >
+              <option value="" style={{ color: '#000' }}>Filter Kebun (Semua)</option>
+              {uniqueKebuns.map(k => (
+                <option key={k} value={k} style={{ color: '#000' }}>{k}</option>
+              ))}
+            </select>
+            <select
+              value={filterAfdeling}
+              onChange={(e) => setFilterAfdeling(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
+            >
+              <option value="" style={{ color: '#000' }}>Filter Afdeling (Semua)</option>
+              {uniqueAfdelings.map(a => (
+                <option key={a} value={a} style={{ color: '#000' }}>{a}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
