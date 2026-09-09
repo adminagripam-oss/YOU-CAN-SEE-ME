@@ -45,8 +45,8 @@ export default function TabEmployeeManagement({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // null = belum dicek | { isDuplicate, matchedName, matchedNik, similarity } = hasil cek
   const [faceCheckResult, setFaceCheckResult] = useState(null);
-  // [UPDATE]: Sesuai permintaan, Threshold diset ke 0.30 (30%) untuk toleransi kamera beda device.
-  const DUPLICATE_THRESHOLD = 0.30; // threshold cosine similarity
+  // [UPDATE]: Sesuai permintaan, Threshold diset ke 1.1 (lebih dari 1.0) agar tidak ada batasan duplikasi (semua kemiripan diabaikan).
+  const DUPLICATE_THRESHOLD = 1.1; // tidak ada batasan kemiripan
 
   // Removed Edit Modal State (moved to DaftarKaryawanPage)
 
