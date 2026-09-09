@@ -1003,9 +1003,23 @@ export default function TabFaceVerification({
       faces: 1,
       nodes: smoothedMesh?.length || 0,
     });
-    // ── Lighting Check ────────────────────────────────────────────────────
+    // ════ TASK 3 & 4: Strict Bounding Box & Lighting Check ════
     const lightingStatus = checkLightingQuality(videoRef.current);
-    setLightingWarning(lightingStatus);
+    let warningMsg = lightingStatus;
+
+    const faceWidth = boundingBox?.[2] || 0;
+    if (!warningMsg && faceWidth > 0) {
+      if (faceWidth < 140) warningMsg = 'Wajah Terlalu Jauh';
+      else if (faceWidth > 360) warningMsg = 'Wajah Terlalu Dekat';
+    }
+
+    setLightingWarning(warningMsg);
+
+    if (warningMsg) {
+      setLivenessStatusMsg(warningMsg);
+      setMatchRate(0);
+      return; // Blokir proses absensi & ekstraksi embedding jika tidak standar
+    }
 
     // ── [TASK 3] Rekam timestamp frame untuk kalkulasi FPS adaptif ────────
     const frameNow = performance.now();

@@ -49,6 +49,7 @@ export default function TabEmployeeManagement({
   // Removed Edit Modal State (moved to DaftarKaryawanPage)
 
   const currentEmpDescriptorRef = useRef(null);
+  const descriptorHistoryRef = useRef([]);
   const currentEmpGFVRef = useRef(null); // 40-d Geometric Feature Vector
   const regVideoRef = useRef(null);
   const regCanvasRef = useRef(null);
@@ -68,7 +69,23 @@ export default function TabEmployeeManagement({
   const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx }) => {
     if (detection.embedding) {
       const newVec = Array.from(detection.embedding);
-      currentEmpDescriptorRef.current = newVec;
+      
+      // Multi-Template Averaging (Buffer 5 frames)
+      const hist = descriptorHistoryRef.current;
+      hist.push(newVec);
+      if (hist.length > 5) hist.shift();
+      
+      const avgVec = new Array(1024).fill(0);
+      for (const v of hist) {
+        for (let i = 0; i < 1024; i++) {
+          avgVec[i] += v[i];
+        }
+      }
+      for (let i = 0; i < 1024; i++) {
+        avgVec[i] /= hist.length;
+      }
+
+      currentEmpDescriptorRef.current = avgVec;
       currentEmpGFVRef.current = [];
 
       // Cek duplikasi wajah secara real-time (async, non-blocking)
@@ -79,7 +96,8 @@ export default function TabEmployeeManagement({
           for (const m of allMasters) {
             const vec = m.descriptor_json;
             if (!Array.isArray(vec) || vec.length !== 1024) continue;
-            const sim = cosineSimilarity(newVec, vec);
+            // Gunakan avgVec (yang stabil) untuk cek duplikasi
+            const sim = cosineSimilarity(avgVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; bestNik = m.nik; }
           }
           if (bestSim >= DUPLICATE_THRESHOLD) {
@@ -118,6 +136,7 @@ export default function TabEmployeeManagement({
   // Callback saat tidak ada wajah di register mode
   const onRegNoFace = useCallback(() => {
     currentEmpDescriptorRef.current = null;
+    descriptorHistoryRef.current = [];
     currentEmpGFVRef.current = null;
     setFaceCheckResult(null);
     setCameraStatusText('Menunggu Wajah di Kamera...');
@@ -337,6 +356,7 @@ export default function TabEmployeeManagement({
       setPhotoPreview(null);
       setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
       currentEmpDescriptorRef.current = null;
+      descriptorHistoryRef.current = [];
       currentEmpGFVRef.current = null;
       setFaceCheckResult(null);
 
