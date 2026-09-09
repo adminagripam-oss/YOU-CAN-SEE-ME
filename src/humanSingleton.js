@@ -51,6 +51,12 @@ const humanConfig = {
     gender: { enabled: false },
   },
 
+  // Task 2: Auto-Normalization (Lighting Correction)
+  filter: {
+    enabled: true,
+    equalization: true, // Otomatis meratakan kontras & kecerahan dari kamera (Histogram Equalization)
+  },
+
   body: { enabled: false },
   hand: { enabled: false },
   object: { enabled: false },
