@@ -1107,7 +1107,9 @@ export default function TabFaceVerification({
 
     if (currentDescRef.current && !isMatchedRef.current) {
       let rawPct = 0;
-      const threshold = 55.0;
+      // [UPDATE]: Threshold diturunkan dari 55.0 menjadi 42.0 
+      // untuk mengakomodasi perbedaan kamera (focal length/lensa) antar device yang berbeda.
+      const threshold = 42.0;
 
       // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
       // Buka DevTools Console → tab Console untuk membaca log ini.
