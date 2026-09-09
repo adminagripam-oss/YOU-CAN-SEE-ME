@@ -1165,7 +1165,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     <TableCell>{emp.status_perkawinan || '-'}</TableCell>
                     <TableCell className="no-print">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-                        {emp.has_master_biometric ? (
+                        {(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') ? (
                           <span className="status-badge success">Siap</span>
                         ) : (
                           <span className="status-badge fail">Belum</span>
@@ -1179,7 +1179,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
                     </TableCell>
                     <TableCell className="no-print">
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        {!emp.has_master_biometric && (
+                        {!(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') && (
                           <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Scan Wajah">
                             <Camera size={18} color="var(--accent-primary)" />
                           </button>

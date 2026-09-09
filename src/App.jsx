@@ -202,25 +202,13 @@ function AppContent() {
       console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
     }
 
-    // WIPE STALE CACHE BEFORE FULL SYNC
-    if (isFullSync) {
-      try {
-        const filterObj = adminObj.role === 'estate_admin' ? { kebun: adminObj.kebun } : 
-                          adminObj.role === 'regional_admin' ? { region: adminObj.region } : undefined;
-        await db.employees_cache.clear(filterObj);
-        console.log('[Full Sync] Wiped old local cache to prevent stale data conflicts.');
-      } catch (clearErr) {
-        console.warn('[Full Sync] Failed to clear cache:', clearErr);
-      }
-    }
-
-    // Preload existing cached employees to support Delta Sync
+    // Preload existing cached employees to support Delta Sync / Offline Mode
     let localCachedEmps = [];
     try {
       const cached = await db.employees_cache.toArray();
       if (cached) {
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-          localCachedEmps = cached.filter(e => e.nama_kebun === adminObj.kebun);
+          localCachedEmps = cached.filter(e => e.nama_kebun === adminObj.kebun || e.kebun === adminObj.kebun);
         } else if (adminObj.role === 'regional_admin' && adminObj.region) {
           localCachedEmps = cached.filter(e => e.region === adminObj.region);
         } else {
@@ -829,15 +817,20 @@ function AppContent() {
     setIsSyncing(false);
   };
 
+  const syncCallbacksRef = useRef({ fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast });
+  useEffect(() => {
+    syncCallbacksRef.current = { fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast };
+  }, [fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast]);
+
   // Network Listener Setup (Supports both native SQLite/Network and web IndexedDB)
   useEffect(() => {
     const showOfflineToast = async () => {
       try {
         const items = await getUnsyncedLogs();
         const count = items ? items.length : 0;
-        showToast('Mode Offline', `Aplikasi berjalan luring. Terdapat ${count} data antrean di SQL lokal.`, 'warning');
+        syncCallbacksRef.current.showToast('Mode Offline', `Aplikasi berjalan luring. Terdapat ${count} data antrean di SQL lokal.`, 'warning');
       } catch {
-        showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
+        syncCallbacksRef.current.showToast('Mode Offline', 'Aplikasi berjalan luring (offline).', 'warning');
       }
     };
 
@@ -846,7 +839,7 @@ function AppContent() {
       if (prevOnlineToastStateRef.current !== isConnected) {
         prevOnlineToastStateRef.current = isConnected;
         if (isConnected) {
-          showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
+          syncCallbacksRef.current.showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
         } else {
           showOfflineToast();
         }
@@ -868,7 +861,7 @@ function AppContent() {
       if (prevOnlineToastStateRef.current !== isConnected) {
         prevOnlineToastStateRef.current = isConnected;
         if (isConnected) {
-          showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
+          syncCallbacksRef.current.showToast('Mode Online', 'Aplikasi terhubung ke internet.', 'success');
         } else {
           showOfflineToast();
         }
@@ -891,13 +884,16 @@ function AppContent() {
       window.addEventListener('online', handleWebOnline);
       window.addEventListener('offline', handleWebOffline);
 
-      const cleanupSync = initAutoSyncListener(showToast, async () => {
-        await fetchEmployees();
-        await fetchLogs();
-        refreshUnsyncedCount();
-      });
+      const cleanupSync = initAutoSyncListener(
+        (t, d, type) => syncCallbacksRef.current.showToast(t, d, type),
+        async () => {
+          await syncCallbacksRef.current.fetchEmployees();
+          await syncCallbacksRef.current.fetchLogs();
+          syncCallbacksRef.current.refreshUnsyncedCount();
+        }
+      );
 
-      refreshUnsyncedCount();
+      syncCallbacksRef.current.refreshUnsyncedCount();
 
       return () => {
         window.removeEventListener('online', handleWebOnline);
@@ -906,13 +902,16 @@ function AppContent() {
       };
     }
 
-    const cleanupSync = initAutoSyncListener(showToast, async () => {
-      await fetchEmployees();
-      await fetchLogs();
-      refreshUnsyncedCount();
-    });
+    const cleanupSync = initAutoSyncListener(
+      (t, d, type) => syncCallbacksRef.current.showToast(t, d, type),
+      async () => {
+        await syncCallbacksRef.current.fetchEmployees();
+        await syncCallbacksRef.current.fetchLogs();
+        syncCallbacksRef.current.refreshUnsyncedCount();
+      }
+    );
 
-    refreshUnsyncedCount();
+    syncCallbacksRef.current.refreshUnsyncedCount();
 
     return () => {
       if (networkListener) {
@@ -920,7 +919,7 @@ function AppContent() {
       }
       cleanupSync();
     };
-  }, [fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast]);
+  }, []);
 
   // Initial Data & face-api Model Loading (waits for dbReady)
   useEffect(() => {
