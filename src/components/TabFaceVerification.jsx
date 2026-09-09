@@ -550,6 +550,7 @@ export default function TabFaceVerification({
   gpsPermission = 'granted', liveCoords = null, onRefreshEmployees,
 }) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [selectedAfdelingFilter, setSelectedAfdelingFilter] = useState('');
   const [nikInput, setNikInput] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('Hadir');
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
@@ -1495,6 +1496,11 @@ export default function TabFaceVerification({
 
 
 
+  const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.department).map(e => e.department))).sort();
+  const filteredEmployees = selectedAfdelingFilter 
+    ? employees.filter(e => e.department === selectedAfdelingFilter) 
+    : employees;
+
   return (
     <div className="glass-card">
       <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1540,6 +1546,26 @@ export default function TabFaceVerification({
       <div className="grid-2">
         {/* ── LEFT PANEL ──────────────────────────────────────────── */}
         <div>
+          {/* Afdeling Filter */}
+          {uniqueAfdelings.length > 0 && (
+            <div className="form-group">
+              <label htmlFor="verify-afdeling-filter">Filter Afdeling</label>
+              <select
+                id="verify-afdeling-filter"
+                value={selectedAfdelingFilter}
+                onChange={(e) => {
+                  setSelectedAfdelingFilter(e.target.value);
+                  setSelectedEmployeeId(''); // Reset employee when afdeling changes
+                }}
+              >
+                <option value="">-- Semua Afdeling --</option>
+                {uniqueAfdelings.map(afd => (
+                  <option key={afd} value={afd}>{afd}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Employee Select */}
           <div className="form-group">
             <label htmlFor="verify-emp-select">Pilih Karyawan</label>
@@ -1549,7 +1575,7 @@ export default function TabFaceVerification({
               onChange={handleEmployeeSelect}
             >
               <option value="">-- Pilih Karyawan Absen --</option>
-              {employees.map((emp) => (
+              {filteredEmployees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.nik} — {emp.name} ({emp.department})
                 </option>
