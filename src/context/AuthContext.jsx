@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
   const login = async (credentials) => {
     try {
       const { username, password } = credentials;
-      
+
       const { data, error } = await supabase.rpc('verify_admin_login', {
         p_username: username,
         p_password: password
@@ -199,7 +199,7 @@ export function AuthProvider({ children }) {
 
       if (summary.total > 0 && !force) {
         const isOnline = await checkOnline();
-        
+
         // Attempt to sync before blocking if online
         if (isOnline) {
           if (showToast) {
@@ -249,7 +249,7 @@ export function AuthProvider({ children }) {
 
     setUser(null);
     localStorage.removeItem('logged_in_admin');
-    
+
     // Force redirect ke login untuk menimpa state router
     window.location.href = '/login';
     return { success: true };

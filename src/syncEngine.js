@@ -29,7 +29,19 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
   if (isSyncing || !isOnline) return { count: 0 };
 
   try {
-    const pendingLogs = await getUnsyncedLogs();
+    let pendingLogs = await getUnsyncedLogs();
+    
+    // FILTER: Tahan log yang masih menggunakan ID temporary (belum di-remapping oleh syncPendingEmployees)
+    // ID Supabase adalah BIGINT (angka), sedangkan ID offline adalah string seperti "off_emp_..."
+    pendingLogs = pendingLogs.filter(log => {
+      const empIdStr = String(log.employee_id);
+      if (isNaN(Number(empIdStr))) {
+        console.warn(`[Auto-Sync] Menahan log absensi untuk employee_id sementara yang belum disync: ${empIdStr}`);
+        return false;
+      }
+      return true;
+    });
+
     if (!pendingLogs || pendingLogs.length === 0) {
       return { count: 0 };
     }
