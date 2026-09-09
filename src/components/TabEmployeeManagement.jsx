@@ -35,6 +35,8 @@ export default function TabEmployeeManagement({
   const [empStatusTkCustom, setEmpStatusTkCustom] = useState('');
   const [empJabatan, setEmpJabatan] = useState('');
   const [empStatusPerkawinan, setEmpStatusPerkawinan] = useState('');
+  const [formStep, setFormStep] = useState(1); // 1 = Data Karyawan, 2 = Biometrik
+  const [cameraFacingMode, setCameraFacingMode] = useState('user');
   const [empFormMode, setEmpFormMode] = useState('camera'); // 'camera' | 'file'
   const [cameraStatusText, setCameraStatusText] = useState('Menunggu Wajah di Kamera...');
   const [cameraStatusColor, setCameraStatusColor] = useState('var(--accent-warning)');
@@ -154,8 +156,8 @@ export default function TabEmployeeManagement({
   useNormalizedFaceMesh({
     videoRef: regVideoRef,
     canvasRef: regCanvasRef,
-    active: modelsLoaded && empFormMode === 'camera',
-    facingMode: 'user',
+    active: modelsLoaded && empFormMode === 'camera' && formStep === 2,
+    facingMode: cameraFacingMode,
     smoothAlpha: 0.35,
     detectFaces: detectRegFacesCallback,
     onFaceProcessed: onRegFaceProcessed,
@@ -353,6 +355,7 @@ export default function TabEmployeeManagement({
       setEmpStatusTkCustom('');
       setEmpJabatan('');
       setEmpStatusPerkawinan('');
+      setFormStep(1);
       setPhotoPreview(null);
       setPhotoFileName('Format: JPG, PNG, WEBP (Pastikan 1 Wajah Terlihat Jelas)');
       currentEmpDescriptorRef.current = null;
@@ -378,232 +381,296 @@ export default function TabEmployeeManagement({
         </div>
 
         <form onSubmit={handleAddEmployeeSubmit}>
-          <div className="form-group">
-            <label htmlFor="emp-nik">NIK / Employee ID</label>
-            <input
-              type="text"
-              id="emp-nik"
-              placeholder="Contoh: JMK 112"
-              value={empNik}
-              onChange={(e) => setEmpNik(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-name">Nama Lengkap Karyawan</label>
-            <input
-              type="text"
-              id="emp-name"
-              placeholder="Contoh: STEVE"
-              value={empName}
-              onChange={(e) => setEmpName(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-afdeling">Afdeling</label>
-            <input
-              type="text"
-              id="emp-afdeling"
-              placeholder="Contoh: Afdeling 1"
-              value={empAfdeling}
-              onChange={(e) => setEmpAfdeling(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-nama-kebun">Nama Kebun</label>
-            <input
-              type="text"
-              id="emp-nama-kebun"
-              placeholder="Contoh: Kebun Sawit Utama"
-              value={empNamaKebun}
-              onChange={(e) => setEmpNamaKebun(e.target.value)}
-              disabled={user?.role === 'estate_admin' && !!user?.kebun}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-status-tk">Status TK</label>
-            <select
-              id="emp-status-tk"
-              value={empStatusTk}
-              onChange={(e) => setEmpStatusTk(e.target.value)}
-            >
-              <option value="">-- Pilih Status TK --</option>
-              <option value="BHL">BHL (Buruh Harian Lepas)</option>
-              <option value="Karyawan Tetap (PKWTT)">Karyawan Tetap (PKWTT)</option>
-              <option value="Karyawan Kontrak (PKWT)">Karyawan Kontrak (PKWT)</option>
-              <option value="Lainnya...">Lainnya...</option>
-            </select>
-            {empStatusTk === 'Lainnya...' && (
-              <input
-                type="text"
-                placeholder="Masukkan Status TK lainnya..."
-                value={empStatusTkCustom}
-                onChange={(e) => setEmpStatusTkCustom(e.target.value)}
-                style={{ marginTop: '8px' }}
-                required
-              />
-            )}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-jabatan">Jabatan</label>
-            <input
-              type="text"
-              id="emp-jabatan"
-              placeholder="Contoh: Mandor"
-              value={empJabatan}
-              onChange={(e) => setEmpJabatan(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emp-status-perkawinan">Status Perkawinan</label>
-            <select
-              id="emp-status-perkawinan"
-              value={empStatusPerkawinan}
-              onChange={(e) => setEmpStatusPerkawinan(e.target.value)}
-            >
-              <option value="">-- Pilih Status Perkawinan --</option>
-              <option value="Lajang">Lajang</option>
-              <option value="Menikah">Menikah</option>
-              <option value="Duda/Janda">Duda/Janda</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label>
-              <i className="fa-solid fa-camera"></i> Foto Wajah Master (Kamera / Unggah Berkas)
-            </label>
-
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-              <button
-                type="button"
-                className={`btn ${empFormMode === 'camera' ? 'btn-primary' : ''}`}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '0.8rem',
-                  background: empFormMode !== 'camera' ? 'var(--bg-primary)' : undefined,
-                  color: empFormMode !== 'camera' ? 'var(--text-main)' : '#fff',
-                  border: empFormMode !== 'camera' ? '1px solid var(--border-color)' : '1px solid transparent',
-                  width: 'auto',
-                }}
-                onClick={() => setEmpFormMode('camera')}
-              >
-                <i className="fa-solid fa-video"></i> Gunakan Kamera
-              </button>
-              <button
-                type="button"
-                className={`btn ${empFormMode === 'file' ? 'btn-primary' : ''}`}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '0.8rem',
-                  background: empFormMode !== 'file' ? 'var(--bg-primary)' : undefined,
-                  color: empFormMode !== 'file' ? 'var(--text-main)' : '#fff',
-                  border: empFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent',
-                  width: 'auto',
-                }}
-                onClick={() => setEmpFormMode('file')}
-              >
-                <i className="fa-solid fa-upload"></i> Unggah File Foto
-              </button>
-            </div>
-
-            {empFormMode === 'camera' && (
-              <div className="webcam-wrapper" style={{ aspectRatio: '4/3' }}>
-                <video
-                  ref={regVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  style={{ transform: 'scaleX(-1)' }}
-                ></video>
-                <canvas
-                  ref={regCanvasRef}
-                  className="overlay-canvas"
-                  style={{ transform: 'scaleX(-1)' }}
-                ></canvas>
-              </div>
-            )}
-
-
-            {empFormMode === 'file' && (
-              <div
-                style={{
-                  background: 'rgba(15,23,42,0.8)',
-                  border: '1px dashed var(--border-color)',
-                  padding: '1.5rem',
-                  borderRadius: '10px',
-                  textAlign: 'center',
-                }}
-              >
+          {formStep === 1 && (
+            <>
+              <div className="form-group">
+                <label htmlFor="emp-nik">NIK / Employee ID</label>
                 <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={handlePhotoFileUpload}
+                  type="text"
+                  id="emp-nik"
+                  placeholder="Contoh: JMK 112"
+                  value={empNik}
+                  onChange={(e) => setEmpNik(e.target.value)}
+                  required
                 />
-                <button
-                  type="button"
-                  className="btn"
-                  style={{
-                    background: 'rgba(99,102,241,0.2)',
-                    border: '1px solid var(--accent-primary)',
-                    color: '#fff',
-                    width: 'auto',
-                  }}
-                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="emp-name">Nama Lengkap Karyawan</label>
+                <input
+                  type="text"
+                  id="emp-name"
+                  placeholder="Contoh: STEVE"
+                  value={empName}
+                  onChange={(e) => setEmpName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="emp-afdeling">Afdeling</label>
+                <input
+                  type="text"
+                  id="emp-afdeling"
+                  placeholder="Contoh: Afdeling 1"
+                  value={empAfdeling}
+                  onChange={(e) => setEmpAfdeling(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="emp-nama-kebun">Nama Kebun</label>
+                <input
+                  type="text"
+                  id="emp-nama-kebun"
+                  placeholder="Contoh: Kebun Sawit Utama"
+                  value={empNamaKebun}
+                  onChange={(e) => setEmpNamaKebun(e.target.value)}
+                  disabled={user?.role === 'estate_admin' && !!user?.kebun}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="emp-status-tk">Status TK</label>
+                <select
+                  id="emp-status-tk"
+                  value={empStatusTk}
+                  onChange={(e) => setEmpStatusTk(e.target.value)}
                 >
-                  <i className="fa-solid fa-image"></i> Pilih File Foto Wajah
-                </button>
-                <div style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  {photoFileName}
-                </div>
-                {photoPreview && (
-                  <img
-                    src={photoPreview}
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '220px',
-                      borderRadius: '8px',
-                      marginTop: '10px',
-                    }}
-                    alt="Preview Foto Master"
+                  <option value="">-- Pilih Status TK --</option>
+                  <option value="BHL">BHL (Buruh Harian Lepas)</option>
+                  <option value="Karyawan Tetap (PKWTT)">Karyawan Tetap (PKWTT)</option>
+                  <option value="Karyawan Kontrak (PKWT)">Karyawan Kontrak (PKWT)</option>
+                  <option value="Lainnya...">Lainnya...</option>
+                </select>
+                {empStatusTk === 'Lainnya...' && (
+                  <input
+                    type="text"
+                    placeholder="Masukkan Status TK lainnya..."
+                    value={empStatusTkCustom}
+                    onChange={(e) => setEmpStatusTkCustom(e.target.value)}
+                    style={{ marginTop: '8px' }}
+                    required
                   />
                 )}
               </div>
-            )}
 
-            <div
-              style={{
-                marginTop: '8px',
-                fontSize: '0.82rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                background: 'rgba(0,0,0,0.2)',
-                padding: '6px 10px',
-                borderRadius: '6px',
-              }}
-            >
-              <span>Status Biometrik Master:</span>
-              <strong style={{ color: cameraStatusColor }}>{cameraStatusText}</strong>
-            </div>
-          </div>
+              <div className="form-group">
+                <label htmlFor="emp-jabatan">Jabatan</label>
+                <input
+                  type="text"
+                  id="emp-jabatan"
+                  placeholder="Contoh: Mandor"
+                  value={empJabatan}
+                  onChange={(e) => setEmpJabatan(e.target.value)}
+                  required
+                />
+              </div>
 
-          <button
-            type="submit"
-            className="btn btn-success"
-            style={{ marginTop: '1rem' }}
-            disabled={isSubmitting}
-          >
-            <i className="fa-solid fa-floppy-disk"></i> Simpan Karyawan &amp; Master Biometrik
-          </button>
+              <div className="form-group">
+                <label htmlFor="emp-status-perkawinan">Status Perkawinan</label>
+                <select
+                  id="emp-status-perkawinan"
+                  value={empStatusPerkawinan}
+                  onChange={(e) => setEmpStatusPerkawinan(e.target.value)}
+                >
+                  <option value="">-- Pilih Status Perkawinan --</option>
+                  <option value="Lajang">Lajang</option>
+                  <option value="Menikah">Menikah</option>
+                  <option value="Duda/Janda">Duda/Janda</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.1)' }}
+                >
+                  Simpan Tanpa Biometrik
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    if (!empNik.trim() || !empName.trim() || !empJabatan.trim()) {
+                      showToast('Peringatan Form', 'Mohon lengkapi NIK, Nama, dan Jabatan terlebih dahulu!', 'warning');
+                      return;
+                    }
+                    setFormStep(2);
+                  }}
+                >
+                  Lanjut &rarr; Foto Wajah
+                </button>
+              </div>
+            </>
+          )}
+
+          {formStep === 2 && (
+            <>
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ margin: 0 }}>
+                    <i className="fa-solid fa-camera"></i> Foto Wajah Master
+                  </label>
+                  {empFormMode === 'camera' && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setCameraFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '0.8rem',
+                        background: 'rgba(255,255,255,0.1)',
+                        border: '1px solid var(--border-color)',
+                        width: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      title="Ganti Kamera Depan/Belakang"
+                    >
+                      <i className="fa-solid fa-rotate"></i> Tukar Kamera
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    className={`btn ${empFormMode === 'camera' ? 'btn-primary' : ''}`}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '0.8rem',
+                      background: empFormMode !== 'camera' ? 'var(--bg-primary)' : undefined,
+                      color: empFormMode !== 'camera' ? 'var(--text-main)' : '#fff',
+                      border: empFormMode !== 'camera' ? '1px solid var(--border-color)' : '1px solid transparent',
+                      width: 'auto',
+                    }}
+                    onClick={() => setEmpFormMode('camera')}
+                  >
+                    <i className="fa-solid fa-video"></i> Kamera
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${empFormMode === 'file' ? 'btn-primary' : ''}`}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '0.8rem',
+                      background: empFormMode !== 'file' ? 'var(--bg-primary)' : undefined,
+                      color: empFormMode !== 'file' ? 'var(--text-main)' : '#fff',
+                      border: empFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent',
+                      width: 'auto',
+                    }}
+                    onClick={() => setEmpFormMode('file')}
+                  >
+                    <i className="fa-solid fa-upload"></i> Upload
+                  </button>
+                </div>
+
+                {empFormMode === 'camera' && (
+                  <div className="webcam-wrapper" style={{ aspectRatio: '4/3' }}>
+                    <video
+                      ref={regVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+                    ></video>
+                    <canvas
+                      ref={regCanvasRef}
+                      className="overlay-canvas"
+                      style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+                    ></canvas>
+                  </div>
+                )}
+
+
+                {empFormMode === 'file' && (
+                  <div
+                    style={{
+                      background: 'rgba(15,23,42,0.8)',
+                      border: '1px dashed var(--border-color)',
+                      padding: '1.5rem',
+                      borderRadius: '10px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={handlePhotoFileUpload}
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{
+                        background: 'rgba(99,102,241,0.2)',
+                        border: '1px solid var(--accent-primary)',
+                        color: '#fff',
+                        width: 'auto',
+                      }}
+                      onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                    >
+                      <i className="fa-solid fa-image"></i> Pilih File Foto Wajah
+                    </button>
+                    <div style={{ marginTop: '8px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      {photoFileName}
+                    </div>
+                    {photoPreview && (
+                      <img
+                        src={photoPreview}
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '220px',
+                          borderRadius: '8px',
+                          marginTop: '10px',
+                        }}
+                        alt="Preview Foto Master"
+                      />
+                    )}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    marginTop: '8px',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    background: 'rgba(0,0,0,0.2)',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                  }}
+                >
+                  <span>Status Biometrik Master:</span>
+                  <strong style={{ color: cameraStatusColor }}>{cameraStatusText}</strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ background: 'rgba(255,255,255,0.1)' }}
+                  onClick={() => setFormStep(1)}
+                >
+                  &larr; Kembali
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-success"
+                  style={{ flex: 1 }}
+                  disabled={isSubmitting}
+                >
+                  <i className="fa-solid fa-floppy-disk"></i> Simpan Karyawan
+                </button>
+              </div>
+            </>
+          )}
         </form>
       </div>
     </div>
