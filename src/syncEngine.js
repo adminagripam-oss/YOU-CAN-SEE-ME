@@ -98,6 +98,11 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
             console.warn(`[Auto-Sync] Discarding invalid log for non-existent employee_id: ${singleLog.employee_id}`);
             return { id: pendingLogs[i].id, discard: true }; // Push to syncedIds so it gets deleted from local queue
           }
+          // If the log is already on the server (e.g. upload succeeded but connection dropped before local DB updated)
+          if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
+            console.warn(`[Auto-Sync] Log already exists on server, discarding local queue item to prevent getting stuck.`);
+            return { id: pendingLogs[i].id, discard: true };
+          }
           return null;
         } else if (singleData && singleData.length > 0) {
           return { id: pendingLogs[i].id, data: singleData[0] };
