@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TabFaceVerification from '../components/TabFaceVerification';
 import { useAuth } from '../context/AuthContext';
-import { MapPin, MapPinOff, Navigation } from 'lucide-react';
+import { MapPin, MapPinOff, Navigation, WifiOff } from 'lucide-react';
 
 export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, showToast, refreshLogs, refreshEmployees }) {
   const { user } = useAuth();
+  
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // ── GPS Permission Gate (dijalankan saat halaman Absensi dibuka) ───────────
   // Status: 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable'
@@ -222,6 +235,29 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
           🔒 Data lokasi hanya digunakan untuk kebutuhan absensi dan tidak disimpan di luar sistem.
         </p>
+      </div>
+    );
+  }
+
+  // ── Peringatan Offline & Data Kosong ──────────────────────────────────────
+  if (!isOnline && (!employees || employees.length === 0)) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '70vh', padding: '2rem', textAlign: 'center', gap: '20px'
+      }}>
+        <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(239,68,68,0.12)', border: '2px solid #ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <MapPinOff size={38} color="#ef4444" />
+        </div>
+        <div>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 8px' }}>
+            ⚠️ Data Kosong di Mode Offline
+          </h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '340px', lineHeight: 1.6, margin: '0 auto' }}>
+            Memori perangkat ini masih kosong. Anda <b>wajib</b> membuka aplikasi saat ada koneksi internet (Wi-Fi/Seluler) 
+            minimal 1x sebelum berangkat ke area tanpa sinyal agar data ter-download.
+          </p>
+        </div>
       </div>
     );
   }
