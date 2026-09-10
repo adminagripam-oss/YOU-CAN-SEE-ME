@@ -201,12 +201,14 @@ export function AuthProvider({ children }) {
         const isOnline = await checkOnline();
 
         // Attempt to sync before blocking if online
+        // CATATAN: triggerAutoSync() menghormati cut-off 22:00.
+        // Data yang diabsen setelah jam 22:00 TIDAK akan dipaksa dikirim saat logout.
         if (isOnline) {
           if (showToast) {
-            showToast('Menyinkronkan Data', 'Mengirim data offline ke server sebelum logout...', 'info');
+            showToast('Menyinkronkan Data', 'Mengirim data offline (sebelum cut-off 22:00) ke server...', 'info');
           }
-          console.log('[LOGOUT] Attempting auto-sync before logout...');
-          await triggerAutoSync();
+          console.log('[LOGOUT] Attempting cut-off-aware auto-sync before logout...');
+          await triggerAutoSync(); // Cut-off 22:00 sudah diterapkan di dalam fungsi ini
           // Re-check summary after sync attempt
           summary = await getUnsyncedDataSummary();
         }

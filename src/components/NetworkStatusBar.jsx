@@ -23,14 +23,15 @@ export default function NetworkStatusBar({ isOnline, unsyncedCount, isSyncing, o
             className="btn-sync-now"
             onClick={onManualSync}
             disabled={isSyncing}
+            title="Hanya mengirim data absensi sebelum pukul 22:00 (Cut-Off Harian)"
           >
             {isSyncing ? (
               <>
-                <i className="fa-solid fa-spinner fa-spin"></i> Syncing...
+                <i className="fa-solid fa-spinner fa-spin"></i> Menyinkronkan...
               </>
             ) : (
               <>
-                <i className="fa-solid fa-rotate"></i> Sync Sekarang
+                <i className="fa-solid fa-rotate"></i> Sync Harian (≤22:00)
               </>
             )}
           </button>

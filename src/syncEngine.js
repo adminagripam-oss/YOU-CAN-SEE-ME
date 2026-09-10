@@ -29,7 +29,23 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
   if (isSyncing || !isOnline) return { count: 0 };
 
   try {
-    let pendingLogs = await getUnsyncedLogs();
+    let pendingLogsRaw = await getUnsyncedLogs();
+    
+    // --- LOGIKA CUT-OFF 22:00 ---
+    const waktuCutOff = new Date();
+    waktuCutOff.setHours(22, 0, 0, 0);
+    const batasCutOffTime = waktuCutOff.getTime();
+
+    let pendingLogs = pendingLogsRaw.filter(log => {
+      if (!log.timestamp) return true;
+      return new Date(log.timestamp).getTime() <= batasCutOffTime;
+    });
+
+    if (pendingLogsRaw.length > 0 && pendingLogs.length === 0) {
+      console.log(`[Auto-Sync] Terdapat ${pendingLogsRaw.length} log pending, namun di luar cut-off (setelah 22:00). Ditunda hingga besok.`);
+      return { count: 0 };
+    }
+    // ----------------------------
     
     // PRE-PROCESSING: Auto-Recovery untuk "Orphaned Logs" (Log yang karyawannya hilang dari antrean lokal)
     try {
@@ -256,7 +272,23 @@ export async function syncPendingAttendanceRequests() {
   try {
     const { db } = await import('./db');
     const allReqs = await db.attendance_requests.toArray();
-    const unsyncedReqs = allReqs.filter(r => !r.is_synced);
+    const unsyncedReqsRaw = allReqs.filter(r => !r.is_synced);
+
+    // --- LOGIKA CUT-OFF 22:00 ---
+    const waktuCutOff = new Date();
+    waktuCutOff.setHours(22, 0, 0, 0);
+    const batasCutOffTime = waktuCutOff.getTime();
+
+    const unsyncedReqs = unsyncedReqsRaw.filter(r => {
+      if (!r.requested_at) return true;
+      return new Date(r.requested_at).getTime() <= batasCutOffTime;
+    });
+
+    if (unsyncedReqsRaw.length > 0 && unsyncedReqs.length === 0) {
+      console.log(`[Auto-Sync Requests] ${unsyncedReqsRaw.length} request pending berada di luar cut-off (setelah 22:00). Ditunda hingga besok.`);
+      return { count: 0 };
+    }
+    // ----------------------------
 
     if (unsyncedReqs.length === 0) return { count: 0 };
 
@@ -340,17 +372,36 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
   try {
     const isNative = Capacitor.isNativePlatform();
-    let pendingEmps = [];
+    let pendingEmpsRaw = [];
 
     if (isNative) {
       const { sqliteGetPendingEmployees } = await import('./services/sqliteService');
-      pendingEmps = await sqliteGetPendingEmployees();
+      pendingEmpsRaw = await sqliteGetPendingEmployees();
     } else {
       const { db } = await import('./db');
-      pendingEmps = await db.employee_sync_queue.toArray();
+      pendingEmpsRaw = await db.employee_sync_queue.toArray();
     }
 
-    if (!pendingEmps || pendingEmps.length === 0) return { count: 0 };
+    if (!pendingEmpsRaw || pendingEmpsRaw.length === 0) return { count: 0 };
+
+    // --- LOGIKA CUT-OFF 22:00 ---
+    const waktuCutOff = new Date();
+    waktuCutOff.setHours(22, 0, 0, 0);
+    const batasCutOffTime = waktuCutOff.getTime();
+
+    const pendingEmps = pendingEmpsRaw.filter(emp => {
+      // employee queue table di db.js (employee_sync_queue) dan local_employee_sync_queue (SQLite)
+      // memiliki atribut created_at
+      if (!emp.created_at) return true;
+      return new Date(emp.created_at).getTime() <= batasCutOffTime;
+    });
+
+    if (pendingEmpsRaw.length > 0 && pendingEmps.length === 0) {
+      console.log(`[Auto-Sync Employees] ${pendingEmpsRaw.length} employee pending berada di luar cut-off (setelah 22:00). Ditunda hingga besok.`);
+      return { count: 0 };
+    }
+    // ----------------------------
+
     const { cacheUserMasterVector, db } = await import('./db');
 
     console.log(`[Auto-Sync Employees] Attempting to sync ${pendingEmps.length} offline registered employees...`);
@@ -544,44 +595,12 @@ export async function triggerAutoSync(showToast, onSyncComplete) {
  * Setup Realtime Online Network Listener for Sequential 3-Tier Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
-  const handleOnline = async () => {
-    console.log('[Network Status] Device is ONLINE. Triggering Sequential 3-Tier Auto-Sync...');
-    await triggerAutoSync(showToast, onSyncComplete);
-  };
-
-  let networkListener = null;
-
-  if (Capacitor.isNativePlatform()) {
-    Network.addListener('networkStatusChange', async (status) => {
-      if (status.connected) {
-        console.log('[Network Status] Device is ONLINE (Native). Triggering Sequential 3-Tier Auto-Sync...');
-        await triggerAutoSync(showToast, onSyncComplete);
-      }
-    }).then(handle => {
-      networkListener = handle;
-    });
-  } else {
-    window.addEventListener('online', handleOnline);
-  }
-
-  // Periodic fallback check every 20 seconds if online and items exist
-  const intervalId = setInterval(async () => {
-    const isOnline = await checkOnline();
-    if (isOnline) {
-      await syncPendingEmployees(showToast, onSyncComplete);
-      await syncPendingAttendanceLogs(showToast, onSyncComplete);
-      await syncPendingAttendanceRequests();
-    }
-  }, 20000);
-
+  // DINONAKTIFKAN: Berdasarkan instruksi "Offline-First", dilarang keras menggunakan Network Listener
+  // atau interval berkala untuk sinkronisasi otomatis saat online.
+  // Sinkronisasi hanya akan dipanggil secara MANUAL via dashboard (Cut-Off) atau OS Background Task.
+  console.log('[Network Status] Auto-Sync Listener telah dinonaktifkan (Mode Offline-First aktif).');
+  
   return () => {
-    if (Capacitor.isNativePlatform()) {
-      if (networkListener) {
-        networkListener.remove();
-      }
-    } else {
-      window.removeEventListener('online', handleOnline);
-    }
-    clearInterval(intervalId);
+    // No-op cleanup
   };
 }
