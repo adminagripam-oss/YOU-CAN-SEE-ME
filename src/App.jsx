@@ -438,7 +438,7 @@ function AppContent() {
         const adminObj = user;
 
         if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-          const empIds = localEmployees.map(e => e.id);
+          const empIds = localEmployees.map(e => e.id).filter(id => !isNaN(Number(id)));
           if (empIds.length > 0) {
             query = query.or(`employee_id.in.(${empIds.join(',')}),location.ilike.%${adminObj.kebun}%`);
           } else {
@@ -452,7 +452,7 @@ function AppContent() {
             'Kalbar 1B': ['Mitra Wawasan (MWS)', 'Persada Alam (PA)', 'Darmex - I', 'Darmex - II', 'Darmex - X']
           };
           const allowed = regionKebuns[adminObj.region] || [];
-          const empIds = localEmployees.map(e => e.id);
+          const empIds = localEmployees.map(e => e.id).filter(id => !isNaN(Number(id)));
           if (allowed.length > 0) {
             const locationLikes = allowed.map(k => `location.ilike.%${k}%`);
             if (empIds.length > 0) {
