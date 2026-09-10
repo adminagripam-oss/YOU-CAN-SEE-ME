@@ -469,19 +469,21 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 
     // 1. Cache to local_employees
     await dbConnection!.run(
-      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         empIdStr,
         user.nik,
         user.name,
         user.department || user.jabatan || null,
         user.afdeling || null,
-        user.nama_kebun || null,
+        user.nama_kebun || user.kebun || null,
         user.status_tk || null,
         user.jabatan || null,
         user.status_perkawinan || null,
-        vectorStr ? 1 : 0
+        vectorStr ? 1 : 0,
+        user.region || null,
+        1
       ]
     );
 
@@ -721,19 +723,21 @@ export async function sqliteBulkPutEmployeesCache(empData: any[]): Promise<void>
     empData.forEach(emp => {
       // 1. Employee query
       set.push({
-        statement: `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        statement: `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         values: [
           String(emp.id),
           emp.nik,
           emp.name,
           emp.department || emp.jabatan || null,
           emp.afdeling || null,
-          emp.nama_kebun || null,
+          emp.nama_kebun || emp.kebun || null,
           emp.status_tk || null,
           emp.jabatan || null,
           emp.status_perkawinan || null,
-          emp.has_master_biometric ? 1 : 0
+          emp.has_master_biometric ? 1 : 0,
+          emp.region || null,
+          emp.is_synced !== undefined ? (emp.is_synced ? 1 : 0) : 1
         ]
       });
 
@@ -1228,8 +1232,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     // 2. Simpan juga ke Cache Karyawan agar langsung muncul di UI dengan status lengkap (konsisten dengan Web/IndexedDB)
     const cacheSql = `
       INSERT OR REPLACE INTO local_employees 
-      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const cacheParams = [
       String(empData.id),
@@ -1237,11 +1241,13 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.name,
       empData.department || empData.jabatan || null,
       empData.afdeling || null,
-      empData.nama_kebun || null,
+      empData.nama_kebun || empData.kebun || null,
       empData.status_tk || null,
       empData.jabatan || null,
       empData.status_perkawinan || null,
-      empData.has_master_biometric ? 1 : 0
+      empData.has_master_biometric ? 1 : 0,
+      empData.region || null,
+      0
     ];
     await dbConnection!.run(cacheSql, cacheParams);
 
