@@ -193,14 +193,8 @@ function AppContent() {
     let dataSource = 'supabase';
     const lastSyncKey = `last_emp_sync_${adminObj.username}`;
 
-    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
-    try {
-      await syncPendingEmployees();
-      await syncPendingAttendanceLogs();
-      await syncPendingAttendanceRequests();
-    } catch (syncErr) {
-      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
-    }
+    // (Offline-First Cut-Off): Sync luring otomatis saat refresh dinonaktifkan.
+    // Data offline hanya dikirim saat cut-off 22:00 atau tombol sync manual.
 
     // Preload existing cached employees to support Delta Sync / Offline Mode
     let localCachedEmps = [];
@@ -374,14 +368,8 @@ function AppContent() {
 
   // Fetch Attendance Logs (Delta Sync + 2-Tier: Supabase + Offline Local Queue)
   const fetchLogs = useCallback(async (isFullSync = false) => {
-    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
-    try {
-      await syncPendingEmployees();
-      await syncPendingAttendanceLogs(showToast);
-      await syncPendingAttendanceRequests();
-    } catch (syncErr) {
-      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
-    }
+    // (Offline-First Cut-Off): Sync luring otomatis saat refresh dinonaktifkan.
+    // Data offline hanya dikirim saat cut-off 22:00 atau tombol sync manual.
 
     let onlineLogs = [];
 
