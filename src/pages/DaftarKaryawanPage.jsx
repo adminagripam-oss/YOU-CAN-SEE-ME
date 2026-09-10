@@ -12,9 +12,10 @@ import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Came
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee } from '../db';
+import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -223,25 +224,100 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
 
     setIsScanningSubmit(true);
     const descriptorJson = JSON.stringify(scanCurrentDescriptorRef.current);
+    const isOfflineEmp = String(scanEmp.id).startsWith('off_') || String(scanEmp.id).startsWith('tmp_') || !navigator.onLine;
+
     try {
-      const { error: empErr } = await supabase.from('employees').update({ has_master_biometric: true }).eq('id', scanEmp.id);
-      if (empErr) throw empErr;
+      if (isOfflineEmp) {
+        // Mode Offline / Temporary Employee: Simpan ke antrean lokal (Dexie / SQLite)
+        if (Capacitor.isNativePlatform()) {
+          const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
+          await sqliteSavePendingEmployee({
+            ...scanEmp,
+            has_master_biometric: true,
+            descriptor_json: scanCurrentDescriptorRef.current,
+            geometric_descriptor_json: scanCurrentGFVRef.current || null,
+            is_synced: false,
+            created_at: scanEmp.created_at || new Date().toISOString()
+          });
+        } else {
+          const existingQueue = await db.employee_sync_queue.get(String(scanEmp.id));
+          if (existingQueue) {
+            await db.employee_sync_queue.put({
+              ...existingQueue,
+              has_master_biometric: true,
+              descriptor_json: scanCurrentDescriptorRef.current,
+              geometric_descriptor_json: scanCurrentGFVRef.current || null,
+              is_synced: false
+            });
+          } else {
+            await db.employee_sync_queue.add({
+              ...scanEmp,
+              has_master_biometric: true,
+              descriptor_json: scanCurrentDescriptorRef.current,
+              geometric_descriptor_json: scanCurrentGFVRef.current || null,
+              is_synced: false,
+              created_at: scanEmp.created_at || new Date().toISOString()
+            });
+          }
+        }
 
-      const { error: descErr } = await supabase
-        .from('master_descriptors')
-        .upsert({ employee_id: scanEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
-      if (descErr) throw descErr;
+        // Simpan ke Vektor Wajah (Master Descriptor) lokal
+        await cacheUserMasterVector({
+          employee_id: scanEmp.id,
+          nik: scanEmp.nik || '',
+          name: scanEmp.name || '',
+          department: scanEmp.department || scanEmp.jabatan || '',
+          afdeling: scanEmp.afdeling || '',
+          nama_kebun: scanEmp.nama_kebun || scanEmp.kebun || '',
+          status_tk: scanEmp.status_tk || '',
+          jabatan: scanEmp.jabatan || '',
+          status_perkawinan: scanEmp.status_perkawinan || '',
+          descriptor_json: scanCurrentDescriptorRef.current,
+          has_master_biometric: true
+        });
 
-      await cacheUserMasterVector({
-        employee_id: scanEmp.id,
-        nik: scanEmp.nik || '',
-        name: scanEmp.name || '',
-        department: scanEmp.department || scanEmp.jabatan || '',
-        descriptor_json: scanCurrentDescriptorRef.current,
-        has_master_biometric: true
-      });
+        // Update local employees_cache agar UI langsung menunjukkan status "Siap" (Pending Sync)
+        try {
+          await db.employees_cache.put({
+            ...scanEmp,
+            has_master_biometric: true,
+            is_synced: false
+          });
+        } catch (_) {}
 
-      showToast('Berhasil', 'Biometrik wajah berhasil disimpan.', 'success');
+        showToast('Berhasil', 'Biometrik wajah berhasil disimpan secara lokal (Pending Sync Cut-Off 22:00).', 'success');
+      } else {
+        // Mode Online: Update Supabase secara langsung
+        let cloudOk = false;
+        try {
+          const { error: empErr } = await supabase.from('employees').update({ has_master_biometric: true }).eq('id', scanEmp.id);
+          if (empErr) throw empErr;
+
+          const { error: descErr } = await supabase
+            .from('master_descriptors')
+            .upsert({ employee_id: scanEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+          if (descErr) throw descErr;
+          cloudOk = true;
+        } catch (cloudErr) {
+          console.warn('[Scan Submit Cloud Fail] Fallback ke lokal cache/queue:', cloudErr.message);
+        }
+
+        await cacheUserMasterVector({
+          employee_id: scanEmp.id,
+          nik: scanEmp.nik || '',
+          name: scanEmp.name || '',
+          department: scanEmp.department || scanEmp.jabatan || '',
+          descriptor_json: scanCurrentDescriptorRef.current,
+          has_master_biometric: true
+        });
+
+        showToast(
+          cloudOk ? 'Berhasil' : 'Tersimpan Lokal',
+          cloudOk ? 'Biometrik wajah berhasil disimpan.' : 'Biometrik disimpan lokal (terhubung saat online/cut-off).',
+          'success'
+        );
+      }
+
       setScanModalOpen(false);
       refreshEmployees();
     } catch (err) {
@@ -486,26 +562,81 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       payload.has_master_biometric = true;
     }
 
+    const isOfflineEmp = String(editingEmp.id).startsWith('off_') || String(editingEmp.id).startsWith('tmp_') || !navigator.onLine;
+
     try {
-      const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
-      if (empErr) throw empErr;
+      if (isOfflineEmp) {
+        // Mode Offline / Temporary Employee: Simpan perubahan di antrean lokal
+        if (Capacitor.isNativePlatform()) {
+          const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
+          await sqliteSavePendingEmployee({
+            id: editingEmp.id,
+            ...payload,
+            descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : editingEmp.descriptor_json,
+            is_synced: false,
+            created_at: editingEmp.created_at || new Date().toISOString()
+          });
+        } else {
+          const existingQueue = await db.employee_sync_queue.get(String(editingEmp.id));
+          if (existingQueue) {
+            await db.employee_sync_queue.put({
+              ...existingQueue,
+              ...payload,
+              descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : existingQueue.descriptor_json,
+              is_synced: false
+            });
+          }
+        }
 
-      if (descriptorJson) {
-        const { error: descErr } = await supabase
-          .from('master_descriptors')
-          .upsert({ employee_id: editingEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
-        if (descErr) throw descErr;
+        if (descriptorJson && editCurrentDescriptorRef.current) {
+          await cacheUserMasterVector({
+            employee_id: editingEmp.id,
+            nik: payload.nik,
+            name: payload.name,
+            department: payload.department,
+            afdeling: payload.afdeling,
+            nama_kebun: payload.nama_kebun,
+            status_tk: payload.status_tk,
+            jabatan: payload.jabatan,
+            status_perkawinan: payload.status_perkawinan,
+            descriptor_json: editCurrentDescriptorRef.current,
+            has_master_biometric: true
+          });
+        }
 
-        await cacheUserMasterVector({
-          employee_id: editingEmp.id,
-          nik: editingEmp.nik || '',
-          name: editingEmp.name || '',
-          department: editingEmp.department || editingEmp.jabatan || '',
-          descriptor_json: editCurrentDescriptorRef.current,
-        });
+        try {
+          await db.employees_cache.put({
+            id: editingEmp.id,
+            ...payload,
+            has_master_biometric: payload.has_master_biometric || editingEmp.has_master_biometric,
+            is_synced: false
+          });
+        } catch (_) {}
+
+        showToast('Berhasil', 'Data karyawan diperbarui secara lokal (Pending Sync Cut-Off 22:00).', 'success');
+      } else {
+        const { error: empErr } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
+        if (empErr) throw empErr;
+
+        if (descriptorJson) {
+          const { error: descErr } = await supabase
+            .from('master_descriptors')
+            .upsert({ employee_id: editingEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+          if (descErr) throw descErr;
+
+          await cacheUserMasterVector({
+            employee_id: editingEmp.id,
+            nik: payload.nik,
+            name: payload.name,
+            department: payload.department,
+            descriptor_json: editCurrentDescriptorRef.current,
+            has_master_biometric: true
+          });
+        }
+
+        showToast('Berhasil', 'Data karyawan berhasil diperbarui.', 'success');
       }
 
-      showToast('Berhasil', 'Data karyawan berhasil diperbarui.', 'success');
       setEditModalOpen(false);
       refreshEmployees();
     } catch (err) {
@@ -520,9 +651,19 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       confirmText: 'Ya, Hapus Data',
       onConfirm: async () => {
         try {
-          // 1. Hapus dari database cloud Supabase
-          const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
-          if (delErr) throw delErr;
+          const isOfflineEmp = String(emp.id).startsWith('off_') || String(emp.id).startsWith('tmp_');
+          if (isOfflineEmp) {
+            if (Capacitor.isNativePlatform()) {
+              const { sqliteRemovePendingEmployee } = await import('../services/sqliteService');
+              await sqliteRemovePendingEmployee(emp.id);
+            } else {
+              await db.employee_sync_queue.delete(String(emp.id));
+            }
+          } else if (navigator.onLine) {
+            // 1. Hapus dari database cloud Supabase
+            const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
+            if (delErr) throw delErr;
+          }
 
           // 2. Bersihkan cache biometrik lokal (IndexedDB / SQLite) agar wajah bisa didaftarkan ulang
           await deleteLocalEmployee(emp.id);
