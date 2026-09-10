@@ -459,10 +459,49 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         // PURGE ghost employee dari local cache HANYA jika ID-nya adalah temporary offline ID.
         // Karyawan real (ID numerik dari Supabase) TIDAK boleh dihapus di sini.
         const tempIdStr = String(emp.id);
-        if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
+        if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('off_emp_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
           const { deleteLocalEmployee } = await import('./db');
           await deleteLocalEmployee(emp.id);
           console.log(`[Sync Employee] Ghost employee ${tempIdStr} dihapus dari cache lokal.`);
+
+          // CRITICAL: Tambahkan ulang karyawan ke employees_cache dengan ID RESMI dari Supabase
+          // agar fetchLogs tidak lagi menerima ID offline saat membangun query ke Supabase.
+          try {
+            const realEmpEntry = {
+              id: realEmpId,
+              nik: emp.nik,
+              name: emp.name,
+              department: emp.department || emp.jabatan,
+              afdeling: emp.afdeling || null,
+              nama_kebun: emp.nama_kebun || null,
+              region: emp.region || null,
+              status_tk: emp.status_tk || null,
+              jabatan: emp.jabatan || null,
+              status_perkawinan: emp.status_perkawinan || null,
+              has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true,
+              is_synced: true
+            };
+            await db.employees_cache.put(realEmpEntry);
+            console.log(`[Sync Employee] employees_cache diperbarui: ${tempIdStr} → ${realEmpId} untuk ${emp.name}`);
+          } catch (cacheErr) {
+            console.warn(`[Sync Employee] Gagal update employees_cache untuk ${emp.name}:`, cacheErr);
+          }
+
+          // JUGA: Update attendance_logs lokal (display cache) dari ID offline ke ID resmi
+          try {
+            const offlineLogs = await db.attendance_logs.filter(
+              l => String(l.employee_id) === tempIdStr
+            ).toArray();
+            for (const ol of offlineLogs) {
+              ol.employee_id = realEmpId;
+              await db.attendance_logs.put(ol);
+            }
+            if (offlineLogs.length > 0) {
+              console.log(`[Sync Employee] ${offlineLogs.length} attendance_logs lokal diupdate ke employee_id: ${realEmpId}`);
+            }
+          } catch (logCacheErr) {
+            console.warn(`[Sync Employee] Gagal update attendance_logs lokal:`, logCacheErr);
+          }
         }
 
         console.log(`[Sync Employee Success] Karyawan ${emp.name} synced dengan ID real ${realEmpId}`);
