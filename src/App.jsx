@@ -193,14 +193,8 @@ function AppContent() {
     let dataSource = 'supabase';
     const lastSyncKey = `last_emp_sync_${adminObj.username}`;
 
-    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
-    try {
-      await syncPendingEmployees();
-      await syncPendingAttendanceLogs();
-      await syncPendingAttendanceRequests();
-    } catch (syncErr) {
-      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
-    }
+    // (Offline-First Cut-Off): Sync luring otomatis saat refresh dinonaktifkan.
+    // Data offline hanya dikirim saat cut-off 22:00 atau tombol sync manual.
 
     // Preload existing cached employees to support Delta Sync / Offline Mode
     let localCachedEmps = [];
@@ -374,14 +368,8 @@ function AppContent() {
 
   // Fetch Attendance Logs (Delta Sync + 2-Tier: Supabase + Offline Local Queue)
   const fetchLogs = useCallback(async (isFullSync = false) => {
-    // TRIGGER TAMBAHAN: Coba sinkronisasi luring (hanya dieksekusi oleh syncEngine jika online)
-    try {
-      await syncPendingEmployees();
-      await syncPendingAttendanceLogs(showToast);
-      await syncPendingAttendanceRequests();
-    } catch (syncErr) {
-      console.warn('[PULL-TO-REFRESH SYNC WARN]:', syncErr);
-    }
+    // (Offline-First Cut-Off): Sync luring otomatis saat refresh dinonaktifkan.
+    // Data offline hanya dikirim saat cut-off 22:00 atau tombol sync manual.
 
     let onlineLogs = [];
 
@@ -1129,18 +1117,14 @@ function AppContent() {
         }
       });
 
-    // 2. Fallback Polling 30 detik — backup jika WebSocket tidak tersedia
+    // 2. Fallback Polling 30 detik — HANYA untuk refresh tampilan UI, BUKAN untuk push data.
+    // Push data (sync) HANYA dilakukan via Cut-Off Harian (jalankanSyncCutOff) atau tombol manual admin.
     const pollingInterval = setInterval(async () => {
       if (navigator.onLine) {
-        console.log('[Polling] Auto-refresh data & push offline data setiap 30 detik...');
+        console.log('[Polling] Auto-refresh tampilan UI setiap 30 detik...');
         fetchEmployees();
         fetchLogs();
-        try {
-          const { triggerAutoSync } = await import('./syncEngine');
-          await triggerAutoSync();
-        } catch (err) {
-          console.warn('[Polling] Background Auto-Sync gagal:', err);
-        }
+        // TIDAK memanggil triggerAutoSync() di sini — ini melanggar prinsip Offline-First Cut-Off.
       }
     }, 30000);
 
