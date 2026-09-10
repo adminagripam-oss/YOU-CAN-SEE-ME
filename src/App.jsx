@@ -1129,18 +1129,14 @@ function AppContent() {
         }
       });
 
-    // 2. Fallback Polling 30 detik — backup jika WebSocket tidak tersedia
+    // 2. Fallback Polling 30 detik — HANYA untuk refresh tampilan UI, BUKAN untuk push data.
+    // Push data (sync) HANYA dilakukan via Cut-Off Harian (jalankanSyncCutOff) atau tombol manual admin.
     const pollingInterval = setInterval(async () => {
       if (navigator.onLine) {
-        console.log('[Polling] Auto-refresh data & push offline data setiap 30 detik...');
+        console.log('[Polling] Auto-refresh tampilan UI setiap 30 detik...');
         fetchEmployees();
         fetchLogs();
-        try {
-          const { triggerAutoSync } = await import('./syncEngine');
-          await triggerAutoSync();
-        } catch (err) {
-          console.warn('[Polling] Background Auto-Sync gagal:', err);
-        }
+        // TIDAK memanggil triggerAutoSync() di sini — ini melanggar prinsip Offline-First Cut-Off.
       }
     }, 30000);
 
