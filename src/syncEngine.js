@@ -31,9 +31,62 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
   try {
     let pendingLogs = await getUnsyncedLogs();
     
-    // FILTER: Tahan log yang masih menggunakan ID temporary (belum di-remapping oleh syncPendingEmployees)
-    // ID Supabase adalah BIGINT (angka), sedangkan ID offline adalah string seperti "off_emp_..."
+    // PRE-PROCESSING: Auto-Recovery untuk "Orphaned Logs" (Log yang karyawannya hilang dari antrean lokal)
+    try {
+      const isNative = Capacitor.isNativePlatform();
+      let pendingEmps = [];
+      if (isNative) {
+        const { sqliteGetPendingEmployees } = await import('./services/sqliteService');
+        pendingEmps = await sqliteGetPendingEmployees();
+      } else {
+        pendingEmps = await db.employee_sync_queue.toArray();
+      }
+      const pendingEmpIds = new Set(pendingEmps.map(e => String(e.id)));
+
+      for (let i = 0; i < pendingLogs.length; i++) {
+        const log = pendingLogs[i];
+        const empIdStr = String(log.employee_id);
+        
+        if (isNaN(Number(empIdStr))) {
+          // Log ini offline. Apakah karyawannya masih ada di antrean?
+          if (!pendingEmpIds.has(empIdStr)) {
+            console.warn(`[Auto-Sync] Log orphaned terdeteksi untuk employee_id: ${empIdStr}. Mencoba auto-recovery...`);
+            if (log.nik && log.nik !== '-') {
+              const { data: existingEmp } = await supabase
+                .from('employees')
+                .select('id')
+                .eq('nik', log.nik)
+                .single();
+                
+              if (existingEmp) {
+                 log.employee_id = existingEmp.id; // Auto fix
+                 if (isNative) {
+                   const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
+                   await sqliteUpdatePendingAttendanceEmployeeId(empIdStr, existingEmp.id);
+                 } else {
+                   await db.attendance_sync_queue.put(log);
+                 }
+                 console.log(`[Auto-Sync] Auto-recovery berhasil! ID log diupdate ke: ${existingEmp.id}`);
+              } else {
+                 console.warn(`[Auto-Sync] Karyawan dgn NIK ${log.nik} tidak ada di server. Log dihapus agar tidak nyangkut.`);
+                 await removeSyncedLogs([log.id]);
+                 log._discard = true;
+              }
+            } else {
+               console.warn(`[Auto-Sync] Log offline tanpa NIK tidak bisa di-recovery. Menghapus log.`);
+               await removeSyncedLogs([log.id]);
+               log._discard = true;
+            }
+          }
+        }
+      }
+    } catch (recoveryErr) {
+      console.warn('[Auto-Sync] Auto-recovery gagal:', recoveryErr);
+    }
+
+    // FILTER: Tahan log yang masih menggunakan ID temporary (masih ada di antrean karyawan)
     pendingLogs = pendingLogs.filter(log => {
+      if (log._discard) return false;
       const empIdStr = String(log.employee_id);
       if (isNaN(Number(empIdStr))) {
         console.warn(`[Auto-Sync] Menahan log absensi untuk employee_id sementara yang belum disync: ${empIdStr}`);
