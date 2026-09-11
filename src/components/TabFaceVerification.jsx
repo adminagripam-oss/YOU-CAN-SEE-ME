@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 
-import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance } from '../db';
+import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray } from '../db';
 import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
-
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Capacitor } from '@capacitor/core';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GEOFENCING CONFIGURATION (Dipindahkan dari server.js)
@@ -727,20 +728,16 @@ export default function TabFaceVerification({
 
       // Helper to validate vector length
       const isValidVector = (v) => {
-        if (!v) return false;
-        let parsed = v;
-        while (typeof parsed === 'string') {
-          try { parsed = JSON.parse(parsed); } catch { break; }
-        }
-        return Array.isArray(parsed) && parsed.length === 1024;
+        return !!toVectorArray(v);
       };
 
       // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
       const cached = await getCachedUserMasterVector(empIdKey);
       if (cached) {
         const tempVec = cached.descriptor_json || cached.face_vector;
-        if (isValidVector(tempVec)) {
-          vec = tempVec;
+        const validArr = toVectorArray(tempVec);
+        if (validArr) {
+          vec = validArr;
           console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid 1024-dim, employee:', empIdKey);
         } else {
           console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (panjang bukan 1024), employee:', empIdKey);
@@ -762,8 +759,9 @@ export default function TabFaceVerification({
               console.warn('[LOAD MASTER T2-SUPABASE WARN]:', masterErr.message);
             } else if (masterData?.descriptor_json) {
               const tempVec = masterData.descriptor_json;
-              if (isValidVector(tempVec)) {
-                vec = tempVec;
+              const validArr = toVectorArray(tempVec);
+              if (validArr) {
+                vec = validArr;
                 console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
               } else {
                 console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid (panjang bukan 1024)');
@@ -779,10 +777,11 @@ export default function TabFaceVerification({
 
       // ── Tier 4: Fallback ke props employees (kolom legacy) ────────────
       if (!vec) {
-        const empObj = employees.find((it) => String(it.id) === String(empIdKey));
+        const empObj = employees.find((it) => String(it.id) === String(empIdKey) || (it.nik && String(it.nik) === String(empIdKey)));
         const tempVec = empObj?.face_vector || empObj?.descriptor_json || empObj?.facial_descriptor;
-        if (isValidVector(tempVec)) {
-          vec = tempVec;
+        const validArr = toVectorArray(tempVec);
+        if (validArr) {
+          vec = validArr;
           console.log('[LOAD MASTER T4-PROPS] Vektor ditemukan valid di employees props');
         } else {
           console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid 1024-dim di props. Employee ID:', empIdKey);
@@ -794,45 +793,23 @@ export default function TabFaceVerification({
       setGfvMode(false);
 
       if (vec) {
-        let parsedVec = vec;
+        const parsedArray = toVectorArray(vec);
+        if (parsedArray) {
+          masterVectorRef.current = parsedArray;
 
-        // Recursive unwrap: tangani kasus double/triple-stringified dari DB
-        // Contoh: '"[1,2,3]"' → '[1,2,3]' → [1,2,3]
-        while (typeof parsedVec === 'string') {
-          try {
-            parsedVec = JSON.parse(parsedVec);
-          } catch (e) {
-            // Bukan JSON valid — hentikan loop, biarkan validasi di bawah menanganinya
-            break;
+          // Cache locally if it was fetched from Tier 2 or 4 (not Tier 1)
+          if (!cached) {
+            const empObj = employees.find((it) => String(it.id) === String(empIdKey)) || {};
+            await cacheUserMasterVector({
+              employee_id: empIdKey,
+              nik: empObj.nik,
+              name: empObj.name,
+              descriptor_json: parsedArray
+            }).catch(err => console.warn('[LOAD MASTER CACHE] Failed to cache vector locally:', err));
           }
-        }
-
-        // Cache locally if it was fetched from Tier 2 or 4 (not Tier 1)
-        if (isValidVector(parsedVec)) {
-          const { cacheUserMasterVector } = await import('../db');
-          const empObj = employees.find((it) => String(it.id) === String(empIdKey)) || {};
-          await cacheUserMasterVector({
-            employee_id: empIdKey,
-            nik: empObj.nik,
-            name: empObj.name,
-            descriptor_json: parsedVec
-          }).catch(err => console.warn('[LOAD MASTER CACHE] Failed to cache vector locally:', err));
-        }
-
-        // Validasi tipe data ketat sebelum disimpan ke ref
-        if (Array.isArray(parsedVec)) {
-          // Kasus ideal: sudah berupa Array angka
-          masterVectorRef.current = parsedVec;
-        } else if (parsedVec instanceof Float32Array) {
-          // Kasus Float32Array (format TensorFlow.js)
-          masterVectorRef.current = Array.from(parsedVec);
-        } else if (typeof parsedVec === 'object' && parsedVec !== null) {
-          // Kasus object {0: val, 1: val, ...} (serialisasi non-array)
-          masterVectorRef.current = Array.from(Object.values(parsedVec));
         } else {
-          // Gagal parse — jangan isi ref dengan data rusak
           masterVectorRef.current = null;
-          console.warn('[LOAD MASTER VECTORS] Vektor tidak valid setelah unwrap:', typeof parsedVec);
+          console.warn('[LOAD MASTER VECTORS] Vektor tidak valid setelah unwrap');
         }
       } else {
         masterVectorRef.current = null;
@@ -979,17 +956,28 @@ export default function TabFaceVerification({
     }
     lastDetectTimeRef.current = now;
 
+    // Phased Flow: HANYA aktifkan description (1024-dim embedding model)
+    // ketika wajah sudah stabil dan liveness sudah terverifikasi.
+    // Ini MENCEGAH penumpukan eksekusi GraphModel 1024-dim di GPU laptop/tablet setiap frame (150ms),
+    // yang menyebabkan WebGL Memory Leak / Context Loss & TypeError: Cannot read properties of undefined (reading 'inputNodes').
     const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
     if (human.config?.face?.description) {
-      human.config.face.description.enabled = shouldExtractEmbedding;
+      // Pastikan model description ter-load sebelum di-enable
+      const isDescLoaded = !!(human.models?.description || human.models?.faceres || human.models?.faceDescription);
+      human.config.face.description.enabled = shouldExtractEmbedding && isDescLoaded;
     }
 
-    // Gunakan croppedCanvas untuk kompatibilitas stabil di WebView Android (menghindari WebGL context loss)
-    const result = await human.detect(croppedCanvas);
-    const face = result?.face?.[0] ?? null;
+    try {
+      // Gunakan croppedCanvas untuk kompatibilitas stabil di WebView Android (menghindari WebGL context loss)
+      const result = await human.detect(croppedCanvas);
+      const face = result?.face?.[0] ?? null;
 
-    lastDetectResultRef.current = face;
-    return face;
+      lastDetectResultRef.current = face;
+      return face;
+    } catch (err) {
+      console.warn('[TabFaceVerification] Error during human.detect:', err?.message || err);
+      return lastDetectResultRef.current; // Return cached face result on error, don't crash
+    }
   }, [modelsLoaded]);
 
   /**
@@ -1438,6 +1426,30 @@ export default function TabFaceVerification({
     // Semua data absensi baru akan dimasukkan ke antrean lokal (SQLite).
     // SyncEngine di latar belakang yang bertugas mengirimkannya secara asinkron.
 
+    let pathFotoLokal = null;
+    if (capturedBase64Image) {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const fileName = `attendance_${targetEmp.nik}_${Date.now()}.jpg`;
+          // PERHATIAN UNTUK AI: Hapus prefix 'data:image/jpeg;base64,' jika ada agar file tidak korup
+          const base64Data = capturedBase64Image.replace(/^data:image\/\w+;base64,/, "");
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Data
+          });
+          pathFotoLokal = result.uri;
+          console.log('[FRONTEND] Saved photo locally to native filesystem:', pathFotoLokal);
+        } else {
+          // Di browser laptop (Web platform), gunakan data Base64 langsung agar tidak bergantung pada Filesystem native
+          pathFotoLokal = capturedBase64Image;
+          console.log('[FRONTEND] Saved photo base64 locally for web platform');
+        }
+      } catch (err) {
+        console.error('[FRONTEND ERROR] Failed to save photo locally:', err);
+      }
+    }
+
     try {
       await queueOfflineAttendance({
         employee_id: targetEmp.id,
@@ -1452,7 +1464,10 @@ export default function TabFaceVerification({
         lng: userLng,
         attendance_type: attendanceTypeDash,
         status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+        status_sync_teks: "pending",
+        status_sync_foto: "pending",
         euclidean_distance: euclideanDist,
+        path_foto_lokal: pathFotoLokal,
         ...(durasiDetik !== null && { durasi: durasiDetik }),
       });
 

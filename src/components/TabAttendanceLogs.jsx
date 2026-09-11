@@ -83,35 +83,17 @@ export default function TabAttendanceLogs({
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
 
-  // Fetch pending approval requests from Supabase
+  // Fetch pending approval requests from Local DB (Zero Supabase GET)
   const fetchApprovalRequests = async () => {
     try {
       setIsLoadingRequests(true);
-      const { data, error } = await supabase
-        .from('attendance_requests')
-        .select('*')
-        .order('requested_at', { ascending: false });
-
-      if (!error && data) {
-        setApprovalRequests(data);
-        // Sync cache locally
-        const { db } = await import('../db');
-        for (const req of data) {
-          await db.attendance_requests.put({ ...req, is_synced: true });
-        }
-      } else {
-        // Fallback to local IndexedDB if table is offline/not found
-        const { db } = await import('../db');
-        const localReqs = await db.attendance_requests.toArray();
-        setApprovalRequests(localReqs);
-      }
+      const { db } = await import('../db');
+      const localReqs = await db.attendance_requests.toArray();
+      // sort descending by requested_at
+      localReqs.sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at));
+      setApprovalRequests(localReqs);
     } catch (err) {
       console.error('[Fetch Requests Exception]:', err);
-      try {
-        const { db } = await import('../db');
-        const localReqs = await db.attendance_requests.toArray();
-        setApprovalRequests(localReqs);
-      } catch (_) {}
     } finally {
       setIsLoadingRequests(false);
     }
@@ -158,7 +140,7 @@ export default function TabAttendanceLogs({
             const newVal = req.new_value || {};
             
             if (newVal.inLogId && newVal.checkIn) {
-              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.inLogId).single();
+              const logData = logs.find(l => String(l.id) === String(newVal.inLogId));
               if (logData) {
                 const oldDate = new Date(logData.timestamp);
                 const [hours, minutes, seconds] = newVal.checkIn.split(':');
@@ -187,7 +169,7 @@ export default function TabAttendanceLogs({
             }
 
             if (newVal.outLogId && newVal.checkOut) {
-              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.outLogId).single();
+              const logData = logs.find(l => String(l.id) === String(newVal.outLogId));
               if (logData) {
                 const oldDate = new Date(logData.timestamp);
                 const [hours, minutes, seconds] = newVal.checkOut.split(':');
