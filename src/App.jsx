@@ -714,15 +714,43 @@ function AppContent() {
     setLogs(finalLogs);
   }, [user, employees]);
 
-  // Check Unsynced Count from IndexedDB
+  // Check Unsynced Count from local Database (Logs + Employees)
   const refreshUnsyncedCount = useCallback(async () => {
     try {
-      const items = await getUnsyncedLogs();
-      setUnsyncedCount(items ? items.length : 0);
+      const logsList = await getUnsyncedLogs();
+      let empCount = 0;
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { sqliteGetPendingEmployees } = await import('./services/sqliteService');
+          const emps = await sqliteGetPendingEmployees();
+          empCount = emps ? emps.length : 0;
+        } catch {
+          empCount = 0;
+        }
+      } else {
+        try {
+          const emps = await db.employee_sync_queue.toArray();
+          empCount = emps ? emps.length : 0;
+        } catch {
+          empCount = 0;
+        }
+      }
+      const total = (logsList ? logsList.length : 0) + empCount;
+      setUnsyncedCount(total);
     } catch {
       setUnsyncedCount(0);
     }
   }, []);
+
+  // Periodic Local Check: updates Topbar badge dynamically as soon as new data enters SQLite/IndexedDB
+  useEffect(() => {
+    if (!dbReady) return;
+    refreshUnsyncedCount();
+    const timer = setInterval(() => {
+      refreshUnsyncedCount();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [dbReady, refreshUnsyncedCount]);
 
   // Count active employees today who haven't checked out yet
   const pendingCheckOutsCount = useMemo(() => {
@@ -776,7 +804,7 @@ function AppContent() {
 
     // 2. Push pending offline logs
     await syncPendingAttendanceLogs(showToast, async () => {
-      refreshUnsyncedCount();
+      await refreshUnsyncedCount();
     });
 
     // 3. Push pending offline requests (edit/hapus)
@@ -801,6 +829,7 @@ function AppContent() {
       console.warn('[Manual Sync Pull Logs Error]:', e);
     }
 
+    await refreshUnsyncedCount();
     showToast('Sinkronisasi Selesai', 'Data berhasil diselaraskan secara penuh dengan cloud.', 'success');
     setIsSyncing(false);
   };
@@ -1062,78 +1091,7 @@ function AppContent() {
     return () => clearTimeout(timer);
   }, [dbReady, isOnline, fetchLogs]);
 
-  // ─── Supabase Realtime Sync + Polling Fallback ───────────────────────────
-  // Mendengarkan perubahan data dari device lain secara real-time.
-  // Berlaku HANYA saat online — tidak mempengaruhi sistem offline.
-  useEffect(() => {
-    if (!dbReady) return;
 
-    // 1. Supabase Realtime: Langganan perubahan tabel employees & attendance_logs
-    const realtimeChannel = supabase
-      .channel('agriface-realtime-sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'employees' },
-        async (payload) => {
-          console.log('[Realtime] employees change detected:', payload.eventType);
-          // Seamless Web <-> APK Integration:
-          // If deleted on Web App, immediately remove from local device cache
-          if (payload.eventType === 'DELETE' && payload.old_record?.id) {
-            const { deleteLocalEmployee } = await import('./db');
-            await deleteLocalEmployee(payload.old_record.id);
-          } else if (payload.eventType === 'UPDATE' && payload.new?.deleted_at) {
-            const { deleteLocalEmployee } = await import('./db');
-            await deleteLocalEmployee(payload.new.id);
-          }
-          fetchEmployees();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'attendance_logs' },
-        async (payload) => {
-          console.log('[Realtime] attendance_logs change detected:', payload.eventType);
-          if (payload.eventType === 'DELETE' && payload.old_record?.id) {
-            const { db } = await import('./db');
-            await db.attendance_logs.delete(String(payload.old_record.id));
-          }
-          fetchLogs();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'master_descriptors' },
-        (payload) => {
-          console.log('[Realtime] master_descriptors change detected:', payload.eventType);
-          fetchEmployees(); // refresh biometric status
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] Connected to Supabase Realtime channel.');
-        }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('[Realtime] Channel error/timeout — falling back to polling.');
-        }
-      });
-
-    // 2. Fallback Polling 30 detik — HANYA untuk refresh tampilan UI, BUKAN untuk push data.
-    // Push data (sync) HANYA dilakukan via Cut-Off Harian (jalankanSyncCutOff) atau tombol manual admin.
-    const pollingInterval = setInterval(async () => {
-      if (navigator.onLine) {
-        console.log('[Polling] Auto-refresh tampilan UI setiap 30 detik...');
-        fetchEmployees();
-        fetchLogs();
-        // TIDAK memanggil triggerAutoSync() di sini — ini melanggar prinsip Offline-First Cut-Off.
-      }
-    }, 30000);
-
-    return () => {
-      supabase.removeChannel(realtimeChannel);
-      clearInterval(pollingInterval);
-      console.log('[Realtime] Unsubscribed from Supabase Realtime channel.');
-    };
-  }, [dbReady, fetchEmployees, fetchLogs]);
 
   const router = useMemo(() => {
     return createBrowserRouter([

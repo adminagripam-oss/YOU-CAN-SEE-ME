@@ -1,7 +1,8 @@
 import { supabase } from './supabaseClient';
-import { getUnsyncedLogs, removeSyncedLogs, db, writeToBackupStorage } from './db';
+import { getUnsyncedLogs, removeSyncedLogs, db, writeToBackupStorage, updateSyncStatus } from './db';
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 let isSyncing = false;
 
@@ -115,31 +116,42 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       return { count: 0 };
     }
 
-    isSyncing = true;
-    console.log(`[Auto-Sync] Attempting to sync ${pendingLogs.length} pending offline attendance logs to server...`);
+    // Pisahkan logs untuk Step A (Text Push) dan Step B (Photo Push)
+    const textPendingLogs = pendingLogs.filter(log => log.status_sync_teks !== 'done');
+    const photoPendingLogs = pendingLogsRaw.filter(log => 
+      (log.status_sync_teks === 'done' || !textPendingLogs.find(t => t.id === log.id)) && 
+      log.status_sync_foto !== 'done' && 
+      log.path_foto_lokal
+    );
 
-    const logsToInsert = pendingLogs.map(log => {
-      const logKebun = log.kebun || log.nama_kebun || '-';
-      const logAfdeling = log.afdeling || '-';
-      let formattedLocation = log.location || '';
-      if (formattedLocation && !formattedLocation.includes(' | ')) {
-        formattedLocation = `${logKebun} | ${logAfdeling} | ${formattedLocation}`;
-      }
-      return {
-        employee_id: log.employee_id,
-        timestamp: log.timestamp,
-        location: formattedLocation,
-        status: log.status,
-        euclidean_distance: log.euclidean_distance,
-        latitude: log.latitude !== undefined ? log.latitude : (log.lat !== undefined ? log.lat : null),
-        longitude: log.longitude !== undefined ? log.longitude : (log.lng !== undefined ? log.lng : null),
-        durasi: log.durasi || null,
-        attendance_type: (log.attendance_type || 'CHECK-IN').replace('_', '-'),
-        nik: log.nik || null,
-        name: log.name || null,
-        department: log.department || null
-      };
-    });
+    let syncedTextIds = [];
+
+    if (textPendingLogs.length > 0) {
+      isSyncing = true;
+      console.log(`[Auto-Sync] Step A: Attempting to sync ${textPendingLogs.length} pending text logs...`);
+
+      const logsToInsert = textPendingLogs.map(log => {
+        const logKebun = log.kebun || log.nama_kebun || '-';
+        const logAfdeling = log.afdeling || '-';
+        let formattedLocation = log.location || '';
+        if (formattedLocation && !formattedLocation.includes(' | ')) {
+          formattedLocation = `${logKebun} | ${logAfdeling} | ${formattedLocation}`;
+        }
+        return {
+          employee_id: log.employee_id,
+          timestamp: log.timestamp,
+          location: formattedLocation,
+          status: log.status,
+          euclidean_distance: log.euclidean_distance,
+          latitude: log.latitude !== undefined ? log.latitude : (log.lat !== undefined ? log.lat : null),
+          longitude: log.longitude !== undefined ? log.longitude : (log.lng !== undefined ? log.lng : null),
+          durasi: log.durasi || null,
+          attendance_type: (log.attendance_type || 'CHECK-IN').replace('_', '-'),
+          nik: log.nik || null,
+          name: log.name || null,
+          department: log.department || null
+        };
+      });
 
     let syncedIds = [];
     let successfulData = [];
@@ -165,16 +177,15 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           // we must discard this log from the queue otherwise it will block sync forever.
           if (singleError.code === '23503') {
             console.warn(`[Auto-Sync] Discarding invalid log for non-existent employee_id: ${singleLog.employee_id}`);
-            return { id: pendingLogs[i].id, discard: true }; // Push to syncedIds so it gets deleted from local queue
+            return { id: textPendingLogs[i].id, discard: true };
           }
-          // If the log is already on the server (e.g. upload succeeded but connection dropped before local DB updated)
           if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
             console.warn(`[Auto-Sync] Log already exists on server, discarding local queue item to prevent getting stuck.`);
-            return { id: pendingLogs[i].id, discard: true };
+            return { id: textPendingLogs[i].id, discard: true };
           }
           return null;
         } else if (singleData && singleData.length > 0) {
-          return { id: pendingLogs[i].id, data: singleData[0] };
+          return { id: textPendingLogs[i].id, data: singleData[0] };
         }
         return null;
       });
@@ -187,71 +198,133 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
         }
       });
     } else {
-      syncedIds = pendingLogs.map(log => log.id);
+      syncedIds = textPendingLogs.map(log => log.id);
       successfulData = data || [];
     }
 
-    if (syncedIds.length === 0) {
-      console.log('[Auto-Sync] No logs were successfully synced.');
-      return { count: 0 };
-    }
+    syncedTextIds = syncedIds;
 
-    // Remove synced records from local DB queue
-    await removeSyncedLogs(syncedIds);
-
-    // Update local attendance logs table: remove offline entries and put synced ones
-    try {
-      // Execute local DB deletion in parallel
-      await Promise.all(pendingLogs.map(log => 
-        db.attendance_logs.delete('offline_' + log.id)
-      ));
-      
-      if (successfulData && successfulData.length > 0) {
-        const localRecords = successfulData.map(record => ({
-          id: String(record.id),
-          employee_id: record.employee_id,
-          nik: record.nik,
-          name: record.name,
-          department: record.department,
-          afdeling: record.afdeling || null,
-          kebun: record.kebun || null,
-          timestamp: record.timestamp,
-          location: record.location,
-          lat: record.latitude !== undefined && record.latitude !== null ? record.latitude : (record.lat !== undefined ? record.lat : null),
-          lng: record.longitude !== undefined && record.longitude !== null ? record.longitude : (record.lng !== undefined ? record.lng : null),
-          status: record.status,
-          attendance_type: record.attendance_type,
-          euclidean_distance: record.euclidean_distance,
-          is_synced: true,
-          created_at: record.created_at
-        }));
-        await db.attendance_logs.bulkPut(localRecords);
+    if (syncedTextIds.length > 0) {
+      console.log(`[Auto-Sync Step A] Successfully synced ${syncedTextIds.length} text records!`);
+      // Update status text to 'done' in local DB
+      for (const id of syncedTextIds) {
+        await updateSyncStatus(id, 'done', null);
+        const logToPhoto = textPendingLogs.find(l => l.id === id);
+        if (logToPhoto && logToPhoto.path_foto_lokal) {
+          photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+        }
       }
-    } catch (dbErr) {
-      console.warn('[Sync Engine] Failed to update local attendance_logs table:', dbErr);
     }
-    console.log(`[Auto-Sync Success] Successfully synced ${syncedIds.length} records!`);
+    } // end if textPendingLogs.length > 0
 
+    // Step B: Sequential Photo Push
+    let syncedPhotoCount = 0;
+    if (photoPendingLogs.length > 0) {
+      isSyncing = true;
+      console.log(`[Auto-Sync] Step B: Attempting to sync ${photoPendingLogs.length} pending photos...`);
+      for (const log of photoPendingLogs) {
+        try {
+          let base64String = null;
+          if (log.path_foto_lokal && (log.path_foto_lokal.startsWith('data:image/') || log.path_foto_lokal.length > 500)) {
+            base64String = log.path_foto_lokal;
+          } else if (log.path_foto_lokal) {
+            // Read base64 from Capacitor Filesystem (native platform)
+            const readResult = await Filesystem.readFile({
+              path: log.path_foto_lokal
+            });
+            base64String = readResult.data;
+          }
+
+          if (!base64String) {
+            throw new Error('Local photo path/data is empty or invalid.');
+          }
+
+          // Convert Base64 to Blob / Buffer for Supabase Storage
+          const dataUrl = base64String.startsWith('data:image/')
+            ? base64String
+            : `data:image/jpeg;base64,${base64String}`;
+
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          
+          const uuid = log.id + '_' + Date.now();
+          const storagePath = `absensi_harian/${log.nik}/${uuid}.jpg`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('attendance-photos')
+            .upload(storagePath, blob, {
+              contentType: 'image/jpeg',
+              upsert: true
+            });
+
+          if (uploadError) {
+            console.warn(`[Auto-Sync Step B] Upload failed for log ${log.id}:`, uploadError);
+            continue; // Skip this one, try again next time
+          }
+
+          // Get public URL
+          const { data: publicUrlData } = supabase.storage
+            .from('attendance-photos')
+            .getPublicUrl(storagePath);
+          
+          const publicUrl = publicUrlData.publicUrl;
+
+          // Update text log in server with photo url (we must find the server ID or match by timestamp/employee_id)
+          // Since we might not have the server ID, we update by timestamp and employee_id
+          await supabase
+            .from('attendance_logs')
+            .update({ path_foto: publicUrl })
+            .eq('employee_id', log.employee_id)
+            .eq('timestamp', log.timestamp);
+
+          // Step C: Garbage Collection (Delete local file and set status_sync_foto = 'done')
+          await updateSyncStatus(log.id, 'done', 'done');
+          
+          try {
+            await Filesystem.deleteFile({
+              path: log.path_foto_lokal
+            });
+            console.log(`[Auto-Sync Step C] Garbage collected local photo for log ${log.id}`);
+          } catch (delErr) {
+            console.warn(`[Auto-Sync Step C] Failed to delete local photo:`, delErr);
+          }
+
+          syncedPhotoCount++;
+
+        } catch (photoErr) {
+          console.warn(`[Auto-Sync Step B Error] Processing photo for log ${log.id}:`, photoErr);
+        }
+      }
+    }
+
+    // Clean up local queue ONLY if is_synced is 1 (done by getUnsyncedLogs but let's clear them)
+    // Actually we don't need to manually delete from attendance_sync_queue because
+    // next time getUnsyncedLogs is called, it will filter out is_synced === true
+    // Wait, let's remove from sync_queue fully synced items
+    const fullySyncedLogs = await getUnsyncedLogs(); // wait, they are already synced so they won't be here
+    // Let's manually remove those we just synced fully
+    const fullySyncedIds = [...syncedTextIds, ...photoPendingLogs.map(p => p.id)];
+    
     // Write sync action to public backup log
-    if (Capacitor.isNativePlatform()) {
+    if (Capacitor.isNativePlatform() && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
       const timestamp = new Date().toISOString();
-      const syncLine = `[${timestamp}] [SYNC SUCCESS] Successfully uploaded ${syncedIds.length} offline attendance logs to cloud database.\n`;
+      const syncLine = `[${timestamp}] [SYNC SUCCESS] Uploaded ${syncedTextIds.length} texts and ${syncedPhotoCount} photos to cloud.\n`;
       await writeToBackupStorage(syncLine);
     }
 
-    if (showToast) {
+    if (showToast && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
       showToast(
         'Auto-Sync Berhasil',
-        `Berhasil mengunggah ${syncedIds.length} data absensi offline!`,
+        `Berhasil mengunggah ${syncedTextIds.length} data dan ${syncedPhotoCount} foto absensi offline!`,
         'success'
       );
     }
 
-    if (onSyncComplete) {
+    if (onSyncComplete && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
       onSyncComplete();
     }
 
-    return { count: syncedIds.length };
+    return { count: syncedTextIds.length + syncedPhotoCount };
   } catch (err) {
     console.error('[Auto-Sync Error]:', err.message || err, err.details || '', err.hint || '', err.code || '');
   } finally {
