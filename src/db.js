@@ -110,6 +110,17 @@ export const db = {
         return await dexieDb.employees_cache.toArray();
       }
     },
+    async put(emp) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteBulkPutEmployeesCache([emp]);
+      } else {
+        try {
+          await dexieDb.employees_cache.put(emp);
+        } catch (e) {
+          console.warn('[Dexie employees_cache put Error]:', e);
+        }
+      }
+    },
     async clear(filter) {
       if (Capacitor.isNativePlatform()) {
         await sqliteClearEmployeesCache(filter);

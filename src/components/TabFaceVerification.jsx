@@ -726,21 +726,40 @@ export default function TabFaceVerification({
     try {
       let vec = null;
 
-      // Helper to validate vector length
+      // Helper to validate vector
       const isValidVector = (v) => {
         return !!toVectorArray(v);
       };
 
-      // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
-      const cached = await getCachedUserMasterVector(empIdKey);
-      if (cached) {
-        const tempVec = cached.descriptor_json || cached.face_vector;
-        const validArr = toVectorArray(tempVec);
-        if (validArr) {
-          vec = validArr;
-          console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid 1024-dim, employee:', empIdKey);
+      // ── Tier 0: Offline Employees (off_* / tmp_*) → langsung dari props ──────
+      // Untuk karyawan yang didaftarkan offline, descriptor_json sudah ada di employees props
+      // (di-merge dari SQLite local_employee_sync_queue oleh App.jsx).
+      // Ini adalah jalur tercepat dan paling andal untuk karyawan offline.
+      const isOfflineId = String(empIdKey).startsWith('off_') || String(empIdKey).startsWith('tmp_');
+      if (isOfflineId) {
+        const empObj = employees.find((it) => String(it.id) === String(empIdKey));
+        const rawPropVec = empObj?.descriptor_json || empObj?.face_vector || empObj?.facial_descriptor;
+        const propArr = toVectorArray(rawPropVec);
+        if (propArr) {
+          vec = propArr;
+          console.log('[LOAD MASTER T0-OFFLINE PROPS] Vektor offline employee ditemukan di props, panjang:', propArr.length, 'employee:', empIdKey);
         } else {
-          console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (panjang bukan 1024), employee:', empIdKey);
+          console.warn('[LOAD MASTER T0-OFFLINE PROPS] Tidak ada vektor di props untuk offline employee:', empIdKey, '| descriptor_json:', rawPropVec ? 'ADA (invalid)' : 'NULL');
+        }
+      }
+
+      // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
+      if (!vec) {
+        const cached = await getCachedUserMasterVector(empIdKey);
+        if (cached) {
+          const tempVec = cached.descriptor_json || cached.face_vector;
+          const validArr = toVectorArray(tempVec);
+          if (validArr) {
+            vec = validArr;
+            console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid, panjang:', validArr.length, 'employee:', empIdKey);
+          } else {
+            console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (descriptor null/kosong), employee:', empIdKey);
+          }
         }
       }
 
@@ -956,15 +975,13 @@ export default function TabFaceVerification({
     }
     lastDetectTimeRef.current = now;
 
-    // Phased Flow: HANYA aktifkan description (1024-dim embedding model)
+    // Phased Flow: HANYA aktifkan description (embedding model)
     // ketika wajah sudah stabil dan liveness sudah terverifikasi.
-    // Ini MENCEGAH penumpukan eksekusi GraphModel 1024-dim di GPU laptop/tablet setiap frame (150ms),
-    // yang menyebabkan WebGL Memory Leak / Context Loss & TypeError: Cannot read properties of undefined (reading 'inputNodes').
+    // CATATAN: isDescLoaded check dihapus — human.models tidak mengekspos properti .description/.faceres
+    // secara langsung di Human.js v3. modelsLoaded (dari App.jsx) adalah satu-satunya sumber kebenaran.
     const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
     if (human.config?.face?.description) {
-      // Pastikan model description ter-load sebelum di-enable
-      const isDescLoaded = !!(human.models?.description || human.models?.faceres || human.models?.faceDescription);
-      human.config.face.description.enabled = shouldExtractEmbedding && isDescLoaded;
+      human.config.face.description.enabled = shouldExtractEmbedding && modelsLoaded;
     }
 
     try {
