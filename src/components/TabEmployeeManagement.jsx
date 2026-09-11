@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity } from '../db';
+import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity, toVectorArray } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -61,7 +61,7 @@ export default function TabEmployeeManagement({
   const detectRegFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
     if (human.config?.face?.description) {
-      human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat daftar
+      human.config.face.description.enabled = true;
     }
     const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
@@ -77,13 +77,16 @@ export default function TabEmployeeManagement({
       hist.push(newVec);
       if (hist.length > 5) hist.shift();
       
-      const avgVec = new Array(1024).fill(0);
+      const vecLength = newVec.length;
+      const avgVec = new Array(vecLength).fill(0);
       for (const v of hist) {
-        for (let i = 0; i < 1024; i++) {
-          avgVec[i] += v[i];
+        // Fallback safety if one frame is somehow different size
+        const len = Math.min(vecLength, v.length);
+        for (let i = 0; i < len; i++) {
+          avgVec[i] += (v[i] || 0);
         }
       }
-      for (let i = 0; i < 1024; i++) {
+      for (let i = 0; i < vecLength; i++) {
         avgVec[i] /= hist.length;
       }
 
@@ -97,7 +100,7 @@ export default function TabEmployeeManagement({
           let bestSim = 0, bestName = '', bestNik = '';
           for (const m of allMasters) {
             const vec = m.descriptor_json;
-            if (!Array.isArray(vec) || vec.length !== 1024) continue;
+            if (!Array.isArray(vec) || vec.length !== avgVec.length) continue;
             // Gunakan avgVec (yang stabil) untuk cek duplikasi
             const sim = cosineSimilarity(avgVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; bestNik = m.nik; }
@@ -192,7 +195,7 @@ export default function TabEmployeeManagement({
 
         try {
           if (human.config?.face?.description) {
-            human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat upload foto
+            human.config.face.description.enabled = true;
           }
           const result = await human.detect(img);
 
@@ -327,6 +330,12 @@ export default function TabEmployeeManagement({
       } else {
         const { db } = await import('../db');
         await db.employee_sync_queue.add(empQueueRecord);
+        await db.employees_cache.put({
+          ...createdEmp,
+          has_master_biometric: !!currentEmpDescriptorRef.current,
+          descriptor_json: currentEmpDescriptorRef.current || null,
+          is_synced: false
+        });
       }
 
       // Simpan Vektor Wajah (Biometrik) secara lokal

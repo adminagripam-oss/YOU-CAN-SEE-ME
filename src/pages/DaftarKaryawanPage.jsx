@@ -15,7 +15,7 @@ import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee } from '../db';
+import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee, toVectorArray } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -120,6 +120,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const [isScanningSubmit, setIsScanningSubmit] = useState(false);
 
   const scanCurrentDescriptorRef = useRef(null);
+  const scanCurrentGFVRef = useRef(null);
   const scanVideoRef = useRef(null);
   const scanCanvasRef = useRef(null);
 
@@ -133,6 +134,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   }, [modelsLoaded]);
 
   const onScanFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
+    if (smoothedMesh) {
+      scanCurrentGFVRef.current = smoothedMesh;
+    }
     if (detection.embedding) {
       const newVec = Array.from(detection.embedding);
       scanCurrentDescriptorRef.current = newVec;
@@ -181,6 +185,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
 
   const onScanNoFace = React.useCallback(() => {
     scanCurrentDescriptorRef.current = null;
+    scanCurrentGFVRef.current = null;
     setScanFaceCheckResult(null);
     setScanCameraStatusText('Menunggu Wajah di Kamera...');
     setScanCameraStatusColor('var(--accent-warning)');
@@ -208,6 +213,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     setScanFacingMode('user');
     setScanFaceCheckResult(null);
     scanCurrentDescriptorRef.current = null;
+    scanCurrentGFVRef.current = null;
     setScanModalOpen(true);
   };
 
@@ -281,6 +287,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           await db.employees_cache.put({
             ...scanEmp,
             has_master_biometric: true,
+            descriptor_json: scanCurrentDescriptorRef.current,
             is_synced: false
           });
         } catch (_) {}
@@ -332,7 +339,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
   const detectEditFacesCallback = React.useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
     if (human.config?.face?.description) {
-      human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding selalu diekstrak saat edit
+      human.config.face.description.enabled = true;
     }
     const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
@@ -433,7 +440,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     img.onload = async () => {
       try {
         if (human.config?.face?.description) {
-          human.config.face.description.enabled = true; // FORCE ENABLE: Pastikan embedding diekstrak dari upload foto saat edit
+          human.config.face.description.enabled = true;
         }
         const result = await human.detect(img);
         if (result.face && result.face.length > 0 && result.face[0].embedding) {
@@ -609,6 +616,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             id: editingEmp.id,
             ...payload,
             has_master_biometric: payload.has_master_biometric || editingEmp.has_master_biometric,
+            descriptor_json: editCurrentDescriptorRef.current || editingEmp.descriptor_json || null,
             is_synced: false
           });
         } catch (_) {}

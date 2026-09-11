@@ -1,13 +1,14 @@
 # Product Requirement Document (PRD) & System Architecture Analysis
-## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine & Hybrid Cloud Infrastructure
+## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA & Auto-Sync Engine
+- **Judul Proyek**: Aplikasi Absensi Mobile Biometrik Wajah Pemanen Kebun dengan Offline-First PWA/Native Engine & Capgo Over-The-Air (OTA) Updater
 - **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
-- **Versi Dokumen**: 3.1.0 (One-Face-Per-Employee Biometric Constraint, Offline-Capable Cosine Similarity Engine, Afdeling Mapping, Duration Calculation Release)
-- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage & pgcrypto) & Dexie.js v2 (IndexedDB Local Storage)
-- **Biometric Engine**: `@vladmandic/human` v3.x (1024-dim Embedding Vector) + MediaPipe Face Mesh 478-Point & EAR Liveness Engine + Cosine Similarity Duplicate-Check Engine (Threshold ≥ 0.85)
-- **Status System**: Live Production Specifications & Enterprise-Ready PWA
+- **Versi Dokumen**: 4.3.0 (OTA-Capable Hybrid PWA/Native System, 22:00 Cut-Off Offline Engine, Dynamic Unsynced Badge & Auto-Recovery)
+- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage & pgcrypto), Dexie.js v4 (Web IndexedDB), `@capacitor-community/sqlite` v6 (Android Native SQLite)
+- **Biometric Engine**: `@vladmandic/human` v3.3.6 (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh 478-Point & EAR Liveness Engine + Cosine Similarity Engine (Threshold ≥ 0.85)
+- **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine + Supabase Public Storage (`ota-updates`)
+- **Status System**: Live Production Specifications & Enterprise-Ready Hybrid PWA / Native Android APK
 
 ---
 
@@ -26,42 +27,44 @@ Sistem versi 2.1.0 menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Of
 
 ```
                                   +-------------------------------------------------+
-                                  |              CLIENT FRONTEND (PWA)              |
-                                  |  React 19 + Vite + React Router v7 + Dexie.js   |
+                                  |         CLIENT FRONTEND (PWA & NATIVE APK)      |
+                                  |  React 19 + Vite 8 + React Router v7 + Capgo    |
                                   +-----------------------+-------------------------+
                                                           |
                                       +-------------------+-------------------+
                                       |                                       |
-                         Tier 1: Express API                     Tier 2: Direct Supabase SDK
-                         (http://localhost:8080)                 (HTTPS / CORS Safe)
+                         Tier 1: Capgo OTA Updater               Tier 2: Direct Supabase SDK
+                         (Supabase Storage ota-updates)          (HTTPS / CORS Safe)
                                       |                                       |
                                       v                                       v
                         +---------------------------+           +---------------------------+
-                        |      EXPRESS SERVER       |           |   SUPABASE CLOUD DATABASE |
-                        |   Node.js + JWT Cookie    +---------->|   PostgreSQL Engine       |
-                        |   Biometric 1-to-1 Auth   |           |   (JSONB Vector Storage)  |
+                        |      CAPGO OTA ENGINE     |           |   SUPABASE CLOUD DATABASE |
+                        |   Auto-Bundle Update      +---------->|   PostgreSQL Engine       |
+                        |   Blocking Update Modal   |           |   (JSONB Vector Storage)  |
                         +---------------------------+           +---------------------------+
                                                                               ^
-                                      Tier 3: Local Offline Cache             |
+                                      Tier 3: Hybrid Offline Storage          |
                         +-----------------------------------------------------+
-                        |          LOCAL SQLITE (APK) / INDEXEDDB (WEB)       |
-                        |  - user_master (biometric vector cache)             |
-                        |  - attendance_sync_queue (offline logs queue)       |
-                        |  - employees_cache (master employee list cache)     |
-                        |  - attendance_logs (permanent history log cache)    |
+                        |     NATIVE SQLITE (APK)  /  INDEXEDDB DEXIE (WEB)   |
+                        |  - user_master / local_master_descriptors           |
+                        |  - attendance_sync_queue / local_attendance_queue   |
+                        |  - employees_cache / local_employees                |
+                        |  - attendance_logs / local_attendance_logs          |
                         +-----------------------------------------------------+
 ```
 
-### 2.1 Frontend (Client-Side SPA & PWA)
+### 2.1 Frontend (Client-Side SPA, PWA & Native Android Shell)
 - **Framework & UI Engine**: React v19.2.8 & Vite v8.1.5.
+- **OTA Update Engine**: `@capgo/capacitor-updater` v6.x dengan pemeriksaan file versi `version.json` dari bucket Supabase `ota-updates` dan modal pembaruan `OTAUpdateModal.jsx`.
 - **Routing & Guard**: `react-router-dom` v7.18.2 dengan proteksi rute `<ProtectedRoute>` dan `<PublicRoute>`.
-- **State Management & Auth Context**: React Context API (`AuthProvider` & `useAuth` hook) yang mendukung verifikasi sesi otomatis `/api/auth/me`.
+- **State Management & Auth Context**: React Context API (`AuthProvider` & `useAuth` hook) yang mendukung verifikasi sesi otomatis.
 - **Design System & Styling**: Custom CSS Tokens dengan dukungan **Light Mode** & **Dark Mode** (`localStorage.getItem('app-theme')`), Glassmorphism UI, Font Google Inter, Iconography Lucide-React & FontAwesome 6.4.0.
-- **Feedback Components**: Shadcn UI Toast System (`ShadcnToast.jsx`) dan Dynamic Modal Dialog (`ConfirmModal.jsx`).
+- **Feedback Components**: Shadcn UI Toast System (`ShadcnToast.jsx`), Dynamic Modal Dialog (`ConfirmModal.jsx`), dan OTA Blocking Update Modal (`OTAUpdateModal.jsx`).
   - **Opaque Dark Mode Background**: Di dark mode, background toast diubah dari semi-transparan menjadi warna solid (opaque) (Success: `#062f21`, Error: `#3f1010`, Info: `#111333`) dengan border solid sesuai warna status.
   - **Minimalis Mobile Size**: Pada layar HP ($\le 600\text{px}$), ukuran kotak toast diminimalisir (maks. width 290px, padding `8px 12px`, dan font kecil) untuk estetika premium dan ringkas.
-- **Biometric Library**: `@vladmandic/face-api` v1.7.15 (Model ResNet-34 Deep Neural Network, SSD MobileNet V1 Face Detector, Tiny Face Detector, 68 Landmark Points Predictor, 128-dimensional Float32 Descriptor Extractor).
-- **Offline Storage**: Dexie.js v4.4.4 wrapper IndexedDB untuk caching master vector, cache data karyawan, dan antrean absensi offline.
+  - **Unsynced Badge Real-time**: Topbar menampilkan badge merah indikator total data offline yang belum tersinkronisasi (log absensi + karyawan baru).
+- **Biometric Library**: `@vladmandic/human` v3.3.6 (1024-dim Embedding Vector, FP16 WebGL precision forcing, MediaPipe Face Mesh 478-Point, EAR Blink Detection).
+- **Offline Storage**: Hibrida — Dexie.js v4.4.4 (IndexedDB) pada Web Browser & `@capacitor-community/sqlite` v6.x (Native SQLite) pada Android APK.
 
 ### 2.2 Backend & Database Infrastructure
 - **Runtime Environment**: Node.js dengan framework Express.js v4.21.2.
@@ -196,6 +199,22 @@ Sistem secara cerdas membedakan status absensi hari ini:
 - **Tree Routing & Layout Outlets**:
   - Routing diatur menggunakan React Router v6+ Data API (`createBrowserRouter` & `<RouterProvider>`) untuk struktur bersarang (nested layout) yang lebih modular dan aman.
   - Shared layout (`DashboardLayout`) dan pengaman otentikasi (`ProtectedRoute` / `PublicRoute`) menggunakan komponen `<Outlet />` bawaan.
+
+### FR-7: Over-The-Air (OTA) Application Update Engine
+- Aplikasi Android mengintegrasikan plugin `@capgo/capacitor-updater` untuk pembaruan bundle web secara langsung di latar belakang.
+- Fungsi `checkForUpdates()` memeriksa file `version.json` dari Supabase Public Storage bucket `ota-updates`.
+- Apabila versi di server lebih tinggi dibanding versi aplikasi aktif, sistem menampilkan modal blocking `OTAUpdateModal` yang mewajibkan pengunduhan rilis baru sebelum operasional dilanjutkan.
+
+### FR-8: Kebijakan Sinkronisasi Cut-Off Pukul 22:00 (22:00 Cut-Off Policy) & Offline-First Strict Mode
+- Menghapuskan auto-sync otomatis secara agresif pada setiap event fetch UI untuk mematuhi prinsip *Offline-First Strict Mode*.
+- Seluruh absensi dan registrasi karyawan offline disimpan persisten di SQLite lokal (`local_attendance_queue` & `local_employees`) / IndexedDB tanpa penulisan ke cloud secara impulsif.
+- Sinkronisasi otomatis massal dialokasikan pada pukul **22:00 WIB** (Cut-Off Harian) atau ketika tombol **Sinkronisasi Manual** diklik oleh Admin di Topbar.
+- Dilengkapi dengan **Auto-Recovery Engine** yang menangani rekonsiliasi ID sementara (`off_emp_...`) menjadi BigInt ID resmi Supabase secara atomis pasca-sync.
+
+### FR-9: Live Dynamic Unsynced Badge Counter
+- Topbar aplikasi dilengkapi dengan indikator badge angka merah yang memuat total akumulasi data luring yang belum tersinkronisasi (`Unsynced Count`).
+- Pengecekan dilakukan secara periodik setiap **2.5 detik** langsung ke memori lokal SQLite / IndexedDB.
+- Angka counter diperbarui secara dinamis begitu ada absensi offline baru atau registrasi karyawan baru yang tersimpan di perangkat.
 
 ---
 
@@ -876,3 +895,38 @@ Pembaruan versi **v4.2.0** berfokus pada penyempurnaan UI/UX (*User Experience*)
 * **Konsistensi Mirror Effect (Kamera Re-Scan)**: Menambahkan implementasi CSS `style={{ transform: 'scaleX(-1)' }}` pada `<video>` dan `<canvas>` di modal Edit Data Karyawan (Re-Scan) pada `DaftarKaryawanPage.jsx`. Pergerakan pengguna saat proses pengambilan biometrik ulang kini terasa natural selayaknya bercermin, persis sama dengan halaman Tambah Karyawan utama.
 * **Bypass Geofencing Statis (Tunda Sementara)**: Mematikan validasi paksa jarak statis kantor (`OFFICE_LAT` & `OFFICE_LNG`) pada fitur absensi (`TabFaceVerification.jsx`). Sistem tidak lagi memblokir absensi dengan error `Di luar jangkauan (Batas: 100000m)`. Logika geofencing akan diganti dengan validasi berbasis lokasi kebun dinamis di rilis mendatang.
 * **Node Watch (HMR Backend)**: Skrip `run-dev.bat` diperbarui menggunakan parameter `node --watch server.js` agar Server Node.js (port 8080) dapat memuat ulang kode otomatis secara instan setiap ada perubahan *script* saat masa pengembangan.
+
+---
+
+## 25. Catatan Pembaruan & Spesifikasi Fitur Terbaru (System Release v4.3.0 / v1.4.2)
+
+Pembaruan versi **v4.3.0 (rilis versi aplikasi mobile v1.4.2)** menandai peluncuran fitur pembaruan aplikasi nirkabel **Over-The-Air (OTA)** via Capgo & Supabase Storage, penerapan kebijakan **Cut-Off Sync Harian Pukul 22:00**, indikator **Unsynced Badge Counter** real-time di Topbar, serta mesin **Auto-Recovery** untuk data offline:
+
+### 25.1 Integrasi Over-The-Air (OTA) Application Update Engine (`Capgo + Supabase`)
+* **Update Nirkabel Tanpa Re-Install APK**: Mengintegrasikan pustaka `@capgo/capacitor-updater` untuk memungkinkan pembaruan kode frontend React (Web Bundle `dist`) secara langsung (*Over-The-Air*) tanpa perlu mengunduh atau menginstall ulang berkas `.apk` Android di HP/Tablet mandor.
+* **Self-Hosted Supabase Storage Bucket (`ota-updates`)**: Seluruh berkas pembaruan aplikasi dipublikasikan ke bucket publik `ota-updates` di Supabase Storage, disertai berkas manifes versi `version.json`:
+  ```json
+  {
+    "version": "1.4.2",
+    "url": "https://[SUPABASE-PROJECT-ID].supabase.co/storage/v1/object/public/ota-updates/dist-1.4.2.zip"
+  }
+  ```
+* **Modal Pembaruan Wajib (`OTAUpdateModal.jsx`)**: Mengintegrasikan pemeriksaan versi otomatis `checkForUpdates()` saat aplikasi online. Jika versi di server lebih baru dari versi aktif, aplikasi menampilkan modal blocking dengan indikator persentase *download progress* yang mewajibkan pembaruan sebelum aplikasi digunakan.
+
+### 25.2 Kebijakan Sinkronisasi Cut-Off Harian Pukul 22:00 (22:00 Cut-Off Sync Policy)
+* **Penghapusan Auto-Sync Agresif pada Fetch**: Menghapuskan pemicu sinkronisasi otomatis latar belakang yang sebelumnya berjalan impulsif setiap kali fungsi `fetchEmployees()` atau `fetchLogs()` dipanggil. Hal ini mencegah terjadinya lonjakan lalu lintas data tak terencana serta menjamin integritas *Offline-First Strict Mode*.
+* **Penahanan Data Persisten Lokal**: Data absensi dan registrasi karyawan baru yang dibuat dalam kondisi offline disimpan dengan aman di SQLite lokal (`local_attendance_queue` & `local_employees`) / IndexedDB tanpa dikirim ke cloud hingga:
+  - Waktu Cut-Off Harian pukul **22:00 WIB** tercapai.
+  - Admin menekan tombol **Sinkronisasi Manual** pada Topbar aplikasi.
+
+### 25.3 Live Dynamic Unsynced Badge Counter di Topbar
+* **Monitoring Luring Real-Time**: Menambahkan badge indikator counter warna merah di Topbar yang menghitung total gabungan data luring yang belum terkirim ke cloud (log absensi + registrasi karyawan offline).
+* **Pemeriksaan Periodik (2.5 Detik)**: Fungsi `refreshUnsyncedCount()` melakukan kueri ringan ke SQLite (`sqliteGetPendingEmployees` & `getUnsyncedLogs`) setiap **2.5 detik**, memperbarui badge di UI secara instan saat ada data luring baru masuk.
+
+### 25.4 Auto-Recovery Engine & Penanganan ID Sementara (`off_emp_...` vs Cloud BigInt ID)
+* **Pencegahan Error Fetch BigInt**: Mengatasi masalah kritis di mana karyawan yang didaftarkan secara offline memiliki ID sementara berformat string (`off_emp_178...`). Setelah sinkronisasi karyawan berhasil ke Supabase, sistem secara atomis memperbarui `employees_cache` dan `local_employees` dengan ID BigInt resmi dari cloud.
+* **Auto-Recovery Log Tertahan**: Menambahkan mekanisme pemulihan otomatis (*Auto-Recovery*) di `syncEngine.js` untuk memetakan ulang `employee_id` pada log absensi offline yang masih merujuk ke ID sementara sebelum dikirimkan ke cloud.
+
+### 25.5 Fine-Tuning Threshold Biometrik (0.85) & Network Permission Android
+* **Standarisasi Threshold Cosine Similarity**: Mengunci threshold kecocokan biometrik pada nilai $\ge 0.85$ (85%) untuk memastikan tingkat akurasi verifikasi 1-to-1 yang seimbang antara *False Acceptance Rate* (FAR) dan *False Rejection Rate* (FRR).
+* **Konfigurasi Network State Android**: Memperbarui `AndroidManifest.xml` dengan hak akses `ACCESS_NETWORK_STATE` dan `INTERNET` guna memastikan sensor status jaringan Capacitor Network mendeteksi transisi offline-ke-online secara presisi pada berbagai merk smartphone Android.
