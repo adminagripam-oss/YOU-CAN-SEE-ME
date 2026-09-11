@@ -437,6 +437,36 @@ export const db = {
  * Save / Cache Master Descriptor.
  * Automatically delegates to SQLite on native APK, or Dexie on Web.
  */
+export function toVectorArray(v) {
+  if (!v) return null;
+  let parsed = v;
+  while (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (e) {
+      break;
+    }
+  }
+  if (!parsed) return null;
+
+  let arr = null;
+  if (Array.isArray(parsed)) {
+    arr = parsed;
+  } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
+    arr = Array.from(parsed);
+  } else if (typeof parsed === 'object' && parsed !== null) {
+    const values = Object.values(parsed);
+    if (values.length > 0) {
+      arr = Array.from(values);
+    }
+  }
+
+  if (arr && arr.length > 0) {
+    return arr.map(n => Number(n) || 0);
+  }
+  return null;
+}
+
 export async function cacheUserMasterVector(user) {
   if (Capacitor.isNativePlatform()) {
     await sqliteCacheUserMasterVector(user);
@@ -447,28 +477,11 @@ export async function cacheUserMasterVector(user) {
     const empId = user.employee_id || user.id;
     if (!empId) return;
 
-    let vector = user.descriptor_json || user.descriptor || user.face_vector || null;
-    if (vector) {
-      let parsed = vector;
-      while (typeof parsed === 'string') {
-        try {
-          parsed = JSON.parse(parsed);
-        } catch (e) {
-          break;
-        }
-      }
-      if (Array.isArray(parsed)) {
-        if (parsed.length !== 1024) {
-          console.warn(`[db.js] cacheUserMasterVector: Mencegah caching vector dengan panjang ${parsed.length} (harus 1024) untuk employee ${empId}`);
-          vector = null;
-        }
-      } else {
-        vector = null;
-      }
-    }
+    let rawVec = user.descriptor_json || user.descriptor || user.face_vector || null;
+    let vector = toVectorArray(rawVec);
 
     const allMasters = await dexieDb.user_master.toArray();
-    const existing = allMasters.find((m) => String(m.employee_id) === String(empId));
+    const existing = allMasters.find((m) => String(m.employee_id) === String(empId) || (m.nik && String(m.nik) === String(user.nik)));
 
     const payload = {
       nik: user.nik,
@@ -490,7 +503,7 @@ export async function cacheUserMasterVector(user) {
     } else {
       await dexieDb.user_master.add({ employee_id: empId, ...payload });
     }
-    console.log(`[IndexedDB] Cached master for ${user.name} | GFV: ${payload.geometric_descriptor_json ? 'YES' : 'NO'}`);
+    console.log(`[IndexedDB] Cached master for ${user.name} | Vector: ${vector ? vector.length + '-dim' : 'NULL'} | GFV: ${payload.geometric_descriptor_json ? 'YES' : 'NO'}`);
   } catch (err) {
     console.error('[IndexedDB Cache Master Error]:', err);
   }
@@ -530,19 +543,48 @@ export async function getCachedUserMasterVector(employeeId) {
 
   try {
     if (!employeeId) return null;
+    const empIdStr = String(employeeId);
     const allMasters = await dexieDb.user_master.toArray();
-    const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
-    if (existing) return existing;
+    let existing = allMasters.find((m) => String(m.employee_id) === empIdStr || (m.nik && String(m.nik) === empIdStr));
+    if (existing) {
+      const vec = toVectorArray(existing.descriptor_json || existing.face_vector);
+      if (vec) {
+        return {
+          ...existing,
+          descriptor_json: vec,
+          face_vector: vec
+        };
+      }
+    }
 
-    // Fallback: check offline queue for offline registered employees
-    const offlineQueue = await dexieDb.attendance_sync_queue.toArray();
-    const offlineRegistered = offlineQueue.find((q) => String(q.id) === String(employeeId) && q.descriptor_json);
+    // Fallback 1: check offline employee queue for offline registered employees
+    const offlineQueue = await dexieDb.employee_sync_queue.toArray();
+    const offlineRegistered = offlineQueue.find((q) => (String(q.id) === empIdStr || (q.nik && String(q.nik) === empIdStr)) && (q.descriptor_json || q.descriptor));
     if (offlineRegistered) {
-      return {
-        ...offlineRegistered,
-        employee_id: offlineRegistered.id,
-        descriptor_json: typeof offlineRegistered.descriptor_json === 'string' ? JSON.parse(offlineRegistered.descriptor_json) : offlineRegistered.descriptor_json,
-      };
+      const vec = toVectorArray(offlineRegistered.descriptor_json || offlineRegistered.descriptor);
+      if (vec) {
+        return {
+          ...offlineRegistered,
+          employee_id: offlineRegistered.id,
+          descriptor_json: vec,
+          face_vector: vec
+        };
+      }
+    }
+
+    // Fallback 2: check employees_cache
+    const empCache = await dexieDb.employees_cache.toArray();
+    const cachedEmp = empCache.find((e) => (String(e.id) === empIdStr || (e.nik && String(e.nik) === empIdStr)) && (e.descriptor_json || e.facial_descriptor || e.face_vector));
+    if (cachedEmp) {
+      const vec = toVectorArray(cachedEmp.descriptor_json || cachedEmp.facial_descriptor || cachedEmp.face_vector);
+      if (vec) {
+        return {
+          ...cachedEmp,
+          employee_id: cachedEmp.id,
+          descriptor_json: vec,
+          face_vector: vec
+        };
+      }
     }
 
     return null;
@@ -668,12 +710,14 @@ export async function removeSyncedLogs(ids) {
  * Returns value in [-1, 1]; higher = more similar.
  */
 export function cosineSimilarity(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0;
+  const vecA = toVectorArray(a);
+  const vecB = toVectorArray(b);
+  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
   let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+  for (let i = 0; i < vecA.length; i++) {
+    dot += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
   }
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
   return denom === 0 ? 0 : dot / denom;
@@ -682,7 +726,7 @@ export function cosineSimilarity(a, b) {
 /**
  * Get ALL cached master vectors from local storage.
  * Native APK → SQLite (local_master_descriptors JOIN local_employees)
- * Web/Dev    → IndexedDB (Dexie user_master table)
+ * Web/Dev    → IndexedDB (Dexie user_master table + employee_sync_queue)
  * Used for one-face-per-employee duplicate check (fully offline-capable).
  */
 export async function getAllMasterVectors() {
@@ -691,12 +735,36 @@ export async function getAllMasterVectors() {
   }
   try {
     const allMasters = await dexieDb.user_master.toArray();
-    return allMasters.map(m => ({
-      employee_id: m.employee_id,
-      nik: m.nik,
-      name: m.name,
-      descriptor_json: m.descriptor_json || m.face_vector || null,
-    }));
+    const map = new Map();
+    for (const m of allMasters) {
+      const vec = toVectorArray(m.descriptor_json || m.face_vector);
+      if (vec) {
+        map.set(String(m.employee_id), {
+          employee_id: m.employee_id,
+          nik: m.nik,
+          name: m.name,
+          descriptor_json: vec,
+        });
+      }
+    }
+
+    // Merge offline pending registered employees
+    const offlineQueue = await dexieDb.employee_sync_queue.toArray();
+    for (const q of offlineQueue) {
+      if (!map.has(String(q.id))) {
+        const vec = toVectorArray(q.descriptor_json || q.descriptor);
+        if (vec) {
+          map.set(String(q.id), {
+            employee_id: q.id,
+            nik: q.nik,
+            name: q.name,
+            descriptor_json: vec,
+          });
+        }
+      }
+    }
+
+    return Array.from(map.values());
   } catch (err) {
     console.error('[IndexedDB getAllMasterVectors Error]:', err);
     return [];
@@ -823,3 +891,39 @@ export async function getUnsyncedDataSummary() {
     unsyncedRequestsCount
   };
 }
+
+/**
+ * Update sync status for text and photo for a specific log ID.
+ * Handles both Native SQLite and Web Dexie.js
+ */
+export const updateSyncStatus = async (id, textStatus = null, photoStatus = null) => {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { sqliteUpdateSyncStatus } = await import('./services/sqliteService');
+      await sqliteUpdateSyncStatus(id, textStatus, photoStatus);
+    } catch (e) {
+      console.warn('[DB Error] Native sqliteUpdateSyncStatus failed:', e);
+    }
+  } else {
+    try {
+      const idStr = String(id);
+      const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
+      const cleanIdInt = parseInt(cleanId, 10);
+      
+      const updates = {};
+      if (textStatus) updates.status_sync_teks = textStatus;
+      if (photoStatus) updates.status_sync_foto = photoStatus;
+      if (textStatus === 'done' && photoStatus === 'done') updates.is_synced = true;
+
+      if (Object.keys(updates).length > 0) {
+        if (!isNaN(cleanIdInt)) {
+          await dexieDb.attendance_sync_queue.update(cleanIdInt, updates);
+        }
+        await dexieDb.attendance_logs.update(idStr, updates);
+        await dexieDb.attendance_logs.update(`offline_${cleanIdInt}`, updates);
+      }
+    } catch (e) {
+      console.warn('[DB Error] Web IndexedDB updateSyncStatus failed:', e);
+    }
+  }
+};

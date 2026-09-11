@@ -99,6 +99,10 @@ export async function initSQLite(): Promise<void> {
         status TEXT,
         attendance_type TEXT,
         euclidean_distance REAL,
+        path_foto_lokal TEXT,
+        path_foto_storage TEXT,
+        status_sync_teks TEXT DEFAULT 'pending',
+        status_sync_foto TEXT DEFAULT 'pending',
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
         kebun TEXT
@@ -128,6 +132,10 @@ export async function initSQLite(): Promise<void> {
         status TEXT,
         attendance_type TEXT,
         euclidean_distance REAL,
+        path_foto_lokal TEXT,
+        path_foto_storage TEXT,
+        status_sync_teks TEXT DEFAULT 'pending',
+        status_sync_foto TEXT DEFAULT 'pending',
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
         kebun TEXT
@@ -416,6 +424,31 @@ export async function initSQLite(): Promise<void> {
     } catch (e) {
       // Column might already exist, ignore error
     }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN path_foto_lokal TEXT;`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN path_foto_storage TEXT;`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN status_sync_teks TEXT DEFAULT 'pending';`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN status_sync_foto TEXT DEFAULT 'pending';`);
+    } catch (e) {}
+
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN path_foto_lokal TEXT;`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN path_foto_storage TEXT;`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN status_sync_teks TEXT DEFAULT 'pending';`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN status_sync_foto TEXT DEFAULT 'pending';`);
+    } catch (e) {}
 
     console.log('[SQLite Service] SQLite tables verified and ready.');
     _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
@@ -459,8 +492,19 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
           break;
         }
       }
-      if (Array.isArray(parsed) && parsed.length === 1024) {
-        vectorStr = JSON.stringify(parsed);
+      let arr: number[] | null = null;
+      if (Array.isArray(parsed)) {
+        arr = parsed;
+      } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
+        arr = Array.from(parsed as any);
+      } else if (typeof parsed === 'object' && parsed !== null) {
+        const values = Object.values(parsed);
+        if (values.length > 0) {
+          arr = Array.from(values as any);
+        }
+      }
+      if (arr && arr.length > 0) {
+        vectorStr = JSON.stringify(arr.map(n => Number(n) || 0));
       }
     }
 
@@ -536,15 +580,15 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       `SELECT md.*, e.nik, e.name, e.department, e.afdeling, e.nama_kebun, e.status_tk, e.jabatan, e.status_perkawinan
        FROM local_master_descriptors md
        LEFT JOIN local_employees e ON CAST(md.employee_id AS TEXT) = CAST(e.id AS TEXT)
-       WHERE CAST(md.employee_id AS TEXT) = ? OR md.employee_id = ?`,
-      [empIdStr, employeeId]
+       WHERE CAST(md.employee_id AS TEXT) = ? OR md.employee_id = ? OR CAST(e.nik AS TEXT) = ?`,
+      [empIdStr, employeeId, empIdStr]
     );
 
-    if (!res.values || res.values.length === 0) {
+    if (!res.values || res.values.length === 0 || !res.values[0].descriptor_json) {
       // Jika tidak ada di master_descriptors, coba cek apakah ini karyawan yang didaftarkan offline (belum di-sync)
       const qRes = await dbConnection!.query(
-        `SELECT * FROM local_employee_sync_queue WHERE CAST(id AS TEXT) = ? OR id = ? LIMIT 1`,
-        [empIdStr, employeeId]
+        `SELECT * FROM local_employee_sync_queue WHERE CAST(id AS TEXT) = ? OR id = ? OR CAST(nik AS TEXT) = ? LIMIT 1`,
+        [empIdStr, employeeId, empIdStr]
       );
       if (qRes.values && qRes.values.length > 0) {
         const row = qRes.values[0];
@@ -580,9 +624,9 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       status_tk: row.status_tk,
       jabatan: row.jabatan,
       status_perkawinan: row.status_perkawinan,
-      descriptor_json: row.descriptor_json ? JSON.parse(row.descriptor_json) : null,
-      face_vector: row.descriptor_json ? JSON.parse(row.descriptor_json) : null,
-      geometric_descriptor_json: row.geometric_descriptor_json ? JSON.parse(row.geometric_descriptor_json) : null,
+      descriptor_json: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
+      face_vector: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
+      geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
       updated_at: row.updated_at
     };
   } catch (err: any) {
@@ -602,11 +646,14 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
   try {
     const createdAt = new Date().toISOString();
     const timestamp = logData.timestamp || createdAt;
+    const statusSyncTeks = logData.status_sync_teks || 'pending';
+    const statusSyncFoto = logData.status_sync_foto || 'pending';
+    const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : 0;
 
     await dbConnection!.run(
       `INSERT INTO local_attendance_queue (
-        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(logData.employee_id),
         logData.nik,
@@ -621,6 +668,11 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
         logData.status,
         logData.attendance_type || 'CHECK_IN',
         logData.euclidean_distance,
+        logData.path_foto_lokal || null,
+        logData.path_foto_storage || null,
+        statusSyncTeks,
+        statusSyncFoto,
+        isSynced,
         createdAt
       ]
     );
@@ -632,7 +684,11 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
       ...logData,
       id,
       timestamp,
-      is_synced: false,
+      path_foto_lokal: logData.path_foto_lokal || null,
+      path_foto_storage: logData.path_foto_storage || null,
+      status_sync_teks: statusSyncTeks,
+      status_sync_foto: statusSyncFoto,
+      is_synced: isSynced === 1,
       created_at: createdAt
     };
     console.log(`[SQLite Service Queue] Queued offline attendance with ID: ${id}`);
@@ -955,10 +1011,14 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
     if (!ready) return;
   }
   try {
+    const statusSyncTeks = log.status_sync_teks || (log.is_synced ? 'done' : 'pending');
+    const statusSyncFoto = log.status_sync_foto || (log.is_synced ? 'done' : 'pending');
+    const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : (log.is_synced ? 1 : 0);
+
     await dbConnection!.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
-      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
         String(log.employee_id),
@@ -974,7 +1034,11 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
         log.status || null,
         log.attendance_type || null,
         log.euclidean_distance !== undefined && log.euclidean_distance !== null ? Number(log.euclidean_distance) : null,
-        log.is_synced ? 1 : 0,
+        log.path_foto_lokal || null,
+        log.path_foto_storage || null,
+        statusSyncTeks,
+        statusSyncFoto,
+        isSynced,
         log.created_at || null
       ]
     );
@@ -992,35 +1056,95 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
     if (!ready) return;
   }
   try {
-    const statements = logs.map(log => ({
-      statement: `INSERT OR REPLACE INTO local_attendance_logs 
-        (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      values: [
-        String(log.id),
-        String(log.employee_id),
-        log.nik || null,
-        log.name || null,
-        log.department || null,
-        log.afdeling || null,
-        log.kebun || log.nama_kebun || null,
-        log.timestamp || null,
-        log.location || null,
-        log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
-        log.lng !== undefined && log.lng !== null ? Number(log.lng) : null,
-        log.status || null,
-        log.attendance_type || null,
-        log.euclidean_distance !== undefined && log.euclidean_distance !== null ? Number(log.euclidean_distance) : null,
-        log.is_synced ? 1 : 0,
-        log.created_at || null
-      ]
-    }));
+    const statements = logs.map(log => {
+      const statusSyncTeks = log.status_sync_teks || (log.is_synced ? 'done' : 'pending');
+      const statusSyncFoto = log.status_sync_foto || (log.is_synced ? 'done' : 'pending');
+      const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : (log.is_synced ? 1 : 0);
+
+      return {
+        statement: `INSERT OR REPLACE INTO local_attendance_logs 
+          (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          String(log.id),
+          String(log.employee_id),
+          log.nik || null,
+          log.name || null,
+          log.department || null,
+          log.afdeling || null,
+          log.kebun || log.nama_kebun || null,
+          log.timestamp || null,
+          log.location || null,
+          log.lat !== undefined && log.lat !== null ? Number(log.lat) : null,
+          log.lng !== undefined && log.lng !== null ? Number(log.lng) : null,
+          log.status || null,
+          log.attendance_type || null,
+          log.euclidean_distance !== undefined && log.euclidean_distance !== null ? Number(log.euclidean_distance) : null,
+          log.path_foto_lokal || null,
+          log.path_foto_storage || null,
+          statusSyncTeks,
+          statusSyncFoto,
+          isSynced,
+          log.created_at || null
+        ]
+      };
+    });
     if (statements.length > 0) {
       await dbConnection!.executeSet(statements);
     }
     console.log(`[SQLite Service] Bulk saved ${logs.length} attendance logs to local SQLite`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteBulkSaveAttendanceLogs Error]:', err?.message || err, err?.stack || '');
+  }
+}
+
+/**
+ * Update sync status for text and photo for a specific log ID.
+ */
+export async function sqliteUpdateSyncStatus(id: number | string, textStatus?: string | null, photoStatus?: string | null): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    const idStr = String(id);
+    const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
+    const cleanIdInt = parseInt(cleanId, 10);
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (textStatus) {
+      updates.push('status_sync_teks = ?');
+      params.push(textStatus);
+    }
+    if (photoStatus) {
+      updates.push('status_sync_foto = ?');
+      params.push(photoStatus);
+    }
+
+    if (textStatus === 'done' && photoStatus === 'done') {
+      updates.push('is_synced = 1');
+    }
+
+    if (updates.length === 0) return;
+
+    const setClause = updates.join(', ');
+
+    if (!isNaN(cleanIdInt)) {
+      await dbConnection!.run(
+        `UPDATE local_attendance_queue SET ${setClause} WHERE id = ?`,
+        [...params, cleanIdInt]
+      );
+    }
+
+    await dbConnection!.run(
+      `UPDATE local_attendance_logs SET ${setClause} WHERE id = ? OR id = ?`,
+      [...params, idStr, `offline_${cleanIdInt}`]
+    );
+    console.log(`[SQLite Service] Updated sync status for ID: ${id} | Teks: ${textStatus || '-'} | Foto: ${photoStatus || '-'}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteUpdateSyncStatus Error]:', err?.message || err);
   }
 }
 
