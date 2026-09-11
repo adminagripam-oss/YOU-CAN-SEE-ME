@@ -725,6 +725,7 @@ export default function TabFaceVerification({
 
     try {
       let vec = null;
+      let cached = null;
 
       // Helper to validate vector
       const isValidVector = (v) => {
@@ -750,7 +751,7 @@ export default function TabFaceVerification({
 
       // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
       if (!vec) {
-        const cached = await getCachedUserMasterVector(empIdKey);
+        cached = await getCachedUserMasterVector(empIdKey);
         if (cached) {
           const tempVec = cached.descriptor_json || cached.face_vector;
           const validArr = toVectorArray(tempVec);
@@ -783,7 +784,7 @@ export default function TabFaceVerification({
                 vec = validArr;
                 console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
               } else {
-                console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid (panjang bukan 1024)');
+                console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid');
               }
             } else {
               console.warn('[LOAD MASTER T2-SUPABASE] Tidak ada data untuk employee_id:', empIdInt);
@@ -803,7 +804,7 @@ export default function TabFaceVerification({
           vec = validArr;
           console.log('[LOAD MASTER T4-PROPS] Vektor ditemukan valid di employees props');
         } else {
-          console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid 1024-dim di props. Employee ID:', empIdKey);
+          console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid di props. Employee ID:', empIdKey);
         }
       }
 
@@ -816,13 +817,19 @@ export default function TabFaceVerification({
         if (parsedArray) {
           masterVectorRef.current = parsedArray;
 
-          // Cache locally if it was fetched from Tier 2 or 4 (not Tier 1)
+          // Cache locally if it was fetched from Tier 0, 2 or 4 (not Tier 1)
           if (!cached) {
             const empObj = employees.find((it) => String(it.id) === String(empIdKey)) || {};
             await cacheUserMasterVector({
               employee_id: empIdKey,
-              nik: empObj.nik,
-              name: empObj.name,
+              nik: empObj.nik || '',
+              name: empObj.name || '',
+              department: empObj.department || '',
+              afdeling: empObj.afdeling || null,
+              nama_kebun: empObj.nama_kebun || null,
+              status_tk: empObj.status_tk || null,
+              jabatan: empObj.jabatan || null,
+              status_perkawinan: empObj.status_perkawinan || null,
               descriptor_json: parsedArray
             }).catch(err => console.warn('[LOAD MASTER CACHE] Failed to cache vector locally:', err));
           }
@@ -832,23 +839,6 @@ export default function TabFaceVerification({
         }
       } else {
         masterVectorRef.current = null;
-      }
-
-      // Auto-cache into IndexedDB/SQLite if retrieved from Cloud/API
-      if (vec && !cached) {
-        const empObj = employees.find((it) => String(it.id) === String(empId));
-        await cacheUserMasterVector({
-          employee_id: empId,
-          nik: empObj?.nik || '',
-          name: empObj?.name || '',
-          department: empObj?.department || '',
-          afdeling: empObj?.afdeling || null,
-          nama_kebun: empObj?.nama_kebun || null,
-          status_tk: empObj?.status_tk || null,
-          jabatan: empObj?.jabatan || null,
-          status_perkawinan: empObj?.status_perkawinan || null,
-          descriptor_json: masterVectorRef.current,
-        });
       }
 
       console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | Vector: ${masterVectorRef.current ? masterVectorRef.current.length + '-dim' : 'NO'}`);
