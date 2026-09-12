@@ -1353,7 +1353,7 @@ export default function TabFaceVerification({
           } catch (highErr) {
             console.warn('[FRONTEND GPS ERROR] Gagal mendapatkan lokasi GPS:', highErr?.message || highErr);
             showToast('Lokasi Standar', 'Menggunakan lokasi default karena GPS HP tidak merespon.', 'warning');
-            
+
             // Bypass dengan koordinat default jika GPS benar-benar gagal
             pos = {
               coords: {
@@ -1533,8 +1533,8 @@ export default function TabFaceVerification({
 
 
   const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.afdeling).map(e => e.afdeling))).sort();
-  const filteredEmployees = selectedAfdelingFilter 
-    ? employees.filter(e => e.afdeling === selectedAfdelingFilter) 
+  const filteredEmployees = selectedAfdelingFilter
+    ? employees.filter(e => e.afdeling === selectedAfdelingFilter)
     : employees;
 
   return (

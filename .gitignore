@@ -4,3 +4,5 @@ dist/
 .vscode/
 *.apk
 !AgriFaceV2.apk
+.env
+.env.*

@@ -85,14 +85,16 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
                  }
                  console.log(`[Auto-Sync] Auto-recovery berhasil! ID log diupdate ke: ${existingEmp.id}`);
               } else {
-                 console.warn(`[Auto-Sync] Karyawan dgn NIK ${log.nik} tidak ada di server. Log dihapus agar tidak nyangkut.`);
-                 await removeSyncedLogs([log.id]);
-                 log._discard = true;
+                 console.warn(`[Auto-Sync] Karyawan dgn NIK ${log.nik} tidak ada di server. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
+                 log.needs_resolution = true;
+                 log.sync_notes = 'Membutuhkan Resolusi NIK';
+                 await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
               }
             } else {
-               console.warn(`[Auto-Sync] Log offline tanpa NIK tidak bisa di-recovery. Menghapus log.`);
-               await removeSyncedLogs([log.id]);
-               log._discard = true;
+               console.warn(`[Auto-Sync] Log offline tanpa NIK tidak bisa di-recovery. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
+               log.needs_resolution = true;
+               log.sync_notes = 'Membutuhkan Resolusi NIK';
+               await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
             }
           }
         }
@@ -101,9 +103,12 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       console.warn('[Auto-Sync] Auto-recovery gagal:', recoveryErr);
     }
 
-    // FILTER: Tahan log yang masih menggunakan ID temporary (masih ada di antrean karyawan)
+    // FILTER: Tahan log yang masih menggunakan ID temporary atau membutuhkan resolusi NIK manual
     pendingLogs = pendingLogs.filter(log => {
-      if (log._discard) return false;
+      if (log.needs_resolution || log.sync_notes === 'Membutuhkan Resolusi NIK') {
+        console.warn(`[Auto-Sync] Menahan log absensi #${log.id} yang membutuhkan resolusi NIK manual.`);
+        return false;
+      }
       const empIdStr = String(log.employee_id);
       if (isNaN(Number(empIdStr))) {
         console.warn(`[Auto-Sync] Menahan log absensi untuk employee_id sementara yang belum disync: ${empIdStr}`);
@@ -162,53 +167,63 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       .select();
 
     if (error) {
-      console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to individual inserts:', error.message || error);
-      // Fallback to one-by-one insert so valid logs can still sync
-      // Fallback to one-by-one insert concurrently so valid logs can still sync faster
-      const fallbackPromises = logsToInsert.map(async (singleLog, i) => {
-        const { data: singleData, error: singleError } = await supabase
-          .from('attendance_logs')
-          .insert([singleLog])
-          .select();
-        
-        if (singleError) {
-          console.error(`[Auto-Sync] Failed to sync log for employee_id ${singleLog.employee_id}:`, singleError.message || singleError);
-          // If the employee doesn't exist on the server (Foreign Key Violation 23503), 
-          // we must discard this log from the queue otherwise it will block sync forever.
-          if (singleError.code === '23503') {
-            console.warn(`[Auto-Sync] Discarding invalid log for non-existent employee_id: ${singleLog.employee_id}`);
-            return { id: textPendingLogs[i].id, discard: true };
-          }
-          if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
-            console.warn(`[Auto-Sync] Log already exists on server, discarding local queue item to prevent getting stuck.`);
-            return { id: textPendingLogs[i].id, discard: true };
-          }
-          return null;
-        } else if (singleData && singleData.length > 0) {
-          return { id: textPendingLogs[i].id, data: singleData[0] };
-        }
-        return null;
-      });
+      console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to sequential for...of insert:', error.message || error);
+      
+      // Requirement 2: Sekuensial lambat (for...of) dengan try...catch per iterasi individu
+      for (let i = 0; i < textPendingLogs.length; i++) {
+        const singleLogPayload = logsToInsert[i];
+        const originalLog = textPendingLogs[i];
 
-      const fallbackResults = await Promise.all(fallbackPromises);
-      fallbackResults.forEach(res => {
-        if (res) {
-          syncedIds.push(res.id);
-          if (res.data) successfulData.push(res.data);
+        try {
+          const { data: singleData, error: singleError } = await supabase
+            .from('attendance_logs')
+            .insert([singleLogPayload])
+            .select();
+          
+          if (singleError) {
+            console.error(`[Auto-Sync Fallback Error] Gagal insert log ID #${originalLog.id} (employee_id: ${singleLogPayload.employee_id}):`, singleError.message || singleError);
+            
+            // Requirement 1: Jika FK violation (23503), JANGAN HAPUS LOG. Tandai butuh resolusi NIK
+            if (singleError.code === '23503') {
+              console.warn(`[Auto-Sync Fallback] FK violation 23503 untuk log #${originalLog.id}. Menandai butuh resolusi NIK manual.`);
+              originalLog.needs_resolution = true;
+              originalLog.sync_notes = 'Membutuhkan Resolusi NIK';
+              await updateSyncStatus(originalLog.id, 'pending', null, 'Membutuhkan Resolusi NIK');
+            } else if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
+              // Jika log sudah ada di server (duplikat), status diubah ke 'done' agar tidak menggantung
+              console.warn(`[Auto-Sync Fallback] Log #${originalLog.id} sudah ada di server (duplicate key). Memperbarui status lokal ke done.`);
+              await updateSyncStatus(originalLog.id, 'done', null);
+              syncedIds.push(originalLog.id);
+            }
+            // Error koneksi/lainnya: Biarkan status tetap pending, lanjut ke baris berikutnya tanpa hapus data
+          } else if (singleData && Array.isArray(singleData) && singleData.length > 0) {
+            // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
+            console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
+            await updateSyncStatus(originalLog.id, 'done', null);
+            syncedIds.push(originalLog.id);
+            successfulData.push(singleData[0]);
+          }
+        } catch (singleCatchErr) {
+          console.error(`[Auto-Sync Fallback Exception] Exception saat insert log #${originalLog.id}:`, singleCatchErr);
+          // Tangkap exception per iterasi agar baris log lain tetap diproses sekuensial
         }
-      });
+      }
     } else {
-      syncedIds = textPendingLogs.map(log => log.id);
-      successfulData = data || [];
+      // Requirement 3: Validasi Keberhasilan Absolut untuk Bulk Insert
+      if (data && Array.isArray(data) && data.length > 0) {
+        syncedIds = textPendingLogs.map(log => log.id);
+        successfulData = data;
+        for (const id of syncedIds) {
+          await updateSyncStatus(id, 'done', null);
+        }
+      }
     }
 
     syncedTextIds = syncedIds;
 
     if (syncedTextIds.length > 0) {
       console.log(`[Auto-Sync Step A] Successfully synced ${syncedTextIds.length} text records!`);
-      // Update status text to 'done' in local DB
       for (const id of syncedTextIds) {
-        await updateSyncStatus(id, 'done', null);
         const logToPhoto = textPendingLogs.find(l => l.id === id);
         if (logToPhoto && logToPhoto.path_foto_lokal) {
           photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
@@ -269,27 +284,36 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           
           const publicUrl = publicUrlData.publicUrl;
 
-          // Update text log in server with photo url (we must find the server ID or match by timestamp/employee_id)
-          // Since we might not have the server ID, we update by timestamp and employee_id
-          await supabase
+          // Requirement 3: Update text log in server with photo url and verify response
+          const { data: photoUpdateData, error: photoUpdateErr } = await supabase
             .from('attendance_logs')
             .update({ path_foto: publicUrl })
             .eq('employee_id', log.employee_id)
-            .eq('timestamp', log.timestamp);
+            .eq('timestamp', log.timestamp)
+            .select();
 
-          // Step C: Garbage Collection (Delete local file and set status_sync_foto = 'done')
-          await updateSyncStatus(log.id, 'done', 'done');
-          
-          try {
-            await Filesystem.deleteFile({
-              path: log.path_foto_lokal
-            });
-            console.log(`[Auto-Sync Step C] Garbage collected local photo for log ${log.id}`);
-          } catch (delErr) {
-            console.warn(`[Auto-Sync Step C] Failed to delete local photo:`, delErr);
+          if (photoUpdateErr) {
+            console.warn(`[Auto-Sync Step B] Failed to update path_foto in cloud for log ${log.id}:`, photoUpdateErr.message || photoUpdateErr);
+            continue;
           }
 
-          syncedPhotoCount++;
+          if (photoUpdateData && Array.isArray(photoUpdateData) && photoUpdateData.length > 0) {
+            // Step C: Garbage Collection (Delete local file and set status_sync_foto = 'done' ONLY upon verified response)
+            await updateSyncStatus(log.id, null, 'done');
+            
+            try {
+              await Filesystem.deleteFile({
+                path: log.path_foto_lokal
+              });
+              console.log(`[Auto-Sync Step C] Garbage collected local photo for log ${log.id}`);
+            } catch (delErr) {
+              console.warn(`[Auto-Sync Step C] Failed to delete local photo:`, delErr);
+            }
+
+            syncedPhotoCount++;
+          } else {
+            console.warn(`[Auto-Sync Step B] Server returned empty response for photo update of log ${log.id}. Retaining local photo.`);
+          }
 
         } catch (photoErr) {
           console.warn(`[Auto-Sync Step B Error] Processing photo for log ${log.id}:`, photoErr);

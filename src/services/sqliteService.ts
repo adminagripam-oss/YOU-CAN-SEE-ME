@@ -168,6 +168,21 @@ export async function initSQLite(): Promise<void> {
         is_synced INTEGER DEFAULT 0,
         created_at TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS local_attendance_requests (
+        id TEXT PRIMARY KEY,
+        request_type TEXT,
+        log_id TEXT,
+        nik TEXT,
+        name TEXT,
+        nama_kebun TEXT,
+        requested_by TEXT,
+        requested_at TEXT,
+        status TEXT,
+        old_value TEXT,
+        new_value TEXT,
+        is_synced INTEGER DEFAULT 0
+      );
     `;
 
     await dbConnection.execute(ddl);
@@ -450,6 +465,13 @@ export async function initSQLite(): Promise<void> {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN status_sync_foto TEXT DEFAULT 'pending';`);
     } catch (e) {}
 
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN sync_notes TEXT;`);
+    } catch (e) {}
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN sync_notes TEXT;`);
+    } catch (e) {}
+
     console.log('[SQLite Service] SQLite tables verified and ready.');
     _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
   } catch (err: any) {
@@ -457,6 +479,7 @@ export async function initSQLite(): Promise<void> {
     _initReject?.(err); // Signal: DB failed — waitForConnection() will return false
   }
 }
+
 
 /**
  * Get active DB connection
@@ -1101,7 +1124,12 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
 /**
  * Update sync status for text and photo for a specific log ID.
  */
-export async function sqliteUpdateSyncStatus(id: number | string, textStatus?: string | null, photoStatus?: string | null): Promise<void> {
+export async function sqliteUpdateSyncStatus(
+  id: number | string,
+  textStatus?: string | null,
+  photoStatus?: string | null,
+  syncNotes?: string | null
+): Promise<void> {
   if (!dbConnection) {
     const ready = await waitForConnection();
     if (!ready) return;
@@ -1121,6 +1149,10 @@ export async function sqliteUpdateSyncStatus(id: number | string, textStatus?: s
     if (photoStatus) {
       updates.push('status_sync_foto = ?');
       params.push(photoStatus);
+    }
+    if (syncNotes !== undefined && syncNotes !== null) {
+      updates.push('sync_notes = ?');
+      params.push(syncNotes);
     }
 
     if (textStatus === 'done' && photoStatus === 'done') {
@@ -1142,7 +1174,7 @@ export async function sqliteUpdateSyncStatus(id: number | string, textStatus?: s
       `UPDATE local_attendance_logs SET ${setClause} WHERE id = ? OR id = ?`,
       [...params, idStr, `offline_${cleanIdInt}`]
     );
-    console.log(`[SQLite Service] Updated sync status for ID: ${id} | Teks: ${textStatus || '-'} | Foto: ${photoStatus || '-'}`);
+    console.log(`[SQLite Service] Updated sync status for ID: ${id} | Teks: ${textStatus || '-'} | Foto: ${photoStatus || '-'} | Notes: ${syncNotes || '-'}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteUpdateSyncStatus Error]:', err?.message || err);
   }
@@ -1449,4 +1481,89 @@ export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: stri
   }
 }
 
+/**
+ * Attendance Requests (Offline HQ Admin Operations)
+ */
+export async function sqliteSaveAttendanceRequest(req: any): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    const oldValJson = req.old_value ? JSON.stringify(req.old_value) : null;
+    const newValJson = req.new_value ? JSON.stringify(req.new_value) : null;
+    const isSyncedInt = req.is_synced ? 1 : 0;
+
+    const sql = `
+      INSERT OR REPLACE INTO local_attendance_requests 
+      (id, request_type, log_id, nik, name, nama_kebun, requested_by, requested_at, status, old_value, new_value, is_synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const params = [
+      String(req.id),
+      req.request_type || '',
+      String(req.log_id || ''),
+      req.nik || null,
+      req.name || null,
+      req.nama_kebun || null,
+      req.requested_by || '',
+      req.requested_at || new Date().toISOString(),
+      req.status || 'PENDING',
+      oldValJson,
+      newValJson,
+      isSyncedInt
+    ];
+
+    await dbConnection!.run(sql, params);
+    console.log(`[SQLite Service] Saved attendance request: ${req.id} (Type: ${req.request_type})`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSaveAttendanceRequest Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteGetAttendanceRequests(): Promise<any[]> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return [];
+  }
+  try {
+    const res = await dbConnection!.query(`SELECT * FROM local_attendance_requests`);
+    const rows = res.values || [];
+    return rows.map((r: any) => ({
+      ...r,
+      old_value: r.old_value ? JSON.parse(r.old_value) : null,
+      new_value: r.new_value ? JSON.parse(r.new_value) : null,
+      is_synced: r.is_synced === 1 || r.is_synced === true
+    }));
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetAttendanceRequests Error]:', err?.message || err);
+    return [];
+  }
+}
+
+export async function sqliteDeleteAttendanceRequest(id: string): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(`DELETE FROM local_attendance_requests WHERE id = ?`, [String(id)]);
+    console.log(`[SQLite Service] Deleted attendance request: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteDeleteAttendanceRequest Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteClearAttendanceRequests(): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.execute(`DELETE FROM local_attendance_requests`);
+    console.log('[SQLite Service] Cleared all attendance requests.');
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteClearAttendanceRequests Error]:', err?.message || err);
+  }
+}
 

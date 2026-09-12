@@ -653,6 +653,8 @@ function AppContent() {
       attendance_type: normalizeType(q.attendance_type),
       euclidean_distance: q.euclidean_distance,
       is_synced: false,
+      sync_notes: q.sync_notes || null,
+      needs_resolution: q.needs_resolution === true || q.sync_notes === 'Membutuhkan Resolusi NIK',
       created_at: q.created_at || q.timestamp
     }));
 

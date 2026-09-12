@@ -26,7 +26,11 @@ import {
   sqliteGetAdmin,
   sqliteSavePendingEmployee,
   sqliteGetPendingEmployees,
-  sqliteRemovePendingEmployee
+  sqliteRemovePendingEmployee,
+  sqliteSaveAttendanceRequest,
+  sqliteGetAttendanceRequests,
+  sqliteDeleteAttendanceRequest,
+  sqliteClearAttendanceRequests
 } from './services/sqliteService';
 
 /**
@@ -404,7 +408,9 @@ export const db = {
   },
   attendance_requests: {
     async put(req) {
-      if (!Capacitor.isNativePlatform()) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSaveAttendanceRequest(req);
+      } else {
         try {
           await dexieDb.attendance_requests.put(req);
         } catch (e) {
@@ -413,7 +419,9 @@ export const db = {
       }
     },
     async toArray() {
-      if (!Capacitor.isNativePlatform()) {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetAttendanceRequests();
+      } else {
         try {
           return await dexieDb.attendance_requests.toArray();
         } catch (e) {
@@ -421,10 +429,11 @@ export const db = {
           return [];
         }
       }
-      return [];
     },
     async delete(id) {
-      if (!Capacitor.isNativePlatform()) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteDeleteAttendanceRequest(id);
+      } else {
         try {
           await dexieDb.attendance_requests.delete(id);
         } catch (e) {
@@ -433,7 +442,9 @@ export const db = {
       }
     },
     async clear() {
-      if (!Capacitor.isNativePlatform()) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteClearAttendanceRequests();
+      } else {
         try {
           await dexieDb.attendance_requests.clear();
         } catch (e) {
@@ -907,11 +918,11 @@ export async function getUnsyncedDataSummary() {
  * Update sync status for text and photo for a specific log ID.
  * Handles both Native SQLite and Web Dexie.js
  */
-export const updateSyncStatus = async (id, textStatus = null, photoStatus = null) => {
+export const updateSyncStatus = async (id, textStatus = null, photoStatus = null, syncNotes = null) => {
   if (Capacitor.isNativePlatform()) {
     try {
       const { sqliteUpdateSyncStatus } = await import('./services/sqliteService');
-      await sqliteUpdateSyncStatus(id, textStatus, photoStatus);
+      await sqliteUpdateSyncStatus(id, textStatus, photoStatus, syncNotes);
     } catch (e) {
       console.warn('[DB Error] Native sqliteUpdateSyncStatus failed:', e);
     }
@@ -924,6 +935,12 @@ export const updateSyncStatus = async (id, textStatus = null, photoStatus = null
       const updates = {};
       if (textStatus) updates.status_sync_teks = textStatus;
       if (photoStatus) updates.status_sync_foto = photoStatus;
+      if (syncNotes !== undefined && syncNotes !== null) {
+        updates.sync_notes = syncNotes;
+        if (syncNotes === 'Membutuhkan Resolusi NIK') {
+          updates.needs_resolution = true;
+        }
+      }
       if (textStatus === 'done' && photoStatus === 'done') updates.is_synced = true;
 
       if (Object.keys(updates).length > 0) {

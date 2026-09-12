@@ -448,7 +448,21 @@ export default function TabAttendanceLogs({
 
             const { db } = await import('../db');
 
+            // 1. HARD DELETE OFFLINE LOGS (Skenario A)
             for (const localId of localOnlyIds) {
+              const logData = logs.find(l => String(l.id) === String(localId));
+              if (logData && logData.path_foto_lokal) {
+                try {
+                  await Filesystem.deleteFile({
+                    path: logData.path_foto_lokal,
+                    directory: Directory.Data
+                  });
+                  console.log(`[Offline Delete] Deleted photo: ${logData.path_foto_lokal}`);
+                } catch (fsErr) {
+                  console.warn(`[Offline Delete] Failed to delete photo for log ${localId}:`, fsErr);
+                }
+              }
+
               if (String(localId).startsWith('offline_')) {
                 const rawQueueId = localId.replace('offline_', '');
                 await db.attendance_sync_queue.delete(rawQueueId);
@@ -456,34 +470,69 @@ export default function TabAttendanceLogs({
               await db.attendance_logs.delete(String(localId));
             }
 
+            // 2. DELETE OFFICIAL LOGS (Skenario B)
             if (onlineIds.length > 0) {
-              const response = await fetch(`${API_BASE_URL}/api/attendance/logs/delete`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids: onlineIds })
-              });
-              
-              let result;
-              try {
-                const text = await response.text();
-                result = text ? JSON.parse(text) : {};
-              } catch (e) {
-                if (!response.ok) throw new Error(`Server API Error (${response.status})`);
+              let isOnlineSuccess = false;
+              if (navigator.onLine) {
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/attendance/logs/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: onlineIds })
+                  });
+                  
+                  let result;
+                  try {
+                    const text = await response.text();
+                    result = text ? JSON.parse(text) : {};
+                  } catch (e) {
+                    if (!response.ok) throw new Error(`Server API Error (${response.status})`);
+                  }
+
+                  if (!response.ok || (result && !result.success)) {
+                    throw new Error((result && result.message) || 'Gagal menghapus data dari server');
+                  }
+                  
+                  isOnlineSuccess = true;
+                } catch (e) {
+                  console.warn('[Online Delete] Network or Server Error:', e.message);
+                }
               }
 
-              if (!response.ok || (result && !result.success)) {
-                throw new Error((result && result.message) || 'Gagal menghapus data dari server');
-              }
-
-              for (const onlineId of onlineIds) {
-                await db.attendance_logs.delete(String(onlineId));
+              if (isOnlineSuccess) {
+                // Success: Delete local copies
+                for (const onlineId of onlineIds) {
+                  await db.attendance_logs.delete(String(onlineId));
+                }
+              } else {
+                // Fallback: Queue offline request for HQ
+                const reqPayload = {
+                  id: crypto.randomUUID ? crypto.randomUUID() : 'req_hq_' + Date.now(),
+                  request_type: 'DELETE',
+                  log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
+                  nik: group.nik,
+                  name: group.name,
+                  nama_kebun: group.nama_kebun || user?.kebun || '-',
+                  requested_by: user?.username || 'hq_admin',
+                  requested_at: new Date().toISOString(),
+                  status: 'APPROVED', // Pre-approved because HQ
+                  old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
+                };
+                await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+                showToast('Offline Mode', 'Permintaan penghapusan log official disimpan ke antrean offline.', 'warning');
+                
+                // Optionally remove from UI optimistically by deleting from attendance_logs?
+                // For HQ offline delete, maybe delete local so it disappears immediately
+                for (const onlineId of onlineIds) {
+                  await db.attendance_logs.delete(String(onlineId));
+                }
               }
             }
 
-            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi berhasil dihapus.`, 'success');
+            showToast('Data Dihapus', `${idsToDelete.length} catatan absensi diproses untuk dihapus.`, 'success');
           } catch (sbEx) {
             setDeletedLogIds(prev => prev.filter(id => !idsToDelete.includes(id)));
-            showToast('Gagal Menghapus', 'Gagal menghapus data.', 'error');
+            showToast('Gagal Menghapus', 'Terjadi kesalahan sistem saat memproses penghapusan.', 'error');
           }
 
           refreshLogs();
@@ -1088,7 +1137,25 @@ export default function TabAttendanceLogs({
                     <TableCell>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>{log.name}</span>
-                        {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) && (
+                        {((log.inLog && (log.inLog.needs_resolution || log.inLog.sync_notes === 'Membutuhkan Resolusi NIK')) || (log.outLog && (log.outLog.needs_resolution || log.outLog.sync_notes === 'Membutuhkan Resolusi NIK'))) ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              background: 'rgba(245, 158, 11, 0.2)',
+                              color: '#f59e0b',
+                              border: '1px solid rgba(245, 158, 11, 0.4)',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontWeight: 'bold',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Data absensi membutuhkan pembaruan/resolusi NIK manual oleh Admin sebelum disinkronkan"
+                          >
+                            <AlertTriangle size={11} /> Membutuhkan Resolusi NIK
+                          </span>
+                        ) : (((log.inLog && (log.inLog.isOfflineQueue || log.inLog.is_synced === false)) || (log.outLog && (log.outLog.isOfflineQueue || log.outLog.is_synced === false))) && (
                           <span
                             style={{
                               fontSize: '0.65rem',
@@ -1105,7 +1172,7 @@ export default function TabAttendanceLogs({
                           >
                             <CloudOff size={11} /> Offline
                           </span>
-                        )}
+                        ))}
                       </div>
                     </TableCell>
                     <TableCell style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
