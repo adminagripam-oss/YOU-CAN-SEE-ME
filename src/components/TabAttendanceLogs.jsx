@@ -83,15 +83,30 @@ export default function TabAttendanceLogs({
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
 
-  // Fetch pending approval requests from Local DB (Zero Supabase GET)
+  // Fetch pending approval requests
   const fetchApprovalRequests = async () => {
     try {
       setIsLoadingRequests(true);
-      const { db } = await import('../db');
-      const localReqs = await db.attendance_requests.toArray();
-      // sort descending by requested_at
-      localReqs.sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at));
-      setApprovalRequests(localReqs);
+      if (user?.role === 'headoffice_admin' && navigator.onLine) {
+        // Bug Fix 3: Tarik langsung dari Supabase untuk akun HQ
+        const { data, error } = await supabase
+          .from('attendance_requests')
+          .select('*')
+          .eq('status', 'PENDING')
+          .order('requested_at', { ascending: false });
+          
+        if (error) {
+          console.error('[Fetch Requests Supabase Error]:', error);
+          throw error;
+        }
+        setApprovalRequests(data || []);
+      } else {
+        // Fallback: baca dari IndexedDB (untuk kebun offline)
+        const { db } = await import('../db');
+        const localReqs = await db.attendance_requests.toArray();
+        localReqs.sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at));
+        setApprovalRequests(localReqs);
+      }
     } catch (err) {
       console.error('[Fetch Requests Exception]:', err);
     } finally {
@@ -117,7 +132,7 @@ export default function TabAttendanceLogs({
 
           // 1. Execute actual log deletion or modification
           if (req.request_type === 'DELETE') {
-            const inLogId = req.old_value?.inLogId;
+            const inLogId = req.log_id || req.old_value?.logId || req.old_value?.inLogId;
             const outLogId = req.old_value?.outLogId;
             const idsToDelete = [inLogId, outLogId].filter(Boolean);
 
@@ -213,7 +228,7 @@ export default function TabAttendanceLogs({
             }
             
             showToast('Disetujui', 'Permohonan absensi berhasil disetujui.', 'success');
-            fetchApprovalRequests();
+            setApprovalRequests(prev => prev.filter(r => r.id !== req.id));
             if (refreshLogs) refreshLogs();
             if (onRefreshLogs) onRefreshLogs();
           } else {
@@ -248,7 +263,7 @@ export default function TabAttendanceLogs({
           }
           
           showToast('Ditolak', 'Permohonan absensi berhasil ditolak.', 'success');
-          fetchApprovalRequests();
+          setApprovalRequests(prev => prev.filter(r => r.id !== req.id));
         } catch (err) {
           showToast('Error', err.message, 'error');
         }

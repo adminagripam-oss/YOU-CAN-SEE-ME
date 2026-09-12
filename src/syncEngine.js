@@ -393,78 +393,37 @@ export async function syncPendingAttendanceRequests() {
 
     console.log(`[Auto-Sync Requests] Attempting to sync ${unsyncedReqs.length} pending offline admin requests...`);
 
-    // ── Pisahkan DELETE requests dari approval requests biasa ──
-    const deleteLogReqs = unsyncedReqs.filter(r => r.request_type === 'DELETE');
-    const approvalReqs = unsyncedReqs.filter(r => r.request_type !== 'DELETE');
+    // Proses semua approval requests (INSERT ke attendance_requests)
+    const reqsToInsert = unsyncedReqs.map(r => ({
+      id: r.id,
+      request_type: r.request_type,
+      log_id: r.log_id,
+      nik: r.nik || null,
+      name: r.name || null,
+      nama_kebun: r.nama_kebun || null,
+      requested_by: r.requested_by,
+      requested_at: r.requested_at || new Date().toISOString(),
+      status: r.status || 'PENDING',
+      old_value: r.old_value || null,
+      new_value: r.new_value || null
+    }));
 
-    // 1. Proses semua permintaan penghapusan log ke Supabase
-    if (deleteLogReqs.length > 0) {
-      const deletePromises = deleteLogReqs.map(async (r) => {
-        try {
-          const logId = r.log_id;
-          if (!logId) return;
+    const { error } = await supabase
+      .from('attendance_requests')
+      .insert(reqsToInsert);
 
-          // Cegah error "invalid syntax for type bigint" dengan validasi numerik
-          if (isNaN(Number(logId)) || String(logId).startsWith('offline_') || String(logId).startsWith('group_')) {
-            console.warn(`[Sync Engine] Mengabaikan penghapusan Supabase untuk ID non-numerik: ${logId}`);
-            await db.attendance_requests.put({ ...r, is_synced: true });
-            return;
-          }
-
-          const { error: delErr } = await supabase
-            .from('attendance_logs')
-            .delete()
-            .eq('id', logId);
-            
-          if (delErr) {
-            console.error(`[Sync Engine] Failed to delete log #${logId} from Supabase:`, delErr.message);
-            // Jika error disebabkan tipe data yang salah, hapus dari antrean agar tidak infinite loop
-            if (delErr.message?.includes('invalid input syntax') || delErr.message?.includes('type bigint')) {
-              await db.attendance_requests.put({ ...r, is_synced: true, status: 'REJECTED_BY_SERVER_ERROR' });
-            }
-          } else {
-            console.log(`[Sync Engine] Log #${logId} berhasil dihapus dari Supabase.`);
-            await db.attendance_requests.put({ ...r, is_synced: true });
-          }
-        } catch (e) {
-          console.error('[Sync Engine DELETE_LOG Error]:', e);
-        }
-      });
-      await Promise.all(deletePromises);
-    }
-
-    // 2. Proses approval requests biasa (INSERT ke attendance_requests)
-    if (approvalReqs.length > 0) {
-      const reqsToInsert = approvalReqs.map(r => ({
-        id: r.id,
-        request_type: r.request_type,
-        log_id: r.log_id,
-        nik: r.nik || null,
-        name: r.name || null,
-        nama_kebun: r.nama_kebun || null,
-        requested_by: r.requested_by,
-        requested_at: r.requested_at || new Date().toISOString(),
-        status: r.status || 'PENDING',
-        old_value: r.old_value || null,
-        new_value: r.new_value || null
-      }));
-
-      const { error } = await supabase
-        .from('attendance_requests')
-        .insert(reqsToInsert);
-
-      if (error) {
-        if (error.message.includes('relation "public.attendance_requests" does not exist')) {
-          console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
-        } else {
-          throw error;
-        }
+    if (error) {
+      if (error.message.includes('relation "public.attendance_requests" does not exist')) {
+        console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
       } else {
-        // Mark as synced locally
-        await Promise.all(approvalReqs.map(r => 
-          db.attendance_requests.put({ ...r, is_synced: true })
-        ));
+        console.error('[Sync Engine] Gagal push request ke Supabase:', error.message);
+        throw error;
       }
+    } else {
+      // Mark as synced locally HANYA jika sukses HTTP 2xx
+      await Promise.all(unsyncedReqs.map(r => 
+        db.attendance_requests.put({ ...r, is_synced: true })
+      ));
     }
 
     console.log(`[Auto-Sync Requests Success] Processed ${unsyncedReqs.length} admin requests!`);
