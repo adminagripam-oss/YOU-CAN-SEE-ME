@@ -160,6 +160,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     let syncedIds = [];
     let successfulData = [];
+    let localToRealIdMap = {};
 
     const { data, error } = await supabase
       .from('attendance_logs')
@@ -192,6 +193,18 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
             } else if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
               // Jika log sudah ada di server (duplikat), status diubah ke 'done' agar tidak menggantung
               console.warn(`[Auto-Sync Fallback] Log #${originalLog.id} sudah ada di server (duplicate key). Memperbarui status lokal ke done.`);
+              
+              // Coba dapatkan real ID dari server untuk duplicate key ini
+              const { data: dupData } = await supabase.from('attendance_logs')
+                .select('id')
+                .eq('employee_id', singleLogPayload.employee_id)
+                .eq('timestamp', singleLogPayload.timestamp)
+                .limit(1);
+                
+              if (dupData && dupData.length > 0) {
+                localToRealIdMap[originalLog.id] = dupData[0].id;
+              }
+              
               await updateSyncStatus(originalLog.id, 'done', null);
               syncedIds.push(originalLog.id);
             } else {
@@ -201,6 +214,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           } else if (singleData && Array.isArray(singleData) && singleData.length > 0) {
             // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
             console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
+            localToRealIdMap[originalLog.id] = singleData[0].id;
             await updateSyncStatus(originalLog.id, 'done', null);
             syncedIds.push(originalLog.id);
             successfulData.push(singleData[0]);
@@ -215,9 +229,41 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       if (data && Array.isArray(data) && data.length > 0) {
         syncedIds = textPendingLogs.map(log => log.id);
         successfulData = data;
-        for (const id of syncedIds) {
-          await updateSyncStatus(id, 'done', null);
+        for (let i = 0; i < syncedIds.length; i++) {
+          if (data[i]) {
+            localToRealIdMap[syncedIds[i]] = data[i].id;
+          }
+          await updateSyncStatus(syncedIds[i], 'done', null);
         }
+      }
+    }
+
+    // Requirement 5 (Bug Fix Asymmetric Sync untuk Request):
+    // Remap log_id pada antrean attendance_requests jika log_id sementara ('offline_x') mendapat ID asli dari Supabase
+    const remappedIds = Object.keys(localToRealIdMap);
+    if (remappedIds.length > 0) {
+      try {
+        const localRequests = await db.attendance_requests.toArray();
+        for (const localId of remappedIds) {
+          const realId = localToRealIdMap[localId];
+          if (String(localId) !== String(realId)) {
+            const reqsToUpdate = localRequests.filter(req => 
+              String(req.log_id) === String(localId) || 
+              (req.old_value && String(req.old_value.logId) === String(localId)) ||
+              (req.old_value && String(req.old_value.inLogId) === String(localId))
+            );
+
+            for (let req of reqsToUpdate) {
+              req.log_id = realId;
+              if (req.old_value && req.old_value.logId === localId) req.old_value.logId = realId;
+              if (req.old_value && req.old_value.inLogId === localId) req.old_value.inLogId = realId;
+              await db.attendance_requests.put(req);
+              console.log(`[Auto-Sync Remap] Request #${req.id} diperbarui: log_id dari ${localId} menjadi ${realId}`);
+            }
+          }
+        }
+      } catch (remapErr) {
+        console.error('[Auto-Sync Remap] Gagal me-remap log_id untuk request:', remapErr);
       }
     }
 
