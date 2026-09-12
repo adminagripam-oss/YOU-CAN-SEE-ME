@@ -1475,6 +1475,10 @@ export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: stri
       `UPDATE local_attendance_queue SET employee_id = ? WHERE employee_id = ?`,
       [String(newRealEmpId), String(oldTempEmpId)]
     );
+    await dbConnection!.run(
+      `UPDATE local_attendance_logs SET employee_id = ? WHERE employee_id = ?`,
+      [String(newRealEmpId), String(oldTempEmpId)]
+    );
     console.log(`[SQLite Service] Updated pending attendance employee_id from ${oldTempEmpId} to ${newRealEmpId}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteUpdatePendingAttendanceEmployeeId Error]:', err?.message || err);

@@ -194,8 +194,10 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
               console.warn(`[Auto-Sync Fallback] Log #${originalLog.id} sudah ada di server (duplicate key). Memperbarui status lokal ke done.`);
               await updateSyncStatus(originalLog.id, 'done', null);
               syncedIds.push(originalLog.id);
+            } else {
+              // Requirement 4: Lempar error jika gagal (No Silent Failures)
+              throw singleError;
             }
-            // Error koneksi/lainnya: Biarkan status tetap pending, lanjut ke baris berikutnya tanpa hapus data
           } else if (singleData && Array.isArray(singleData) && singleData.length > 0) {
             // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
             console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
@@ -205,7 +207,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           }
         } catch (singleCatchErr) {
           console.error(`[Auto-Sync Fallback Exception] Exception saat insert log #${originalLog.id}:`, singleCatchErr);
-          // Tangkap exception per iterasi agar baris log lain tetap diproses sekuensial
+          // Biarkan data tetap berstatus 'pending' di DB lokal untuk di-retry nanti
         }
       }
     } else {
@@ -602,6 +604,10 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               await sqliteUpdatePendingAttendanceEmployeeId(emp.id, realEmpId);
             } else {
               await db.attendance_sync_queue.put(pendingLog);
+              const localLog = await db.attendance_logs.get(pendingLog.id);
+              if (localLog) {
+                await db.attendance_logs.put({ ...localLog, employee_id: realEmpId });
+              }
             }
           });
           await Promise.all(updateLogPromises);

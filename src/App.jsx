@@ -796,44 +796,57 @@ function AppContent() {
     setIsSyncing(true);
     showToast('Sinkronisasi Dimulai', 'Mengirim data offline dan memuat ulang data terbaru dari cloud...', 'info');
 
-    // 1. Push pending offline employees
     try {
-      const { syncPendingEmployees } = await import('./syncEngine');
-      await syncPendingEmployees();
-    } catch (e) {
-      console.warn('[Manual Sync Employees Error]:', e);
-    }
+      // ─── FASE 1: PUSH DATA KE CLOUD (Strict Sequence) ───
+      
+      // 1A. Push pending offline employees
+      try {
+        const { syncPendingEmployees } = await import('./syncEngine');
+        await syncPendingEmployees();
+      } catch (e) {
+        console.warn('[Manual Sync Employees Error]:', e);
+      }
 
-    // 2. Push pending offline logs
-    await syncPendingAttendanceLogs(showToast, async () => {
+      // 1B. Push pending offline logs
+      try {
+        const { syncPendingAttendanceLogs } = await import('./syncEngine');
+        await syncPendingAttendanceLogs(showToast);
+      } catch (e) {
+        console.warn('[Manual Sync Logs Error]:', e);
+      }
+
+      // 1C. Push pending offline requests (edit/hapus)
+      try {
+        const { syncPendingAttendanceRequests } = await import('./syncEngine');
+        await syncPendingAttendanceRequests();
+      } catch (e) {
+        console.warn('[Manual Sync Requests Error]:', e);
+      }
+
+      // ─── FASE 2: PULL DATA DARI CLOUD (Strict Sequence, ONLY after PUSH completes) ───
+
+      // 2A. Pull fresh employees & missing biometrics descriptors
+      try {
+        await fetchEmployees(true);
+      } catch (e) {
+        console.warn('[Manual Sync Pull Employees Error]:', e);
+      }
+
+      // 2B. Pull fresh attendance logs
+      try {
+        await fetchLogs(true);
+      } catch (e) {
+        console.warn('[Manual Sync Pull Logs Error]:', e);
+      }
+
       await refreshUnsyncedCount();
-    });
-
-    // 3. Push pending offline requests (edit/hapus)
-    try {
-      const { syncPendingAttendanceRequests } = await import('./syncEngine');
-      await syncPendingAttendanceRequests();
-    } catch (e) {
-      console.warn('[Manual Sync Requests Error]:', e);
+      showToast('Sinkronisasi Selesai', 'Data berhasil diselaraskan secara penuh dengan cloud.', 'success');
+    } catch (fatalError) {
+      console.error('[Manual Sync Fatal Error]:', fatalError);
+      showToast('Error Sinkronisasi', 'Terjadi kesalahan sistem saat sinkronisasi.', 'error');
+    } finally {
+      setIsSyncing(false);
     }
-
-    // 4. Pull fresh employees & missing biometrics descriptors
-    try {
-      await fetchEmployees(true);
-    } catch (e) {
-      console.warn('[Manual Sync Pull Employees Error]:', e);
-    }
-
-    // 5. Pull fresh attendance logs
-    try {
-      await fetchLogs(true);
-    } catch (e) {
-      console.warn('[Manual Sync Pull Logs Error]:', e);
-    }
-
-    await refreshUnsyncedCount();
-    showToast('Sinkronisasi Selesai', 'Data berhasil diselaraskan secara penuh dengan cloud.', 'success');
-    setIsSyncing(false);
   };
 
   const syncCallbacksRef = useRef({ fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast });
