@@ -401,12 +401,25 @@ export async function syncPendingAttendanceRequests() {
         try {
           const logId = r.log_id;
           if (!logId) return;
+
+          // Cegah error "invalid syntax for type bigint" dengan validasi numerik
+          if (isNaN(Number(logId)) || String(logId).startsWith('offline_') || String(logId).startsWith('group_')) {
+            console.warn(`[Sync Engine] Mengabaikan penghapusan Supabase untuk ID non-numerik: ${logId}`);
+            await db.attendance_requests.put({ ...r, is_synced: true });
+            return;
+          }
+
           const { error: delErr } = await supabase
             .from('attendance_logs')
             .delete()
             .eq('id', logId);
+            
           if (delErr) {
             console.error(`[Sync Engine] Failed to delete log #${logId} from Supabase:`, delErr.message);
+            // Jika error disebabkan tipe data yang salah, hapus dari antrean agar tidak infinite loop
+            if (delErr.message?.includes('invalid input syntax') || delErr.message?.includes('type bigint')) {
+              await db.attendance_requests.put({ ...r, is_synced: true, status: 'REJECTED_BY_SERVER_ERROR' });
+            }
           } else {
             console.log(`[Sync Engine] Log #${logId} berhasil dihapus dari Supabase.`);
             await db.attendance_requests.put({ ...r, is_synced: true });

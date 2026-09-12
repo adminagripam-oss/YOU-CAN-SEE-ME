@@ -506,19 +506,21 @@ export default function TabAttendanceLogs({
                 }
               } else {
                 // Fallback: Queue offline request for HQ
-                const reqPayload = {
-                  id: crypto.randomUUID ? crypto.randomUUID() : 'req_hq_' + Date.now(),
-                  request_type: 'DELETE',
-                  log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
-                  nik: group.nik,
-                  name: group.name,
-                  nama_kebun: group.nama_kebun || user?.kebun || '-',
-                  requested_by: user?.username || 'hq_admin',
-                  requested_at: new Date().toISOString(),
-                  status: 'APPROVED', // Pre-approved because HQ
-                  old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
-                };
-                await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+                for (const onlineId of onlineIds) {
+                  const reqPayload = {
+                    id: crypto.randomUUID ? crypto.randomUUID() : 'req_hq_' + Date.now() + '_' + onlineId,
+                    request_type: 'DELETE',
+                    log_id: onlineId,
+                    nik: group.nik,
+                    name: group.name,
+                    nama_kebun: group.nama_kebun || user?.kebun || '-',
+                    requested_by: user?.username || 'hq_admin',
+                    requested_at: new Date().toISOString(),
+                    status: 'APPROVED', // Pre-approved because HQ
+                    old_value: { logId: onlineId, date: group.displayDate }
+                  };
+                  await db.attendance_requests.put({ ...reqPayload, is_synced: false });
+                }
                 showToast('Offline Mode', 'Permintaan penghapusan log official disimpan ke antrean offline.', 'warning');
                 
                 // Optionally remove from UI optimistically by deleting from attendance_logs?
