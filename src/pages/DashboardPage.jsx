@@ -101,6 +101,53 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
 
+  // Pre-group raw filtered logs by employee_id to avoid double counting (Rule: Dashboard KPI Consistency)
+  const groupedLogs = useMemo(() => {
+    const groups = {};
+    filteredLogs.forEach(log => {
+      const empIdStr = String(log.employee_id);
+      if (!groups[empIdStr]) {
+        groups[empIdStr] = {
+          employee_id: empIdStr,
+          nik: log.nik,
+          inLog: null,
+          outLog: null,
+          keterangan: 'Hadir' // default
+        };
+      }
+      
+      const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT')) || (log.location && log.location.includes('CHECK-OUT'));
+      
+      let ket = 'Hadir';
+      if (log.status) {
+        if (log.status.includes('Izin')) ket = 'Izin';
+        else if (log.status.includes('Sakit')) ket = 'Sakit';
+        else if (log.status.includes('Mangkir')) ket = 'Mangkir';
+        else if (log.status.toLowerCase().includes('lupa_checkout') || log.status.toLowerCase().includes('lupa check-out')) ket = 'Lupa Check-out';
+      }
+
+      if (!isCheckOut) {
+        groups[empIdStr].inLog = log;
+        if (ket !== 'Hadir') groups[empIdStr].keterangan = ket;
+      } else {
+        groups[empIdStr].outLog = log;
+        if (ket !== 'Hadir') groups[empIdStr].keterangan = ket;
+      }
+    });
+
+    // Resolve final status for the employee for this day
+    Object.values(groups).forEach(g => {
+       // According to rule: 'Lupa Check-out' is counted under 'TK Hadir'
+       if (g.keterangan === 'Lupa Check-out') {
+          g.finalStatus = 'Hadir'; 
+       } else {
+          g.finalStatus = g.keterangan;
+       }
+    });
+
+    return Object.values(groups);
+  }, [filteredLogs]);
+
   // Grouping data by kebun (for Regional & Head Office dashboards)
   const kebunSummary = useMemo(() => {
     const uniqueKebuns = [...new Set(filteredEmployees.map(e => e.nama_kebun).filter(Boolean))];
@@ -109,15 +156,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       const kebunEmployees = filteredEmployees.filter(e => e.nama_kebun === kebunName);
       const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
 
-      // Hitung HK Hadir (TK Hadir) hari ini
-      const kebunFilteredLogs = filteredLogs.filter(l => {
-        const empIdStr = String(l.employee_id);
-        const isVerified = !(l.status?.toUpperCase().includes('GAGAL') || l.status?.toUpperCase().includes('REJECT'));
-        return kebunEmpIds.has(empIdStr) && isVerified;
-      });
+      // Hitung HK Hadir (TK Hadir) hari ini dari groupedLogs yang finalStatus-nya 'Hadir'
+      const kebunGroupedLogs = groupedLogs.filter(g => kebunEmpIds.has(String(g.employee_id)));
+      const hadirCount = kebunGroupedLogs.filter(g => g.finalStatus === 'Hadir').length;
       
-      const uniqueHadirIds = new Set(kebunFilteredLogs.map(l => String(l.employee_id)));
-      const hadirCount = uniqueHadirIds.size;
       const totalCount = kebunEmployees.length || 1;
       const percent = ((hadirCount / totalCount) * 100).toFixed(1);
 
@@ -132,7 +174,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         percentage: percent
       };
     }).sort((a, b) => b.hadirCount - a.hadirCount);
-  }, [filteredEmployees, filteredLogs]);
+  }, [filteredEmployees, groupedLogs]);
 
   const filteredKebunSummary = useMemo(() => {
     return kebunSummary.filter(k => {
@@ -145,26 +187,13 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     });
   }, [kebunSummary, kebunSearch]);
 
-  // Calculate 100% DYNAMIC real-time attendance counts from filteredLogs
-  // Count unique verified employee check-ins for the selectedDate
-  const verifiedEmployeeIds = new Set(
-    filteredLogs
-      .filter((l) => {
-        const statusLower = (l.status || '').toLowerCase();
-        return statusLower === '' || statusLower.includes('hadir') || statusLower.includes('verified');
-      })
-      .map((l) => l.nik || l.employee_id)
-  );
-
-  const verifiedCount = filteredLogs.length > 0 ? (verifiedEmployeeIds.size || filteredLogs.length) : 0;
-  const izinCount = filteredLogs.filter((l) => l.status === 'Izin').length;
-  const sakitCount = filteredLogs.filter((l) => l.status === 'Sakit').length;
+  // Calculate 100% DYNAMIC real-time attendance counts from groupedLogs
+  const verifiedCount = groupedLogs.filter(g => g.finalStatus === 'Hadir').length;
+  const izinCount = groupedLogs.filter(g => g.finalStatus === 'Izin').length;
+  const sakitCount = groupedLogs.filter(g => g.finalStatus === 'Sakit').length;
   
-  // Count Lupa Check-out
-  const lupaCheckoutCount = filteredLogs.filter(l => {
-    const statusLower = (l.status || '').toLowerCase();
-    return statusLower.includes('lupa_checkout') || statusLower.includes('lupa check-out');
-  }).length;
+  // Count Lupa Check-out (still tracked for display purposes, but already included in verifiedCount)
+  const lupaCheckoutCount = groupedLogs.filter(g => g.keterangan === 'Lupa Check-out').length;
   
   // Mangkir = Total Employees - (Hadir + Izin + Sakit)
   const mangkirCount = totalEmployees > 0 ? Math.max(totalEmployees - verifiedCount - izinCount - sakitCount, 0) : 0;

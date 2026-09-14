@@ -681,6 +681,11 @@ function AppContent() {
         if (localDate) {
           const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
           onlineSignatures.add(signature);
+          // Juga tambahkan signature berbasis NIK agar log offline dengan temp employee_id
+          // (off_emp_xxx) dapat dikenali sebagai duplikat dari log online yang sudah di-sync.
+          if (log.nik && log.nik !== '-') {
+            onlineSignatures.add(`nik_${log.nik}_${localDate}_${log.attendance_type}`);
+          }
         }
       }
     });
@@ -688,14 +693,26 @@ function AppContent() {
     mergedLocalLogs.forEach(log => {
       const localDate = getLocalDateString(log.timestamp);
       if (!localDate) return;
-      const signature = `${log.employee_id}_${localDate}_${log.attendance_type}`;
 
-      // Skip unsynced log if its signature is already in online logs
-      if (!log.is_synced && onlineSignatures.has(signature)) {
-        return;
+      // Gunakan NIK-based key untuk log offline dengan employee_id sementara,
+      // agar dedup dapat mencocokkan dengan log online yang sudah memiliki ID real.
+      const empIdStr = String(log.employee_id);
+      const isTempId = isNaN(Number(empIdStr));
+      const nikKey = log.nik && log.nik !== '-' ? `nik_${log.nik}_${localDate}_${log.attendance_type}` : null;
+      const signature = `${empIdStr}_${localDate}_${log.attendance_type}`;
+
+      // Skip unsynced log jika sudah ada versi online-nya (baik by ID maupun by NIK)
+      if (!log.is_synced) {
+        if (onlineSignatures.has(signature)) return;
+        if (isTempId && nikKey && onlineSignatures.has(nikKey)) return;
       }
 
-      if (!seen.has(signature)) {
+      // Gunakan NIK-key sebagai seen key untuk offline temp ID agar tidak double-render
+      const seenKey = (!log.is_synced && isTempId && nikKey) ? nikKey : signature;
+
+      if (!seen.has(seenKey)) {
+        seen.add(seenKey);
+        // Juga tandai signature asli agar tidak masuk lagi
         seen.add(signature);
 
         let resolvedLog = { ...log };
@@ -849,10 +866,25 @@ function AppContent() {
     }
   };
 
+  // Gunakan ref agar callback selalu memegang referensi terbaru untuk event listener (jika perlu)
   const syncCallbacksRef = useRef({ fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast });
   useEffect(() => {
     syncCallbacksRef.current = { fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast };
   }, [fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast]);
+
+  // Listener untuk event refresh_logs dari komponen lain (misal setelah scan absen offline)
+  useEffect(() => {
+    const handleRefreshLogs = () => {
+      if (syncCallbacksRef.current?.fetchLogs) {
+        syncCallbacksRef.current.fetchLogs();
+      }
+      if (syncCallbacksRef.current?.refreshUnsyncedCount) {
+        syncCallbacksRef.current.refreshUnsyncedCount();
+      }
+    };
+    window.addEventListener('refresh_logs', handleRefreshLogs);
+    return () => window.removeEventListener('refresh_logs', handleRefreshLogs);
+  }, []);
 
   // Network Listener Setup (Supports both native SQLite/Network and web IndexedDB)
   useEffect(() => {
@@ -1244,6 +1276,7 @@ function AppContent() {
                     path: "daftar-karyawan",
                     element: (
                       <DaftarKaryawanPage
+                        isOnline={isOnline}
                         employees={employees}
                         modelsLoaded={modelsLoaded}
                         showToast={showToast}

@@ -303,9 +303,9 @@ export default function TabAttendanceLogs({
       const tsDate = new Date(log.timestamp);
       const dateKey = tsDate.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'); // YYYY-MM-DD format for internal grouping
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-      const key = `${log.nik}_${dateKey}`;
+      const key = `${log.employee_id}_${dateKey}`;
 
-      console.log(`[DEBUG GROUPING] Log ID: ${log.id}, NIK: ${log.nik}, DateKey: ${dateKey}, Key: ${key}, Type: ${log.attendance_type}`);
+      console.log(`[DEBUG GROUPING] Log ID: ${log.id}, EmpID: ${log.employee_id}, DateKey: ${dateKey}, Key: ${key}, Type: ${log.attendance_type}`);
 
       if (!groups[key]) {
         groups[key] = {
@@ -454,27 +454,16 @@ export default function TabAttendanceLogs({
               let isOnlineSuccess = false;
               if (navigator.onLine) {
                 try {
-                  const response = await fetch(`${API_BASE_URL}/api/attendance/logs/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: onlineIds })
-                  });
+                  const { supabase } = await import('../supabaseClient');
+                  const { error } = await supabase.from('attendance_logs').delete().in('id', onlineIds);
                   
-                  let result;
-                  try {
-                    const text = await response.text();
-                    result = text ? JSON.parse(text) : {};
-                  } catch (e) {
-                    if (!response.ok) throw new Error(`Server API Error (${response.status})`);
-                  }
-
-                  if (!response.ok || (result && !result.success)) {
-                    throw new Error((result && result.message) || 'Gagal menghapus data dari server');
+                  if (error) {
+                    throw new Error(error.message || 'Gagal menghapus data dari server Supabase');
                   }
                   
                   isOnlineSuccess = true;
                 } catch (e) {
-                  console.warn('[Online Delete] Network or Server Error:', e.message);
+                  console.warn('[Online Delete] Network or Supabase Error:', e.message);
                 }
               }
 
@@ -1117,6 +1106,7 @@ export default function TabAttendanceLogs({
           <Table className="freeze-table-header">
             <TableHeader>
               <TableRow>
+                <TableHead style={{ width: '50px', textAlign: 'center' }}>No.</TableHead>
                 <TableHead>Tanggal</TableHead>
                 <TableHead>Check In</TableHead>
                 <TableHead>NIK</TableHead>
@@ -1133,13 +1123,14 @@ export default function TabAttendanceLogs({
             <TableBody>
               {filteredLogs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                  <TableCell colSpan={12} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
                     Belum ada log absensi yang tercatat.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredLogs.map((log) => (
+                filteredLogs.map((log, index) => (
                   <TableRow key={log.id}>
+                    <TableCell style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</TableCell>
                     <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
                     <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                     <TableCell className="nik-cell">{log.nik}</TableCell>
@@ -1384,7 +1375,6 @@ export default function TabAttendanceLogs({
       {/* EDIT MODAL */}
       {isEditModalOpen && editData && (() => {
         const isExpired = (() => {
-          if (isHQ) return false;
           if (!editData || !editData.date) return false;
           const logDate = new Date(editData.date);
           const today = new Date();

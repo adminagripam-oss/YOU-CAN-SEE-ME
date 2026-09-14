@@ -40,6 +40,13 @@ export async function initSQLite(): Promise<void> {
   try {
     console.log('[SQLite Service] Initializing SQLite connection for native APK...');
 
+    // Sinkronisasi koneksi SQLite yang terputus akibat WebView Reload (OTA Update)
+    try {
+      await sqlite.checkConnectionsConsistency().catch(() => console.warn('[SQLite] Consistency check warning'));
+    } catch (e) {
+      console.warn('[SQLite] checkConnectionsConsistency err:', e);
+    }
+
     // Check if connection already exists
     const isConn = await sqlite.isConnection('AgriFaceLocalDB', false);
     if (isConn.result) {
@@ -720,24 +727,24 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
     const statusSyncFoto = logData.status_sync_foto || 'pending';
     const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : 0;
 
-    await dbConnection!.run(
+    const runRes = await dbConnection!.run(
       `INSERT INTO local_attendance_queue (
         employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(logData.employee_id),
-        logData.nik,
-        logData.name,
-        logData.department,
+        logData.nik || null,
+        logData.name || null,
+        logData.department || null,
         logData.afdeling || null,
         logData.kebun || null,
         timestamp,
         logData.location || 'HP Mobile (Offline)',
-        logData.lat || null,
-        logData.lng || null,
-        logData.status,
+        logData.lat !== undefined && logData.lat !== null ? Number(logData.lat) : null,
+        logData.lng !== undefined && logData.lng !== null ? Number(logData.lng) : null,
+        logData.status || null,
         logData.attendance_type || 'CHECK_IN',
-        logData.euclidean_distance,
+        logData.euclidean_distance !== undefined && logData.euclidean_distance !== null ? Number(logData.euclidean_distance) : null,
         logData.path_foto_lokal || null,
         logData.path_foto_storage || null,
         statusSyncTeks,
@@ -748,8 +755,11 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
       ]
     );
 
-    const lastIdRes = await dbConnection!.query('SELECT last_insert_rowid() as id');
-    const id = lastIdRes.values?.[0]?.id || null;
+    let id = (runRes as any).lastId ?? (runRes.changes as any)?.lastId;
+    if (id === null || id === undefined) {
+      // Rule: Never allow a fallback to null to prevent 'offline_null' silent overwrites
+      id = 'temp_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    }
 
     const queuedItem = {
       ...logData,
@@ -980,6 +990,14 @@ export async function sqliteDeleteEmployeeBiometrics(employeeId: number | string
       {
         statement: `DELETE FROM local_employees WHERE id = ?`,
         values: [empIdStr]
+      },
+      {
+        statement: `DELETE FROM local_attendance_logs WHERE employee_id = ?`,
+        values: [empIdStr]
+      },
+      {
+        statement: `DELETE FROM local_attendance_queue WHERE employee_id = ?`,
+        values: [empIdStr]
       }
     ];
     await dbConnection.executeSet(set);
@@ -1205,7 +1223,10 @@ export async function sqliteUpdateSyncStatus(
       params.push(syncNotes);
     }
 
-    if (textStatus === 'done' && photoStatus === 'done') {
+    if (textStatus === 'done' || (textStatus === 'done' && photoStatus === 'done')) {
+      // Set is_synced = 1 demi keamanan segera setelah teks berhasil diupload.
+      // Ini memastikan fetchLogs dapat membersihkan ghost display-cache entry
+      // (offline entry dengan temp employee_id) saat melakukan full-sync cleanup.
       updates.push('is_synced = 1');
     }
 
@@ -1259,8 +1280,13 @@ export async function sqliteGetAttendanceLogs(): Promise<any[]> {
       status: row.status,
       attendance_type: row.attendance_type,
       euclidean_distance: row.euclidean_distance,
+      path_foto_lokal: row.path_foto_lokal,
+      path_foto_storage: row.path_foto_storage,
+      status_sync_teks: row.status_sync_teks,
+      status_sync_foto: row.status_sync_foto,
       is_synced: row.is_synced === 1,
-      created_at: row.created_at
+      created_at: row.created_at,
+      durasi: row.durasi
     }));
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetAttendanceLogs Error]:', err?.message || err, err?.stack || '');
@@ -1527,6 +1553,7 @@ export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: stri
       `UPDATE local_attendance_queue SET employee_id = ? WHERE employee_id = ?`,
       [String(newRealEmpId), String(oldTempEmpId)]
     );
+    // Also update the UI logs display table so that Deduplication works post-sync
     await dbConnection!.run(
       `UPDATE local_attendance_logs SET employee_id = ? WHERE employee_id = ?`,
       [String(newRealEmpId), String(oldTempEmpId)]

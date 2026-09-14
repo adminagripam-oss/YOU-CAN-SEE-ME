@@ -294,8 +294,12 @@ export default function TabEmployeeManagement({
     setIsSubmitting(true);
 
     try {
+      // Sesuai permintaan: Generate 9 digit desimal di belakang NIK
+      const generatedSuffix = Date.now().toString().slice(-9);
+      const finalNik = empNik.trim() + generatedSuffix;
+
       const empPayload = {
-        nik: empNik.trim(),
+        nik: finalNik,
         name: empName.trim(),
         department: empJabatan.trim(),
         afdeling: empAfdeling.trim(),

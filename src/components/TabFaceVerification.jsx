@@ -1480,6 +1480,7 @@ export default function TabFaceVerification({
 
       isSuccess = true;
       successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;
+      window.dispatchEvent(new Event('refresh_logs'));
     } catch (err) {
       console.error('[QUEUE ERROR]:', err);
     }

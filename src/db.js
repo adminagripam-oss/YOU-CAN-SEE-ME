@@ -650,6 +650,8 @@ export async function queueOfflineAttendance(logData) {
           name: result.name,
           department: result.department,
           afdeling: logData.afdeling || null,
+          kebun: result.kebun || logData.kebun || logData.nama_kebun || null,
+          nama_kebun: result.kebun || logData.kebun || logData.nama_kebun || null,
           timestamp: result.timestamp,
           location: result.location,
           lat: result.lat,
@@ -657,6 +659,11 @@ export async function queueOfflineAttendance(logData) {
           status: result.status,
           attendance_type: result.attendance_type,
           euclidean_distance: result.euclidean_distance,
+          path_foto_lokal: result.path_foto_lokal || logData.path_foto_lokal || null,
+          path_foto_storage: result.path_foto_storage || logData.path_foto_storage || null,
+          status_sync_teks: result.status_sync_teks || 'pending',
+          status_sync_foto: result.status_sync_foto || 'pending',
+          durasi: result.durasi !== undefined ? result.durasi : logData.durasi !== undefined ? logData.durasi : null,
           is_synced: false,
           created_at: result.created_at
         };
@@ -707,303 +714,324 @@ export async function queueOfflineAttendance(logData) {
   }
 }
 
-/**
- * Get all unsynced logs.
- */
-export async function getUnsyncedLogs() {
-  if (Capacitor.isNativePlatform()) {
-    return await sqliteGetUnsyncedLogs();
-  }
-
-  try {
-    const allQueue = await dexieDb.attendance_sync_queue.toArray();
-    return allQueue.filter((item) => !item.is_synced || item.is_synced === 0);
-  } catch (err) {
-    console.error('[IndexedDB Get Unsynced Error]:', err);
-    return [];
-  }
-}
-
-/**
- * Remove synced items from Queue.
- */
-export async function removeSyncedLogs(ids) {
-  if (Capacitor.isNativePlatform()) {
-    await sqliteRemoveSyncedLogs(ids);
-    return;
-  }
-
-  try {
-    if (!ids || ids.length === 0) return;
-    await dexieDb.attendance_sync_queue.bulkDelete(ids);
-  } catch (err) {
-    console.error('[IndexedDB Delete Synced Error]:', err);
-  }
-}
-
-/**
- * Cosine similarity between two equal-length numeric vectors.
- * Returns value in [-1, 1]; higher = more similar.
- */
-export function cosineSimilarity(a, b) {
-  const vecA = toVectorArray(a);
-  const vecB = toVectorArray(b);
-  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-  let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dot += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom === 0 ? 0 : dot / denom;
-}
-
-/**
- * Get ALL cached master vectors from local storage.
- * Native APK → SQLite (local_master_descriptors JOIN local_employees)
- * Web/Dev    → IndexedDB (Dexie user_master table + employee_sync_queue)
- * Used for one-face-per-employee duplicate check (fully offline-capable).
- */
-export async function getAllMasterVectors() {
-  if (Capacitor.isNativePlatform()) {
-    return await sqliteGetAllMasterVectors();
-  }
-  try {
-    const allMasters = await dexieDb.user_master.toArray();
-    const map = new Map();
-    for (const m of allMasters) {
-      const vec = toVectorArray(m.descriptor_json || m.face_vector);
-      if (vec) {
-        map.set(String(m.employee_id), {
-          employee_id: m.employee_id,
-          nik: m.nik,
-          name: m.name,
-          descriptor_json: vec,
-        });
-      }
+  /**
+   * Get all unsynced logs.
+   */
+  export async function getUnsyncedLogs() {
+    if (Capacitor.isNativePlatform()) {
+      return await sqliteGetUnsyncedLogs();
     }
 
-    // Merge offline pending registered employees
-    const offlineQueue = await dexieDb.employee_sync_queue.toArray();
-    for (const q of offlineQueue) {
-      if (!map.has(String(q.id))) {
-        const vec = toVectorArray(q.descriptor_json || q.descriptor);
+    try {
+      const allQueue = await dexieDb.attendance_sync_queue.toArray();
+      return allQueue.filter((item) => !item.is_synced || item.is_synced === 0);
+    } catch (err) {
+      console.error('[IndexedDB Get Unsynced Error]:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Remove synced items from Queue.
+   */
+  export async function removeSyncedLogs(ids) {
+    if (Capacitor.isNativePlatform()) {
+      await sqliteRemoveSyncedLogs(ids);
+      return;
+    }
+
+    try {
+      if (!ids || ids.length === 0) return;
+      await dexieDb.attendance_sync_queue.bulkDelete(ids);
+    } catch (err) {
+      console.error('[IndexedDB Delete Synced Error]:', err);
+    }
+  }
+
+  /**
+   * Cosine similarity between two equal-length numeric vectors.
+   * Returns value in [-1, 1]; higher = more similar.
+   */
+  export function cosineSimilarity(a, b) {
+    const vecA = toVectorArray(a);
+    const vecB = toVectorArray(b);
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dot += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom === 0 ? 0 : dot / denom;
+  }
+
+  /**
+   * Get ALL cached master vectors from local storage.
+   * Native APK → SQLite (local_master_descriptors JOIN local_employees)
+   * Web/Dev    → IndexedDB (Dexie user_master table + employee_sync_queue)
+   * Used for one-face-per-employee duplicate check (fully offline-capable).
+   */
+  export async function getAllMasterVectors() {
+    if (Capacitor.isNativePlatform()) {
+      return await sqliteGetAllMasterVectors();
+    }
+    try {
+      const allMasters = await dexieDb.user_master.toArray();
+      const map = new Map();
+      for (const m of allMasters) {
+        const vec = toVectorArray(m.descriptor_json || m.face_vector);
         if (vec) {
-          map.set(String(q.id), {
-            employee_id: q.id,
-            nik: q.nik,
-            name: q.name,
+          map.set(String(m.employee_id), {
+            employee_id: m.employee_id,
+            nik: m.nik,
+            name: m.name,
             descriptor_json: vec,
           });
         }
       }
-    }
 
-    return Array.from(map.values());
-  } catch (err) {
-    console.error('[IndexedDB getAllMasterVectors Error]:', err);
-    return [];
-  }
-}
-
-/**
- * Purges deleted employee master vectors and cache records from local IndexedDB or SQLite.
- */
-export async function deleteLocalEmployee(employeeId) {
-  if (Capacitor.isNativePlatform()) {
-    await sqliteDeleteEmployeeBiometrics(Number(employeeId));
-    return;
-  }
-
-  try {
-    const allMasters = await dexieDb.user_master.toArray();
-    const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
-    if (existing) {
-      await dexieDb.user_master.delete(existing.id);
-      console.log(`[IndexedDB] Deleted master vector for employee ID: ${employeeId}`);
-    }
-    // Also remove from employees_cache table if it exists
-    await dexieDb.employees_cache.delete(Number(employeeId));
-  } catch (err) {
-    console.error('[IndexedDB deleteLocalEmployee Error]:', err);
-  }
-}
-
-/**
- * Appends plain text audit logs directly to a public file inside the device's Documents folder.
- * This guarantees the user's offline logs are never lost even if the app's cache or storage is cleared.
- */
-export async function writeToBackupStorage(logLine) {
-  if (!Capacitor.isNativePlatform()) return;
-  const path = 'AgriFace_Offline_Backup.txt';
-  const directory = Directory.External;
-  const encoding = Encoding?.UTF8 || 'utf8';
-
-  try {
-    // Append to file in user's public external app directory (bypasses Scoped Storage restrictions)
-    await Filesystem.appendFile({
-      path,
-      data: logLine,
-      directory,
-      encoding
-    });
-
-    // Resolve and print the exact file path on the device
-    try {
-      const uriResult = await Filesystem.getUri({ directory, path });
-      console.log('[Storage Backup] Appended log to:', uriResult.uri);
-    } catch (_) {
-      console.log('[Storage Backup] Appended log to public external storage');
-    }
-  } catch (err) {
-    console.warn('[Storage Backup] appendFile failed, falling back to read-modify-write:', err);
-    try {
-      let existing = '';
-      try {
-        const readResult = await Filesystem.readFile({
-          path,
-          directory,
-          encoding
-        });
-        existing = readResult.data || '';
-      } catch (readErr) {
-        // File doesn't exist yet, ignore
+      // Merge offline pending registered employees
+      const offlineQueue = await dexieDb.employee_sync_queue.toArray();
+      for (const q of offlineQueue) {
+        if (!map.has(String(q.id))) {
+          const vec = toVectorArray(q.descriptor_json || q.descriptor);
+          if (vec) {
+            map.set(String(q.id), {
+              employee_id: q.id,
+              nik: q.nik,
+              name: q.name,
+              descriptor_json: vec,
+            });
+          }
+        }
       }
 
-      await Filesystem.writeFile({
+      return Array.from(map.values());
+    } catch (err) {
+      console.error('[IndexedDB getAllMasterVectors Error]:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Purges deleted employee master vectors and cache records from local IndexedDB or SQLite.
+   */
+  export async function deleteLocalEmployee(employeeId) {
+    if (Capacitor.isNativePlatform()) {
+      await sqliteDeleteEmployeeBiometrics(employeeId);
+      return;
+    }
+
+    try {
+      const allMasters = await dexieDb.user_master.toArray();
+      const existing = allMasters.find((m) => String(m.employee_id) === String(employeeId));
+      if (existing) {
+        await dexieDb.user_master.delete(existing.id);
+        console.log(`[IndexedDB] Deleted master vector for employee ID: ${employeeId}`);
+      }
+      // Also remove from employees_cache table if it exists
+      const empIdNum = Number(employeeId);
+      if (!isNaN(empIdNum)) {
+        await dexieDb.employees_cache.delete(empIdNum);
+      }
+      await dexieDb.employees_cache.delete(String(employeeId));
+
+      // Cascade Delete: Remove orphaned attendance logs for this employee
+      const empIdStr = String(employeeId);
+
+      const allLogs = await dexieDb.attendance_logs.toArray();
+      const logIdsToDelete = allLogs.filter(l => String(l.employee_id) === empIdStr).map(l => l.id);
+      if (logIdsToDelete.length > 0) {
+        await dexieDb.attendance_logs.bulkDelete(logIdsToDelete);
+        console.log(`[IndexedDB] Cascade deleted ${logIdsToDelete.length} attendance logs for employee ID: ${employeeId}`);
+      }
+
+      const allQLogs = await dexieDb.attendance_sync_queue.toArray();
+      const qLogIdsToDelete = allQLogs.filter(q => String(q.employee_id) === empIdStr).map(q => q.id);
+      if (qLogIdsToDelete.length > 0) {
+        await dexieDb.attendance_sync_queue.bulkDelete(qLogIdsToDelete);
+        console.log(`[IndexedDB] Cascade deleted ${qLogIdsToDelete.length} queued attendance logs for employee ID: ${employeeId}`);
+      }
+    } catch (err) {
+      console.error('[IndexedDB deleteLocalEmployee Error]:', err);
+    }
+  }
+
+  /**
+   * Appends plain text audit logs directly to a public file inside the device's Documents folder.
+   * This guarantees the user's offline logs are never lost even if the app's cache or storage is cleared.
+   */
+  export async function writeToBackupStorage(logLine) {
+    if (!Capacitor.isNativePlatform()) return;
+    const path = 'AgriFace_Offline_Backup.txt';
+    const directory = Directory.External;
+    const encoding = Encoding?.UTF8 || 'utf8';
+
+    try {
+      // Append to file in user's public external app directory (bypasses Scoped Storage restrictions)
+      await Filesystem.appendFile({
         path,
-        data: existing + logLine,
+        data: logLine,
         directory,
         encoding
       });
 
+      // Resolve and print the exact file path on the device
       try {
         const uriResult = await Filesystem.getUri({ directory, path });
-        console.log('[Storage Backup] Fallback write successful to:', uriResult.uri);
+        console.log('[Storage Backup] Appended log to:', uriResult.uri);
       } catch (_) {
-        console.log('[Storage Backup] Fallback write successful');
+        console.log('[Storage Backup] Appended log to public external storage');
       }
-    } catch (writeErr) {
-      console.error('[Storage Backup Fatal] Failed to write backup log to filesystem:', writeErr);
+    } catch (err) {
+      console.warn('[Storage Backup] appendFile failed, falling back to read-modify-write:', err);
+      try {
+        let existing = '';
+        try {
+          const readResult = await Filesystem.readFile({
+            path,
+            directory,
+            encoding
+          });
+          existing = readResult.data || '';
+        } catch (readErr) {
+          // File doesn't exist yet, ignore
+        }
+
+        await Filesystem.writeFile({
+          path,
+          data: existing + logLine,
+          directory,
+          encoding
+        });
+
+        try {
+          const uriResult = await Filesystem.getUri({ directory, path });
+          console.log('[Storage Backup] Fallback write successful to:', uriResult.uri);
+        } catch (_) {
+          console.log('[Storage Backup] Fallback write successful');
+        }
+      } catch (writeErr) {
+        console.error('[Storage Backup Fatal] Failed to write backup log to filesystem:', writeErr);
+      }
     }
   }
-}
 
-/**
- * Summary of all unsynced local data across attendance logs, offline registered employees, and attendance requests
- */
-export async function getUnsyncedDataSummary() {
-  let unsyncedLogsCount = 0;
-  let unsyncedEmployeesCount = 0;
-  let unsyncedRequestsCount = 0;
+  /**
+   * Summary of all unsynced local data across attendance logs, offline registered employees, and attendance requests
+   */
+  export async function getUnsyncedDataSummary() {
+    let unsyncedLogsCount = 0;
+    let unsyncedEmployeesCount = 0;
+    let unsyncedRequestsCount = 0;
 
-  try {
-    const logs = await db.attendance_sync_queue.toArray();
-    unsyncedLogsCount = logs ? logs.length : 0;
-  } catch (e) {
-    console.warn('[Unsynced Summary] Logs check warn:', e);
+    try {
+      const logs = await db.attendance_sync_queue.toArray();
+      unsyncedLogsCount = logs ? logs.length : 0;
+    } catch (e) {
+      console.warn('[Unsynced Summary] Logs check warn:', e);
+    }
+
+    try {
+      const emps = await db.employee_sync_queue.toArray();
+      unsyncedEmployeesCount = emps ? emps.length : 0;
+    } catch (e) {
+      console.warn('[Unsynced Summary] Employees check warn:', e);
+    }
+
+    try {
+      const reqs = await db.attendance_requests.toArray();
+      unsyncedRequestsCount = reqs ? reqs.filter(r => !r.is_synced).length : 0;
+    } catch (e) {
+      console.warn('[Unsynced Summary] Requests check warn:', e);
+    }
+
+    const total = unsyncedLogsCount + unsyncedEmployeesCount + unsyncedRequestsCount;
+    return {
+      total,
+      unsyncedLogsCount,
+      unsyncedEmployeesCount,
+      unsyncedRequestsCount
+    };
   }
 
-  try {
-    const emps = await db.employee_sync_queue.toArray();
-    unsyncedEmployeesCount = emps ? emps.length : 0;
-  } catch (e) {
-    console.warn('[Unsynced Summary] Employees check warn:', e);
-  }
+  /**
+   * Update sync status for text and photo for a specific log ID.
+   * Handles both Native SQLite and Web Dexie.js
+   */
+  export const updateSyncStatus = async (id, textStatus = null, photoStatus = null, syncNotes = null) => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { sqliteUpdateSyncStatus } = await import('./services/sqliteService');
+        await sqliteUpdateSyncStatus(id, textStatus, photoStatus, syncNotes);
+      } catch (e) {
+        console.warn('[DB Error] Native sqliteUpdateSyncStatus failed:', e);
+      }
+    } else {
+      try {
+        const idStr = String(id);
+        const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
+        const cleanIdInt = parseInt(cleanId, 10);
 
-  try {
-    const reqs = await db.attendance_requests.toArray();
-    unsyncedRequestsCount = reqs ? reqs.filter(r => !r.is_synced).length : 0;
-  } catch (e) {
-    console.warn('[Unsynced Summary] Requests check warn:', e);
-  }
+        const updates = {};
+        if (textStatus) updates.status_sync_teks = textStatus;
+        if (photoStatus) updates.status_sync_foto = photoStatus;
+        if (syncNotes !== undefined && syncNotes !== null) {
+          updates.sync_notes = syncNotes;
+          if (syncNotes === 'Membutuhkan Resolusi NIK') {
+            updates.needs_resolution = true;
+          }
+        }
+        if (textStatus === 'done' && photoStatus === 'done') updates.is_synced = true;
 
-  const total = unsyncedLogsCount + unsyncedEmployeesCount + unsyncedRequestsCount;
-  return {
-    total,
-    unsyncedLogsCount,
-    unsyncedEmployeesCount,
-    unsyncedRequestsCount
+        if (Object.keys(updates).length > 0) {
+          if (!isNaN(cleanIdInt)) {
+            await dexieDb.attendance_sync_queue.update(cleanIdInt, updates);
+          }
+          await dexieDb.attendance_logs.update(idStr, updates);
+          await dexieDb.attendance_logs.update(`offline_${cleanIdInt}`, updates);
+        }
+      } catch (e) {
+        console.warn('[DB Error] Web IndexedDB updateSyncStatus failed:', e);
+      }
+    }
   };
-}
 
-/**
- * Update sync status for text and photo for a specific log ID.
- * Handles both Native SQLite and Web Dexie.js
- */
-export const updateSyncStatus = async (id, textStatus = null, photoStatus = null, syncNotes = null) => {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const { sqliteUpdateSyncStatus } = await import('./services/sqliteService');
-      await sqliteUpdateSyncStatus(id, textStatus, photoStatus, syncNotes);
-    } catch (e) {
-      console.warn('[DB Error] Native sqliteUpdateSyncStatus failed:', e);
-    }
-  } else {
-    try {
-      const idStr = String(id);
-      const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
-      const cleanIdInt = parseInt(cleanId, 10);
-      
-      const updates = {};
-      if (textStatus) updates.status_sync_teks = textStatus;
-      if (photoStatus) updates.status_sync_foto = photoStatus;
-      if (syncNotes !== undefined && syncNotes !== null) {
-        updates.sync_notes = syncNotes;
-        if (syncNotes === 'Membutuhkan Resolusi NIK') {
-          updates.needs_resolution = true;
-        }
+  export const queueEmployeeDelete = async (id) => {
+    if (Capacitor.isNativePlatform()) {
+      await sqliteQueueEmployeeDelete(id);
+    } else {
+      try {
+        await dexieDb.employee_delete_queue.put({ id: String(id) });
+      } catch (e) {
+        console.error('[DB Error] Failed to queue employee delete in Dexie:', e);
       }
-      if (textStatus === 'done' && photoStatus === 'done') updates.is_synced = true;
+    }
+  };
 
-      if (Object.keys(updates).length > 0) {
-        if (!isNaN(cleanIdInt)) {
-          await dexieDb.attendance_sync_queue.update(cleanIdInt, updates);
-        }
-        await dexieDb.attendance_logs.update(idStr, updates);
-        await dexieDb.attendance_logs.update(`offline_${cleanIdInt}`, updates);
+  export const getEmployeeDeletes = async () => {
+    if (Capacitor.isNativePlatform()) {
+      return await sqliteGetEmployeeDeletes();
+    } else {
+      try {
+        const records = await dexieDb.employee_delete_queue.toArray();
+        return records.map(r => r.id);
+      } catch (e) {
+        console.error('[DB Error] Failed to get employee deletes from Dexie:', e);
+        return [];
       }
-    } catch (e) {
-      console.warn('[DB Error] Web IndexedDB updateSyncStatus failed:', e);
     }
-  }
-};
+  };
 
-export const queueEmployeeDelete = async (id) => {
-  if (Capacitor.isNativePlatform()) {
-    await sqliteQueueEmployeeDelete(id);
-  } else {
-    try {
-      await dexieDb.employee_delete_queue.put({ id: String(id) });
-    } catch (e) {
-      console.error('[DB Error] Failed to queue employee delete in Dexie:', e);
+  export const removeEmployeeDelete = async (id) => {
+    if (Capacitor.isNativePlatform()) {
+      await sqliteRemoveEmployeeDelete(id);
+    } else {
+      try {
+        await dexieDb.employee_delete_queue.delete(String(id));
+      } catch (e) {
+        console.error('[DB Error] Failed to remove employee delete in Dexie:', e);
+      }
     }
-  }
-};
-
-export const getEmployeeDeletes = async () => {
-  if (Capacitor.isNativePlatform()) {
-    return await sqliteGetEmployeeDeletes();
-  } else {
-    try {
-      const records = await dexieDb.employee_delete_queue.toArray();
-      return records.map(r => r.id);
-    } catch (e) {
-      console.error('[DB Error] Failed to get employee deletes from Dexie:', e);
-      return [];
-    }
-  }
-};
-
-export const removeEmployeeDelete = async (id) => {
-  if (Capacitor.isNativePlatform()) {
-    await sqliteRemoveEmployeeDelete(id);
-  } else {
-    try {
-      await dexieDb.employee_delete_queue.delete(String(id));
-    } catch (e) {
-      console.error('[DB Error] Failed to remove employee delete in Dexie:', e);
-    }
-  }
-};
+  };

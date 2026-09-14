@@ -20,7 +20,7 @@ import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
 
-export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
+export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
 
   // Filters State
@@ -152,7 +152,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             const sim = cosineSimilarity(newVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; }
           }
-          if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+          if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
             setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
             setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
             setScanCameraStatusColor('var(--accent-error)');
@@ -363,7 +363,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             const sim = cosineSimilarity(newVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; }
           }
-          if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+          if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
             setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
             setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
             setEditCameraStatusColor('var(--accent-error)');
@@ -457,7 +457,7 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
               if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
             editCurrentDescriptorRef.current = newVec;
-            if (bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+            if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
               setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
               setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
               setEditCameraStatusColor('var(--accent-error)');
@@ -670,7 +670,9 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           }
 
           if (navigator.onLine && !isOfflineEmp) {
-            // 1. Hapus dari database cloud Supabase
+            // 1. Hapus dari database cloud Supabase (Cascade delete eksplisit untuk amannya)
+            await supabase.from('attendance_logs').delete().eq('employee_id', emp.id);
+            await supabase.from('master_descriptors').delete().eq('employee_id', emp.id);
             const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
             if (delErr) throw delErr;
           } else if (!navigator.onLine && !isOfflineEmp) {
@@ -682,9 +684,10 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           // 2. Bersihkan cache biometrik lokal (IndexedDB / SQLite) agar wajah bisa didaftarkan ulang
           await deleteLocalEmployee(emp.id);
           
-          showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan.', 'success');
+          showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan beserta log absensinya.', 'success');
           refreshEmployees();
           if (refreshLogs) refreshLogs();
+          window.dispatchEvent(new Event('refresh_logs'));
         } catch (err) {
           showToast('Error Sistem', err.message, 'error');
         }
@@ -890,6 +893,10 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
     const matchesAfdeling = filterAfdeling ? emp.afdeling === filterAfdeling : true;
 
     return matchesSearch && matchesStatusTk && matchesStatusPerkawinan && matchesKebun && matchesAfdeling;
+  }).sort((a, b) => {
+    const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return dateB - dateA;
   });
 
   // ---------------------------------

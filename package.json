@@ -1,6 +1,6 @@
 {
   "name": "agriface-biometric-attendance",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "AgriFace - Sistem Absensi Biometrik Wajah Perkebunan berbasis Metode 1-to-1 Verification & Offline-First PWA",
   "main": "server.js",
   "scripts": {

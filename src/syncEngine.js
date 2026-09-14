@@ -27,7 +27,12 @@ export async function checkOnline() {
  */
 export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete = null) {
   const isOnline = await checkOnline();
-  if (isSyncing || !isOnline) return { count: 0 };
+  // Guard: jika isSyncing stuck (crash pada siklus sebelumnya), reset otomatis
+  if (!isOnline) return { count: 0 };
+  if (isSyncing) {
+    console.warn('[Auto-Sync] isSyncing masih aktif dari siklus sebelumnya. Reset paksa untuk mencegah log nyangkut selamanya.');
+    isSyncing = false;
+  }
 
   try {
     let pendingLogsRaw = await getUnsyncedLogs();
@@ -582,19 +587,26 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
       try {
         let realEmpId = null;
 
+        let finalNik = emp.nik ?? '';
+        if (finalNik === '' || finalNik === '-' || finalNik === 'Tanpa NIK') {
+          // Generate a unique fallback NIK to prevent Supabase 23505 UNIQUE constraint collision
+          // which would otherwise cause multiple offline employees to be merged into one.
+          finalNik = 'OFF_NIK_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+        }
+
         // 1. Insert employee record to Supabase
         const { data: createdEmp, error: empErr } = await supabase
           .from('employees')
           .insert([{
-            nik: emp.nik,
-            name: emp.name,
-            department: emp.department || emp.jabatan,
-            afdeling: emp.afdeling,
-            nama_kebun: emp.nama_kebun,
-            status_tk: emp.status_tk,
-            jabatan: emp.jabatan,
-            status_perkawinan: emp.status_perkawinan,
-            has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true
+            nik: finalNik,
+            name: emp.name ?? '',
+            department: emp.department ?? emp.jabatan ?? '',
+            afdeling: emp.afdeling ?? '',
+            nama_kebun: emp.nama_kebun ?? '',
+            status_tk: emp.status_tk ?? '',
+            jabatan: emp.jabatan ?? '',
+            status_perkawinan: emp.status_perkawinan ?? '',
+            has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
           }])
           .select()
           .single();
@@ -702,7 +714,8 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               status_tk: emp.status_tk || null,
               jabatan: emp.jabatan || null,
               status_perkawinan: emp.status_perkawinan || null,
-              has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true,
+              // Fix SQLite boolean deserialization: SQLite stores 1/0, not true/false
+              has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1,
               is_synced: true
             };
             await db.employees_cache.put(realEmpEntry);
@@ -712,10 +725,10 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           }
 
           // JUGA: Update attendance_logs lokal (display cache) dari ID offline ke ID resmi
+          // FIX: db.attendance_logs.filter() tidak ada. Gunakan toArray() lalu .filter() array biasa.
           try {
-            const offlineLogs = await db.attendance_logs.filter(
-              l => String(l.employee_id) === tempIdStr
-            ).toArray();
+            const allDisplayLogs = await db.attendance_logs.toArray();
+            const offlineLogs = allDisplayLogs.filter(l => String(l.employee_id) === tempIdStr);
             for (const ol of offlineLogs) {
               ol.employee_id = realEmpId;
               await db.attendance_logs.put(ol);
