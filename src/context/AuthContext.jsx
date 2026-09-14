@@ -237,6 +237,10 @@ export function AuthProvider({ children }) {
       // DESTROY LOCAL DATA on successful logout to prevent sticky data
       try {
         console.log('[LOGOUT] Destroying local session data (Caches, Logs, Employees)...');
+        if (Capacitor.isNativePlatform()) {
+          const { sqliteClearAll } = await import('../services/sqliteService');
+          await sqliteClearAll();
+        }
         await db.employees_cache.clear(); // This also clears user_master in db.js
         await db.today_attendance_cache.clear();
         await db.attendance_logs.clear();

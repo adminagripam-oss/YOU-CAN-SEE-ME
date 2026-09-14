@@ -442,41 +442,90 @@ export async function syncPendingAttendanceRequests() {
 
     console.log(`[Auto-Sync Requests] Attempting to sync ${unsyncedReqs.length} pending offline admin requests...`);
 
-    // Proses semua approval requests (INSERT ke attendance_requests)
-    const reqsToInsert = unsyncedReqs.map(r => ({
-      id: r.id,
-      request_type: r.request_type,
-      log_id: r.log_id,
-      nik: r.nik || null,
-      name: r.name || null,
-      nama_kebun: r.nama_kebun || null,
-      requested_by: r.requested_by,
-      requested_at: r.requested_at || new Date().toISOString(),
-      status: r.status || 'PENDING',
-      old_value: r.old_value || null,
-      new_value: r.new_value || null
-    }));
+    let syncedCount = 0;
 
-    const { error } = await supabase
-      .from('attendance_requests')
-      .insert(reqsToInsert);
-
-    if (error) {
-      if (error.message.includes('relation "public.attendance_requests" does not exist')) {
-        console.warn('[Sync Engine] attendance_requests table does not exist in Supabase yet.');
-      } else {
-        console.error('[Sync Engine] Gagal push request ke Supabase:', error.message);
-        throw error;
+    for (const r of unsyncedReqs) {
+      if (r.status === 'APPROVED') {
+        try {
+          if (r.request_type === 'DELETE') {
+            const inLogId = r.old_value?.inLogId || r.old_value?.logId || r.log_id;
+            const outLogId = r.old_value?.outLogId;
+            const idsToDelete = [inLogId, outLogId].filter(Boolean);
+            
+            if (idsToDelete.length > 0) {
+              const { error: delErr } = await supabase.from('attendance_logs').delete().in('id', idsToDelete);
+              if (delErr) {
+                console.warn(`[Auto-Sync] Gagal execute delete untuk request ${r.id}:`, delErr.message);
+                continue; // Skip, don't mark as synced
+              }
+            }
+          } else if (r.request_type === 'EDIT' && r.new_value) {
+            let editSuccess = true;
+            const newVal = r.new_value;
+            
+            if (newVal.inLogId && newVal.checkIn) {
+              const [hours, minutes, seconds] = newVal.checkIn.split(':');
+              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.inLogId).single();
+              if (logData) {
+                const oldDate = new Date(logData.timestamp);
+                oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+                let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
+                newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
+                const { error: updErr } = await supabase.from('attendance_logs').update({ timestamp: oldDate.toISOString(), status: newStatus }).eq('id', newVal.inLogId);
+                if (updErr) editSuccess = false;
+              }
+            }
+            if (newVal.outLogId && newVal.checkOut) {
+              const [hours, minutes, seconds] = newVal.checkOut.split(':');
+              const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.outLogId).single();
+              if (logData) {
+                const oldDate = new Date(logData.timestamp);
+                oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+                let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
+                newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
+                const { error: updErr } = await supabase.from('attendance_logs').update({ timestamp: oldDate.toISOString(), status: newStatus }).eq('id', newVal.outLogId);
+                if (updErr) editSuccess = false;
+              }
+            }
+            if (!editSuccess) {
+              console.warn(`[Auto-Sync] Gagal execute edit untuk request ${r.id}`);
+              continue; // Skip
+            }
+          }
+        } catch (execErr) {
+          console.error(`[Auto-Sync] Exception executing request ${r.id}:`, execErr);
+          continue;
+        }
       }
-    } else {
-      // Mark as synced locally HANYA jika sukses HTTP 2xx
-      await Promise.all(unsyncedReqs.map(r => 
-        db.attendance_requests.put({ ...r, is_synced: true })
-      ));
+
+      // After executing, insert into attendance_requests for audit trail
+      const reqPayload = {
+        id: r.id,
+        request_type: r.request_type,
+        log_id: r.log_id,
+        nik: r.nik || null,
+        name: r.name || null,
+        nama_kebun: r.nama_kebun || null,
+        requested_by: r.requested_by,
+        requested_at: r.requested_at || new Date().toISOString(),
+        status: r.status || 'PENDING',
+        old_value: r.old_value || null,
+        new_value: r.new_value || null
+      };
+
+      const { error: insErr } = await supabase.from('attendance_requests').upsert([reqPayload]);
+      if (insErr && !insErr.message.includes('relation "public.attendance_requests" does not exist')) {
+         console.warn(`[Auto-Sync] Failed to insert audit trail for ${r.id}:`, insErr.message);
+      }
+      
+      await db.attendance_requests.put({ ...r, is_synced: true });
+      syncedCount++;
     }
 
-    console.log(`[Auto-Sync Requests Success] Processed ${unsyncedReqs.length} admin requests!`);
-    return { count: unsyncedReqs.length };
+    if (syncedCount > 0) {
+      console.log(`[Auto-Sync Requests Success] Processed ${syncedCount} admin requests!`);
+    }
+    return { count: syncedCount };
   } catch (err) {
     console.error('[Sync Engine Requests Error]:', err.message || err);
     return { count: 0 };

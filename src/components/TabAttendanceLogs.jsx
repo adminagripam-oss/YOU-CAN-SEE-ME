@@ -399,57 +399,6 @@ export default function TabAttendanceLogs({
 
 
   const handleDeleteGroup = (group) => {
-    const isHQ = user?.role === 'headoffice_admin';
-
-    if (!isHQ) {
-      openConfirmModal({
-        title: 'Ajukan Hapus Absensi?',
-        message: `Anda tidak memiliki hak akses untuk menghapus secara langsung. Ajukan permohonan hapus absensi ${group.name} pada ${group.displayDate} ke Head Office?`,
-        confirmText: 'Ajukan Hapus',
-        onConfirm: async () => {
-          try {
-            const reqPayload = {
-              id: crypto.randomUUID ? crypto.randomUUID() : 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
-              request_type: 'DELETE',
-              log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
-              nik: group.nik,
-              name: group.name,
-              nama_kebun: group.nama_kebun || user?.kebun || '-',
-              requested_by: user?.username || 'unknown_admin',
-              requested_at: new Date().toISOString(),
-              status: 'PENDING',
-              old_value: { inLogId: group.inLog?.id || null, outLogId: group.outLog?.id || null, date: group.displayDate }
-            };
-
-              const { db } = await import('../db');
-              await db.attendance_requests.put({ ...reqPayload, is_synced: false });
-              showToast('Request Disimpan', 'Permohonan penghapusan disimpan dan masuk antrean sinkronisasi.', 'success');
-          } catch (err) {
-            console.error('[DELETE REQUEST ERROR]:', err);
-            try {
-              const { db } = await import('../db');
-              const fallbackPayload = {
-                id: 'req_' + Date.now(),
-                request_type: 'DELETE',
-                log_id: group.inLog?.id || group.outLog?.id || 'group_' + group.id,
-                nik: group.nik,
-                name: group.name,
-                nama_kebun: group.nama_kebun || user?.kebun || '-',
-                requested_by: user?.username || 'unknown_admin',
-                requested_at: new Date().toISOString(),
-                status: 'PENDING',
-                is_synced: false
-              };
-              await db.attendance_requests.put(fallbackPayload);
-              showToast('Request Disimpan Lokal', 'Permohonan penghapusan disimpan secara offline.', 'warning');
-            } catch (dexieErr) {
-              showToast('Gagal Mengajukan', `Error: ${err.message}`, 'error');
-            }
-          }
-        }
-      });
-      return;
-    }
 
     openConfirmModal({
       title: 'Hapus Riwayat Absensi?',
@@ -535,18 +484,18 @@ export default function TabAttendanceLogs({
                   await db.attendance_logs.delete(String(onlineId));
                 }
               } else {
-                // Fallback: Queue offline request for HQ
+                // Fallback: Queue offline request
                 for (const onlineId of onlineIds) {
                   const reqPayload = {
-                    id: crypto.randomUUID ? crypto.randomUUID() : 'req_hq_' + Date.now() + '_' + onlineId,
+                    id: crypto.randomUUID ? crypto.randomUUID() : 'req_auto_' + Date.now() + '_' + onlineId,
                     request_type: 'DELETE',
                     log_id: onlineId,
                     nik: group.nik,
                     name: group.name,
                     nama_kebun: group.nama_kebun || user?.kebun || '-',
-                    requested_by: user?.username || 'hq_admin',
+                    requested_by: user?.username || 'admin',
                     requested_at: new Date().toISOString(),
-                    status: 'APPROVED', // Pre-approved because HQ
+                    status: 'APPROVED', // Pre-approved because everyone has access
                     old_value: { logId: onlineId, date: group.displayDate }
                   };
                   await db.attendance_requests.put({ ...reqPayload, is_synced: false });
@@ -554,7 +503,7 @@ export default function TabAttendanceLogs({
                 showToast('Offline Mode', 'Permintaan penghapusan log official disimpan ke antrean offline.', 'warning');
                 
                 // Optionally remove from UI optimistically by deleting from attendance_logs?
-                // For HQ offline delete, maybe delete local so it disappears immediately
+                // For offline delete, maybe delete local so it disappears immediately
                 for (const onlineId of onlineIds) {
                   await db.attendance_logs.delete(String(onlineId));
                 }
@@ -589,24 +538,24 @@ export default function TabAttendanceLogs({
   };
 
   const saveEdit = async () => {
-    const isHQ = user?.role === 'headoffice_admin';
+    try {
+      let success = true;
+      const { db } = await import('../db');
+      const inLogId = editData.inLog?.id || null;
+      const outLogId = editData.outLog?.id || null;
 
-    // Jika user BUKAN headoffice_admin ATAU sedang offline, dia WAJIB lewat antrean permohonan (attendance_requests)
-    if (!isHQ || !navigator.onLine) {
-      try {
-        const inLogId = editData.inLog?.id || null;
-        const outLogId = editData.outLog?.id || null;
-        
+      // Helper for offline request queuing
+      const queueOfflineEdit = async () => {
         const reqPayload = {
-          id: crypto.randomUUID ? crypto.randomUUID() : 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+          id: crypto.randomUUID ? crypto.randomUUID() : 'req_auto_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
           request_type: 'EDIT',
           log_id: inLogId || outLogId || 'group_' + editData.id,
           nik: editData.nik,
           name: editData.name,
           nama_kebun: editData.nama_kebun || user?.kebun || '-',
-          requested_by: user?.username || 'unknown_admin',
+          requested_by: user?.username || 'admin',
           requested_at: new Date().toISOString(),
-          status: 'PENDING',
+          status: 'APPROVED', // Pre-approved
           old_value: { 
             checkIn: editData.checkIn, 
             checkOut: editData.checkOut, 
@@ -622,23 +571,51 @@ export default function TabAttendanceLogs({
             outLogId
           }
         };
-
-        const { db } = await import('../db');
         await db.attendance_requests.put({ ...reqPayload, is_synced: false });
-        showToast('Request Disimpan', 'Permohonan perubahan disimpan dan masuk antrean sinkronisasi.', 'success');
+      };
+
+      if (!navigator.onLine) {
+        // Mode Offline
+        if (editData.inLog && editData.editCheckIn) {
+          const oldDate = new Date(editData.inLog.timestamp);
+          const [hours, minutes, seconds] = editData.editCheckIn.split(':');
+          oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+          let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
+          newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
+
+          const localLogs = await db.attendance_logs.toArray();
+          const found = localLogs.find(l => String(l.id) === String(editData.inLog.id));
+          if (found) {
+            found.timestamp = oldDate.toISOString();
+            found.status = newStatus;
+            await db.attendance_logs.put(found);
+          }
+        }
+
+        if (editData.outLog && editData.editCheckOut) {
+          const oldDate = new Date(editData.outLog.timestamp);
+          const [hours, minutes, seconds] = editData.editCheckOut.split(':');
+          oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
+          let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
+          newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
+
+          const localLogs = await db.attendance_logs.toArray();
+          const found = localLogs.find(l => String(l.id) === String(editData.outLog.id));
+          if (found) {
+            found.timestamp = oldDate.toISOString();
+            found.status = newStatus;
+            await db.attendance_logs.put(found);
+          }
+        }
+
+        await queueOfflineEdit();
+        showToast('Offline Mode', 'Perubahan absensi disimpan ke antrean lokal.', 'warning');
         setIsEditModalOpen(false);
-      } catch (err) {
-        console.error('[EDIT REQUEST ERROR]:', err);
-        showToast('Error', `Gagal mengajukan permohonan edit: ${err.message}`, 'error');
+        refreshLogs();
+        return;
       }
-      return;
-    }
 
-    try {
-      let success = true;
-      const { db } = await import('../db');
-
-      // Update inLog if it exists and checkIn changed
+      // Mode Online: Langsung ke Supabase
       if (editData.inLog && editData.editCheckIn) {
         const oldDate = new Date(editData.inLog.timestamp);
         const [hours, minutes, seconds] = editData.editCheckIn.split(':');
@@ -669,7 +646,6 @@ export default function TabAttendanceLogs({
         }
       }
 
-      // Update outLog if it exists and checkOut changed
       if (editData.outLog && editData.editCheckOut) {
         const oldDate = new Date(editData.outLog.timestamp);
         const [hours, minutes, seconds] = editData.editCheckOut.split(':');
