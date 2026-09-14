@@ -30,7 +30,10 @@ import {
   sqliteSaveAttendanceRequest,
   sqliteGetAttendanceRequests,
   sqliteDeleteAttendanceRequest,
-  sqliteClearAttendanceRequests
+  sqliteClearAttendanceRequests,
+  sqliteQueueEmployeeDelete,
+  sqliteGetEmployeeDeletes,
+  sqliteRemoveEmployeeDelete
 } from './services/sqliteService';
 
 /**
@@ -89,6 +92,17 @@ dexieDb.version(7).stores({
   attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
   local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
   attendance_requests: 'id, request_type, log_id, status, is_synced'
+});
+
+dexieDb.version(9).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric, is_synced',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced',
+  employee_delete_queue: 'id'
 });
 
 dexieDb.version(8).stores({
@@ -952,6 +966,44 @@ export const updateSyncStatus = async (id, textStatus = null, photoStatus = null
       }
     } catch (e) {
       console.warn('[DB Error] Web IndexedDB updateSyncStatus failed:', e);
+    }
+  }
+};
+
+export const queueEmployeeDelete = async (id) => {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteQueueEmployeeDelete(id);
+  } else {
+    try {
+      await dexieDb.employee_delete_queue.put({ id: String(id) });
+    } catch (e) {
+      console.error('[DB Error] Failed to queue employee delete in Dexie:', e);
+    }
+  }
+};
+
+export const getEmployeeDeletes = async () => {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetEmployeeDeletes();
+  } else {
+    try {
+      const records = await dexieDb.employee_delete_queue.toArray();
+      return records.map(r => r.id);
+    } catch (e) {
+      console.error('[DB Error] Failed to get employee deletes from Dexie:', e);
+      return [];
+    }
+  }
+};
+
+export const removeEmployeeDelete = async (id) => {
+  if (Capacitor.isNativePlatform()) {
+    await sqliteRemoveEmployeeDelete(id);
+  } else {
+    try {
+      await dexieDb.employee_delete_queue.delete(String(id));
+    } catch (e) {
+      console.error('[DB Error] Failed to remove employee delete in Dexie:', e);
     }
   }
 };

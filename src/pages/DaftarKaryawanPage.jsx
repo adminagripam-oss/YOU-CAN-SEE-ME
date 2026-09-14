@@ -240,8 +240,8 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
           await sqliteSavePendingEmployee({
             ...scanEmp,
             has_master_biometric: true,
-            descriptor_json: scanCurrentDescriptorRef.current,
-            geometric_descriptor_json: scanCurrentGFVRef.current || null,
+            descriptor_json: (typeof scanCurrentDescriptorRef !== 'undefined' && scanCurrentDescriptorRef?.current) ? scanCurrentDescriptorRef.current : null,
+            geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
             is_synced: false,
             created_at: scanEmp.created_at || new Date().toISOString()
           });
@@ -251,16 +251,16 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
             await db.employee_sync_queue.put({
               ...existingQueue,
               has_master_biometric: true,
-              descriptor_json: scanCurrentDescriptorRef.current,
-              geometric_descriptor_json: scanCurrentGFVRef.current || null,
+              descriptor_json: (typeof scanCurrentDescriptorRef !== 'undefined' && scanCurrentDescriptorRef?.current) ? scanCurrentDescriptorRef.current : null,
+              geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
               is_synced: false
             });
           } else {
             await db.employee_sync_queue.add({
               ...scanEmp,
               has_master_biometric: true,
-              descriptor_json: scanCurrentDescriptorRef.current,
-              geometric_descriptor_json: scanCurrentGFVRef.current || null,
+              descriptor_json: (typeof scanCurrentDescriptorRef !== 'undefined' && scanCurrentDescriptorRef?.current) ? scanCurrentDescriptorRef.current : null,
+              geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
               is_synced: false,
               created_at: scanEmp.created_at || new Date().toISOString()
             });
@@ -660,17 +660,23 @@ export default function DaftarKaryawanPage({ employees, modelsLoaded, showToast,
       onConfirm: async () => {
         try {
           const isOfflineEmp = String(emp.id).startsWith('off_') || String(emp.id).startsWith('tmp_');
-          if (isOfflineEmp) {
-            if (Capacitor.isNativePlatform()) {
-              const { sqliteRemovePendingEmployee } = await import('../services/sqliteService');
-              await sqliteRemovePendingEmployee(emp.id);
-            } else {
-              await db.employee_sync_queue.delete(String(emp.id));
-            }
-          } else if (navigator.onLine) {
+          
+          if (Capacitor.isNativePlatform()) {
+            const { sqliteRemovePendingEmployee } = await import('../services/sqliteService');
+            await sqliteRemovePendingEmployee(emp.id);
+          } else {
+            await db.employee_sync_queue.delete(String(emp.id));
+            await db.employee_sync_queue.delete(Number(emp.id));
+          }
+
+          if (navigator.onLine && !isOfflineEmp) {
             // 1. Hapus dari database cloud Supabase
             const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
             if (delErr) throw delErr;
+          } else if (!navigator.onLine && !isOfflineEmp) {
+            // Mode Offline: Masukkan ke queue penghapusan
+            const { queueEmployeeDelete } = await import('../db');
+            await queueEmployeeDelete(emp.id);
           }
 
           // 2. Bersihkan cache biometrik lokal (IndexedDB / SQLite) agar wajah bisa didaftarkan ulang

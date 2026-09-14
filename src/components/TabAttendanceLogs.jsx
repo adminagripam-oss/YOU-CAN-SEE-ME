@@ -137,18 +137,33 @@ export default function TabAttendanceLogs({
             const idsToDelete = [inLogId, outLogId].filter(Boolean);
 
             if (idsToDelete.length > 0) {
-              const { error: sbErr } = await supabase
-                .from('attendance_logs')
-                .delete()
-                .in('id', idsToDelete);
+              const onlineIds = idsToDelete.filter(id => !String(id).startsWith('offline_') && !String(id).startsWith('auto_out_') && !String(id).startsWith('online_') && !isNaN(Number(id)));
+              const offlineIds = idsToDelete.filter(id => !onlineIds.includes(id));
 
-              if (sbErr) {
-                opSuccess = false;
-                throw sbErr;
+              if (onlineIds.length > 0) {
+                const { error: sbErr } = await supabase
+                  .from('attendance_logs')
+                  .delete()
+                  .in('id', onlineIds);
+
+                if (sbErr) {
+                  opSuccess = false;
+                  throw sbErr;
+                }
               }
 
-              for (const onlineId of idsToDelete) {
+              for (const onlineId of onlineIds) {
                 await db.attendance_logs.delete(String(onlineId));
+              }
+
+              // Also delete offline IDs locally from cache and sync queues
+              for (const offId of offlineIds) {
+                await db.attendance_logs.delete(String(offId));
+                if (String(offId).startsWith('offline_')) {
+                  const rawQueueId = String(offId).replace('offline_', '');
+                  await db.attendance_sync_queue.delete(rawQueueId);
+                  await db.attendance_sync_queue.delete(parseInt(rawQueueId, 10)); // just in case it is integer
+                }
               }
             }
           } else if (req.request_type === 'EDIT') {
@@ -576,7 +591,8 @@ export default function TabAttendanceLogs({
   const saveEdit = async () => {
     const isHQ = user?.role === 'headoffice_admin';
 
-    if (!isHQ) {
+    // Jika user BUKAN headoffice_admin ATAU sedang offline, dia WAJIB lewat antrean permohonan (attendance_requests)
+    if (!isHQ || !navigator.onLine) {
       try {
         const inLogId = editData.inLog?.id || null;
         const outLogId = editData.outLog?.id || null;

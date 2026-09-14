@@ -271,11 +271,18 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     if (syncedTextIds.length > 0) {
       console.log(`[Auto-Sync Step A] Successfully synced ${syncedTextIds.length} text records!`);
+      const noPhotoIds = [];
       for (const id of syncedTextIds) {
         const logToPhoto = textPendingLogs.find(l => l.id === id);
         if (logToPhoto && logToPhoto.path_foto_lokal) {
           photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+        } else {
+          noPhotoIds.push(id);
         }
+      }
+      
+      if (noPhotoIds.length > 0) {
+        await removeSyncedLogs(noPhotoIds);
       }
     }
     } // end if textPendingLogs.length > 0
@@ -348,6 +355,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           if (photoUpdateData && Array.isArray(photoUpdateData) && photoUpdateData.length > 0) {
             // Step C: Garbage Collection (Delete local file and set status_sync_foto = 'done' ONLY upon verified response)
             await updateSyncStatus(log.id, null, 'done');
+            await removeSyncedLogs([log.id]);
             
             try {
               await Filesystem.deleteFile({
@@ -370,12 +378,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     }
 
     // Clean up local queue ONLY if is_synced is 1 (done by getUnsyncedLogs but let's clear them)
-    // Actually we don't need to manually delete from attendance_sync_queue because
-    // next time getUnsyncedLogs is called, it will filter out is_synced === true
-    // Wait, let's remove from sync_queue fully synced items
-    const fullySyncedLogs = await getUnsyncedLogs(); // wait, they are already synced so they won't be here
-    // Let's manually remove those we just synced fully
-    const fullySyncedIds = [...syncedTextIds, ...photoPendingLogs.map(p => p.id)];
+    // We already removed them in Step A (no photo) and Step C (with photo).
     
     // Write sync action to public backup log
     if (Capacitor.isNativePlatform() && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
@@ -703,6 +706,42 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
   }
 }
 
+export async function syncPendingEmployeeDeletes() {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { getEmployeeDeletes, removeEmployeeDelete } = await import('./db');
+    const deleteIds = await getEmployeeDeletes();
+    if (!deleteIds || deleteIds.length === 0) return { count: 0 };
+
+    console.log(`[Auto-Sync] Attempting to sync ${deleteIds.length} employee deletions...`);
+    let syncedCount = 0;
+
+    for (const id of deleteIds) {
+      try {
+        const { error } = await supabase.from('employees').delete().eq('id', id);
+        if (!error || error.code === 'PGRST116') { // PGRST116 means not found, which is fine for delete
+          await removeEmployeeDelete(id);
+          syncedCount++;
+        } else {
+          console.warn(`[Auto-Sync] Gagal sync delete karyawan ${id}:`, error.message);
+        }
+      } catch (err) {
+        console.warn(`[Auto-Sync] Exception saat sync delete karyawan ${id}:`, err);
+      }
+    }
+    
+    if (syncedCount > 0) {
+      console.log(`[Auto-Sync] Berhasil sync ${syncedCount} penghapusan karyawan.`);
+    }
+    return { count: syncedCount };
+  } catch (err) {
+    console.error('[Sync Engine Employee Deletes Error]:', err.message || err);
+    return { count: 0 };
+  }
+}
+
 export async function triggerAutoSync(showToast, onSyncComplete) {
   // Tier 1: Upload offline employees first & update FKs
   await syncPendingEmployees(showToast, onSyncComplete);
@@ -710,6 +749,8 @@ export async function triggerAutoSync(showToast, onSyncComplete) {
   await syncPendingAttendanceLogs(showToast, onSyncComplete);
   // Tier 3: Upload offline admin requests
   await syncPendingAttendanceRequests();
+  // Tier 4: Upload offline employee deletions
+  await syncPendingEmployeeDeletes();
 }
 
 /**

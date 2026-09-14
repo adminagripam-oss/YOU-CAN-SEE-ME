@@ -105,7 +105,8 @@ export async function initSQLite(): Promise<void> {
         status_sync_foto TEXT DEFAULT 'pending',
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
-        kebun TEXT
+        kebun TEXT,
+        durasi INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS local_today_attendance_cache (
@@ -138,7 +139,8 @@ export async function initSQLite(): Promise<void> {
         status_sync_foto TEXT DEFAULT 'pending',
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
-        kebun TEXT
+        kebun TEXT,
+        durasi INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS local_admins (
@@ -163,6 +165,8 @@ export async function initSQLite(): Promise<void> {
         status_tk TEXT,
         jabatan TEXT,
         status_perkawinan TEXT,
+        has_master_biometric INTEGER DEFAULT 0,
+        region TEXT,
         descriptor_json TEXT,
         geometric_descriptor_json TEXT,
         is_synced INTEGER DEFAULT 0,
@@ -182,6 +186,10 @@ export async function initSQLite(): Promise<void> {
         old_value TEXT,
         new_value TEXT,
         is_synced INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS local_employee_delete_queue (
+        id TEXT PRIMARY KEY
       );
     `;
 
@@ -328,6 +336,45 @@ export async function initSQLite(): Promise<void> {
       console.warn('[SQLite Service] Migration local_employees v3 warning:', e);
     }
 
+    // Missing column migrations
+    try {
+      const aqInfo = await dbConnection.query(`PRAGMA table_info(local_attendance_queue);`);
+      const hasDurasi1 = aqInfo.values?.some((c: any) => c.name === 'durasi');
+      if (!hasDurasi1) {
+        console.log('[SQLite Service] Adding missing durasi column to local_attendance_queue...');
+        await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN durasi INTEGER;`);
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_attendance_queue add durasi warning:', e);
+    }
+
+    try {
+      const alInfo = await dbConnection.query(`PRAGMA table_info(local_attendance_logs);`);
+      const hasDurasi2 = alInfo.values?.some((c: any) => c.name === 'durasi');
+      if (!hasDurasi2) {
+        console.log('[SQLite Service] Adding missing durasi column to local_attendance_logs...');
+        await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN durasi INTEGER;`);
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_attendance_logs add durasi warning:', e);
+    }
+
+    try {
+      const eqInfo = await dbConnection.query(`PRAGMA table_info(local_employee_sync_queue);`);
+      const hasHasMB = eqInfo.values?.some((c: any) => c.name === 'has_master_biometric');
+      const hasRegionCol = eqInfo.values?.some((c: any) => c.name === 'region');
+      if (!hasHasMB) {
+        console.log('[SQLite Service] Adding missing has_master_biometric column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN has_master_biometric INTEGER DEFAULT 0;`);
+      }
+      if (!hasRegionCol) {
+        console.log('[SQLite Service] Adding missing region column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN region TEXT;`);
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_employee_sync_queue add columns warning:', e);
+    }
+
     try {
       const aqInfo = await dbConnection.query(`PRAGMA table_info(local_attendance_queue);`);
       const empIdCol = aqInfo.values?.find((c: any) => c.name === 'employee_id');
@@ -441,36 +488,36 @@ export async function initSQLite(): Promise<void> {
     }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN path_foto_lokal TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN path_foto_storage TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN status_sync_teks TEXT DEFAULT 'pending';`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN status_sync_foto TEXT DEFAULT 'pending';`);
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN path_foto_lokal TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN path_foto_storage TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN status_sync_teks TEXT DEFAULT 'pending';`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN status_sync_foto TEXT DEFAULT 'pending';`);
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN sync_notes TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN sync_notes TEXT;`);
-    } catch (e) {}
+    } catch (e) { }
 
     console.log('[SQLite Service] SQLite tables verified and ready.');
     _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
@@ -675,8 +722,8 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
 
     await dbConnection!.run(
       `INSERT INTO local_attendance_queue (
-        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(logData.employee_id),
         logData.nik,
@@ -696,7 +743,8 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
         statusSyncTeks,
         statusSyncFoto,
         isSynced,
-        createdAt
+        createdAt,
+        logData.durasi !== undefined && logData.durasi !== null ? Number(logData.durasi) : null
       ]
     );
 
@@ -1040,8 +1088,8 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
 
     await dbConnection!.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
-      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
         String(log.employee_id),
@@ -1062,7 +1110,8 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
         statusSyncTeks,
         statusSyncFoto,
         isSynced,
-        log.created_at || null
+        log.created_at || null,
+        log.durasi !== undefined && log.durasi !== null ? Number(log.durasi) : null
       ]
     );
   } catch (err: any) {
@@ -1086,8 +1135,8 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
 
       return {
         statement: `INSERT OR REPLACE INTO local_attendance_logs 
-          (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         values: [
           String(log.id),
           String(log.employee_id),
@@ -1108,7 +1157,8 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
           statusSyncTeks,
           statusSyncFoto,
           isSynced,
-          log.created_at || null
+          log.created_at || null,
+          log.durasi !== undefined && log.durasi !== null ? Number(log.durasi) : null
         ]
       };
     });
@@ -1366,8 +1416,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     // 1. Simpan ke Antrean Sync (Outbox)
     const sql = `
       INSERT OR REPLACE INTO local_employee_sync_queue 
-      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, descriptor_json, geometric_descriptor_json, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?);
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?);
     `;
     const params = [
       String(empData.id),
@@ -1379,6 +1429,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.status_tk || null,
       empData.jabatan || null,
       empData.status_perkawinan || null,
+      empData.has_master_biometric ? 1 : 0,
+      empData.region || null,
       descJson,
       geomJson,
       empData.created_at || new Date().toISOString()
@@ -1571,3 +1623,42 @@ export async function sqliteClearAttendanceRequests(): Promise<void> {
   }
 }
 
+export async function sqliteQueueEmployeeDelete(id: string): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(`INSERT OR REPLACE INTO local_employee_delete_queue (id) VALUES (?)`, [String(id)]);
+    console.log(`[SQLite Service] Queued employee delete for ID: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteQueueEmployeeDelete Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteGetEmployeeDeletes(): Promise<string[]> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return [];
+  }
+  try {
+    const res = await dbConnection!.query(`SELECT id FROM local_employee_delete_queue`);
+    return (res.values || []).map((row: any) => row.id);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetEmployeeDeletes Error]:', err?.message || err);
+    return [];
+  }
+}
+
+export async function sqliteRemoveEmployeeDelete(id: string): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(`DELETE FROM local_employee_delete_queue WHERE id = ?`, [String(id)]);
+    console.log(`[SQLite Service] Removed employee delete from queue: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteRemoveEmployeeDelete Error]:', err?.message || err);
+  }
+}
