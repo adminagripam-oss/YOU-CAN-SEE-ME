@@ -463,6 +463,12 @@ export async function syncPendingAttendanceRequests() {
                 console.warn(`[Auto-Sync] Gagal execute delete untuk request ${r.id}:`, delErr.message);
                 continue; // Skip, don't mark as synced
               }
+              
+              // Skenario Resolution (Success): Execute local Hard Delete
+              const { db } = await import('./db');
+              for (const id of idsToDelete) {
+                await db.attendance_logs.hardDelete(String(id));
+              }
             }
           } else if (r.request_type === 'EDIT' && r.new_value) {
             let editSuccess = true;
@@ -621,6 +627,24 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               .single();
             if (existingEmp) {
               realEmpId = existingEmp.id;
+              
+              // Lakukan UPDATE untuk mengirim perubahan teks yang diedit saat offline
+              const { error: updErr } = await supabase.from('employees').update({
+                name: emp.name ?? '',
+                department: emp.department ?? emp.jabatan ?? '',
+                afdeling: emp.afdeling ?? '',
+                nama_kebun: emp.nama_kebun ?? '',
+                status_tk: emp.status_tk ?? '',
+                jabatan: emp.jabatan ?? '',
+                status_perkawinan: emp.status_perkawinan ?? '',
+                has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
+              }).eq('id', realEmpId);
+              
+              if (updErr) {
+                console.warn(`[Sync Employee] Gagal update data karyawan eksisting ${emp.nik}:`, updErr.message);
+              } else {
+                console.log(`[Sync Employee] Sukses update data karyawan eksisting ${emp.nik}`);
+              }
             } else {
               console.warn(`[Sync Employee Fail] Gagal menemukan ID untuk NIK duplikat ${emp.nik}`);
               return false;
@@ -785,6 +809,8 @@ export async function syncPendingEmployeeDeletes() {
         const { error } = await supabase.from('employees').delete().eq('id', id);
         if (!error || error.code === 'PGRST116') { // PGRST116 means not found, which is fine for delete
           await removeEmployeeDelete(id);
+          const { hardDeleteLocalEmployee } = await import('./db');
+          await hardDeleteLocalEmployee(id);
           syncedCount++;
         } else {
           console.warn(`[Auto-Sync] Gagal sync delete karyawan ${id}:`, error.message);
@@ -805,14 +831,14 @@ export async function syncPendingEmployeeDeletes() {
 }
 
 export async function triggerAutoSync(showToast, onSyncComplete) {
-  // Tier 1: Upload offline employees first & update FKs
-  await syncPendingEmployees(showToast, onSyncComplete);
-  // Tier 2: Upload offline attendance logs
-  await syncPendingAttendanceLogs(showToast, onSyncComplete);
-  // Tier 3: Upload offline admin requests
-  await syncPendingAttendanceRequests();
-  // Tier 4: Upload offline employee deletions
+  // Tier 1: Upload offline employee deletions FIRST to free up NIKs
   await syncPendingEmployeeDeletes();
+  // Tier 2: Upload offline employees & update FKs
+  await syncPendingEmployees(showToast, onSyncComplete);
+  // Tier 3: Upload offline attendance logs
+  await syncPendingAttendanceLogs(showToast, onSyncComplete);
+  // Tier 4: Upload offline admin requests
+  await syncPendingAttendanceRequests();
 }
 
 /**

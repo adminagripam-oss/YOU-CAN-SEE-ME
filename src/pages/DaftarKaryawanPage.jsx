@@ -15,7 +15,7 @@ import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, deleteLocalEmployee, toVectorArray } from '../db';
+import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -592,6 +592,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : existingQueue.descriptor_json,
               is_synced: false
             });
+          } else {
+            await db.employee_sync_queue.put({
+              id: editingEmp.id,
+              ...payload,
+              descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : editingEmp.descriptor_json,
+              is_synced: false,
+              created_at: editingEmp.created_at || new Date().toISOString()
+            });
           }
         }
 
@@ -669,20 +677,31 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             await db.employee_sync_queue.delete(Number(emp.id));
           }
 
-          if (navigator.onLine && !isOfflineEmp) {
-            // 1. Hapus dari database cloud Supabase (Cascade delete eksplisit untuk amannya)
-            await supabase.from('attendance_logs').delete().eq('employee_id', emp.id);
-            await supabase.from('master_descriptors').delete().eq('employee_id', emp.id);
-            const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
-            if (delErr) throw delErr;
-          } else if (!navigator.onLine && !isOfflineEmp) {
-            // Mode Offline: Masukkan ke queue penghapusan
-            const { queueEmployeeDelete } = await import('../db');
+          if (isOfflineEmp) {
+            // Unsynced offline employee: Safe to hard delete locally
+            await hardDeleteLocalEmployee(emp.id);
+          } else {
+            // Synced employee: Offline deletion architecture
+            const { queueEmployeeDelete, removeEmployeeDelete } = await import('../db');
             await queueEmployeeDelete(emp.id);
-          }
+            await softDeleteLocalEmployee(emp.id);
 
-          // 2. Bersihkan cache biometrik lokal (IndexedDB / SQLite) agar wajah bisa didaftarkan ulang
-          await deleteLocalEmployee(emp.id);
+            if (navigator.onLine) {
+              try {
+                // 1. Hapus dari database cloud Supabase (Cascade delete eksplisit untuk amannya)
+                await supabase.from('attendance_logs').delete().eq('employee_id', emp.id);
+                await supabase.from('master_descriptors').delete().eq('employee_id', emp.id);
+                const { error: delErr } = await supabase.from('employees').delete().eq('id', emp.id);
+                if (delErr) throw delErr;
+
+                // 2. Bersihkan antrean & lakukan hard delete setelah sukses sync
+                await removeEmployeeDelete(emp.id);
+                await hardDeleteLocalEmployee(emp.id);
+              } catch (onlineErr) {
+                console.warn('Gagal hapus langsung ke server, menunggu antrean:', onlineErr.message);
+              }
+            }
+          }
           
           showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan beserta log absensinya.', 'success');
           refreshEmployees();
@@ -883,6 +902,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   // Filter Logic
   // ---------------------------------
   const filteredEmployees = employees.filter((emp) => {
+    if (emp.syncStatus === 'PENDING_DELETE') return false;
+
     const matchesSearch =
       emp.nik?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.name?.toLowerCase().includes(searchQuery.toLowerCase());

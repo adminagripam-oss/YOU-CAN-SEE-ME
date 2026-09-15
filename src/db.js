@@ -12,7 +12,8 @@ import {
   sqliteBulkPutEmployeesCache,
   sqliteGetEmployeesCache,
   sqliteGetAllMasterVectors,
-  sqliteDeleteEmployeeBiometrics,
+  sqliteHardDeleteEmployeeBiometrics,
+  sqliteSoftDeleteEmployee,
   sqliteCacheTodayAttendance,
   sqliteGetTodayAttendance,
   sqliteClearTodayAttendanceCache,
@@ -20,7 +21,8 @@ import {
   sqliteBulkSaveAttendanceLogs,
   sqliteGetAttendanceLogs,
   sqliteGetTodayAttendanceLogs,
-  sqliteDeleteAttendanceLog,
+  sqliteHardDeleteAttendanceLog,
+  sqliteSoftDeleteAttendanceLog,
   sqliteClearAttendanceLogs,
   sqliteSaveAdmin,
   sqliteGetAdmin,
@@ -316,14 +318,25 @@ export const db = {
         }
       }
     },
-    async delete(id) {
+    async hardDelete(id) {
       if (Capacitor.isNativePlatform()) {
-        await sqliteDeleteAttendanceLog(id);
+        await sqliteHardDeleteAttendanceLog(id);
       } else {
         try {
           await dexieDb.attendance_logs.delete(id);
         } catch (e) {
-          console.warn('[Dexie Attendance Logs Delete Error]:', e);
+          console.warn('[Dexie Attendance Logs Hard Delete Error]:', e);
+        }
+      }
+    },
+    async softDelete(id) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSoftDeleteAttendanceLog(id);
+      } else {
+        try {
+          await dexieDb.attendance_logs.update(id, { syncStatus: 'PENDING_DELETE' });
+        } catch (e) {
+          console.warn('[Dexie Attendance Logs Soft Delete Error]:', e);
         }
       }
     },
@@ -817,9 +830,9 @@ export async function queueOfflineAttendance(logData) {
   /**
    * Purges deleted employee master vectors and cache records from local IndexedDB or SQLite.
    */
-  export async function deleteLocalEmployee(employeeId) {
+export async function hardDeleteLocalEmployee(employeeId) {
     if (Capacitor.isNativePlatform()) {
-      await sqliteDeleteEmployeeBiometrics(employeeId);
+      await sqliteHardDeleteEmployeeBiometrics(employeeId);
       return;
     }
 
@@ -854,7 +867,25 @@ export async function queueOfflineAttendance(logData) {
         console.log(`[IndexedDB] Cascade deleted ${qLogIdsToDelete.length} queued attendance logs for employee ID: ${employeeId}`);
       }
     } catch (err) {
-      console.error('[IndexedDB deleteLocalEmployee Error]:', err);
+      console.error('[IndexedDB hardDeleteLocalEmployee Error]:', err);
+    }
+  }
+
+  export async function softDeleteLocalEmployee(employeeId) {
+    if (Capacitor.isNativePlatform()) {
+      await sqliteSoftDeleteEmployee(employeeId);
+      return;
+    }
+
+    try {
+      const empIdNum = Number(employeeId);
+      if (!isNaN(empIdNum)) {
+        await dexieDb.employees_cache.update(empIdNum, { syncStatus: 'PENDING_DELETE' });
+      }
+      await dexieDb.employees_cache.update(String(employeeId), { syncStatus: 'PENDING_DELETE' });
+      console.log(`[IndexedDB] Soft deleted employee ID: ${employeeId}`);
+    } catch (err) {
+      console.error('[IndexedDB softDeleteLocalEmployee Error]:', err);
     }
   }
 

@@ -446,7 +446,7 @@ export default function TabAttendanceLogs({
                 const rawQueueId = localId.replace('offline_', '');
                 await db.attendance_sync_queue.delete(rawQueueId);
               }
-              await db.attendance_logs.delete(String(localId));
+              await db.attendance_logs.hardDelete(String(localId));
             }
 
             // 2. DELETE OFFICIAL LOGS (Skenario B)
@@ -470,7 +470,7 @@ export default function TabAttendanceLogs({
               if (isOnlineSuccess) {
                 // Success: Delete local copies
                 for (const onlineId of onlineIds) {
-                  await db.attendance_logs.delete(String(onlineId));
+                  await db.attendance_logs.hardDelete(String(onlineId));
                 }
               } else {
                 // Fallback: Queue offline request
@@ -494,7 +494,7 @@ export default function TabAttendanceLogs({
                 // Optionally remove from UI optimistically by deleting from attendance_logs?
                 // For offline delete, maybe delete local so it disappears immediately
                 for (const onlineId of onlineIds) {
-                  await db.attendance_logs.delete(String(onlineId));
+                  await db.attendance_logs.softDelete(String(onlineId));
                 }
               }
             }
@@ -565,6 +565,8 @@ export default function TabAttendanceLogs({
 
       if (!navigator.onLine) {
         // Mode Offline
+        let needsQueueEdit = false;
+
         if (editData.inLog && editData.editCheckIn) {
           const oldDate = new Date(editData.inLog.timestamp);
           const [hours, minutes, seconds] = editData.editCheckIn.split(':');
@@ -578,6 +580,19 @@ export default function TabAttendanceLogs({
             found.timestamp = oldDate.toISOString();
             found.status = newStatus;
             await db.attendance_logs.put(found);
+            
+            // Perbaikan Offline Edit: Jika ini log offline, ubah juga payload di antrean
+            if (String(found.id).startsWith('offline_')) {
+              const rawQueueId = String(found.id).replace('offline_', '');
+              const queuedLog = await db.attendance_sync_queue.get(rawQueueId);
+              if (queuedLog) {
+                queuedLog.timestamp = oldDate.toISOString();
+                queuedLog.status = newStatus;
+                await db.attendance_sync_queue.put(queuedLog);
+              }
+            } else {
+              needsQueueEdit = true;
+            }
           }
         }
 
@@ -594,10 +609,25 @@ export default function TabAttendanceLogs({
             found.timestamp = oldDate.toISOString();
             found.status = newStatus;
             await db.attendance_logs.put(found);
+            
+            // Perbaikan Offline Edit: Jika ini log offline, ubah juga payload di antrean
+            if (String(found.id).startsWith('offline_')) {
+              const rawQueueId = String(found.id).replace('offline_', '');
+              const queuedLog = await db.attendance_sync_queue.get(rawQueueId);
+              if (queuedLog) {
+                queuedLog.timestamp = oldDate.toISOString();
+                queuedLog.status = newStatus;
+                await db.attendance_sync_queue.put(queuedLog);
+              }
+            } else {
+              needsQueueEdit = true;
+            }
           }
         }
 
-        await queueOfflineEdit();
+        if (needsQueueEdit) {
+          await queueOfflineEdit();
+        }
         showToast('Offline Mode', 'Perubahan absensi disimpan ke antrean lokal.', 'warning');
         setIsEditModalOpen(false);
         refreshLogs();

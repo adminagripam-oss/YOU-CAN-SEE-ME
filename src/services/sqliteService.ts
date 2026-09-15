@@ -83,7 +83,8 @@ export async function initSQLite(): Promise<void> {
         status_perkawinan TEXT,
         has_master_biometric INTEGER DEFAULT 0,
         region TEXT,
-        is_synced INTEGER DEFAULT 1
+        is_synced INTEGER DEFAULT 1,
+        syncStatus TEXT DEFAULT NULL
       );
 
       CREATE TABLE IF NOT EXISTS local_master_descriptors (
@@ -147,7 +148,8 @@ export async function initSQLite(): Promise<void> {
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
         kebun TEXT,
-        durasi INTEGER
+        durasi INTEGER,
+        syncStatus TEXT DEFAULT NULL
       );
 
       CREATE TABLE IF NOT EXISTS local_admins (
@@ -524,6 +526,14 @@ export async function initSQLite(): Promise<void> {
     } catch (e) { }
     try {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN sync_notes TEXT;`);
+    } catch (e) { }
+
+    // Soft delete migrations
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN syncStatus TEXT DEFAULT NULL;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN syncStatus TEXT DEFAULT NULL;`);
     } catch (e) { }
 
     console.log('[SQLite Service] SQLite tables verified and ready.');
@@ -976,9 +986,9 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
 }
 
 /**
- * Deletes local employee data and master biometric descriptors.
+ * Hard Deletes local employee data and master biometric descriptors.
  */
-export async function sqliteDeleteEmployeeBiometrics(employeeId: number | string): Promise<void> {
+export async function sqliteHardDeleteEmployeeBiometrics(employeeId: number | string): Promise<void> {
   if (!dbConnection) return;
   try {
     const empIdStr = String(employeeId);
@@ -1337,9 +1347,9 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
 }
 
 /**
- * Delete a single local attendance log from SQLite.
+ * Hard Delete a single local attendance log from SQLite.
  */
-export async function sqliteDeleteAttendanceLog(id: string): Promise<void> {
+export async function sqliteHardDeleteAttendanceLog(id: string): Promise<void> {
   if (!dbConnection) {
     const ready = await waitForConnection();
     if (!ready) return;
@@ -1687,5 +1697,31 @@ export async function sqliteRemoveEmployeeDelete(id: string): Promise<void> {
     console.log(`[SQLite Service] Removed employee delete from queue: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemoveEmployeeDelete Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteSoftDeleteEmployee(id: string): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(`UPDATE local_employees SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
+    console.log(`[SQLite Service] Soft deleted employee: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSoftDeleteEmployee Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteSoftDeleteAttendanceLog(id: string): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection!.run(`UPDATE local_attendance_logs SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
+    console.log(`[SQLite Service] Soft deleted attendance log: ${id}`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSoftDeleteAttendanceLog Error]:', err?.message || err);
   }
 }

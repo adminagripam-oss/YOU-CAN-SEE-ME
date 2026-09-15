@@ -27,3 +27,16 @@ ik_{nik}_{date}_{type}) for online logs in addition to the employee_id-based sig
 - **db.attendance_logs Has No filter() Method**: The db.attendance_logs object in db.js is a custom wrapper with only: put, ulkPut, 	oArray, delete, getTodayLogs, clear. Never call .filter() directly on it. Always use .toArray() first, then apply JavaScript array .filter() on the result.
 
 - **Offline SQLite Primary Key Retrieval**: When inserting new rows into Capacitor SQLite native tables, ALWAYS retrieve the auto-incremented primary key synchronously using `runRes.changes?.lastId` from the insert execution result. Never rely on subsequent `SELECT last_insert_rowid()` queries (which are highly prone to race conditions), and never allow a fallback to `null` to be used as a prefix (e.g., `offline_null`) for IndexedDB dual-write caches, as this will cause silent data overwriting.
+
+- **Offline Deletion Architecture**: When handling delete operations in the React + Capacitor app, always follow the offline-first deletion pattern: 
+  1. **Optimistic UI Update**: Immediately update React/Zustand state to hide the item from the user.
+  2. **Soft Delete Locally**: Do not hard-delete immediately. Mark the local database (SQLite/IndexedDB) record with a flag like `syncStatus: 'PENDING_DELETE'`.
+  3. **Queue Network Action**: Add the delete request (endpoint, HTTP DELETE, item ID, timestamp) to the `offline_sync_queue`.
+  4. **Check & Listen**: Use Capacitor `Network.getStatus()` to trigger sync if online, or wait if offline. Use `Network.addListener` to detect connectivity changes.
+  5. **Cleanup & Hard Delete**: Only permanently delete the local record and remove the queue task upon receiving a successful server response (HTTP 200/204).
+
+- **Offline Data Integration (Native vs Web)**: Whenever implementing central data fetching logic (like `fetchEmployees` in `App.jsx`), always explicitly branch data retrieval using `Capacitor.isNativePlatform()`. In native environments, read exclusively from SQLite caches (`sqliteGetEmployeesCache`, `sqliteGetPendingEmployees`). Failure to do so will cause the React state to read from an empty/stale IndexedDB fallback, preventing the UI/Dashboard from reacting to local offline changes seamlessly.
+
+- **Offline Deletion Tokenization (Sync Architecture)**: Differentiate deletion logic based on the origin of the entity.
+  1. For entities with temporary offline IDs (`off_emp_...`), perform a true local hard-delete, as the remote database has no knowledge of them.
+  2. For entities with authoritative remote IDs (UUIDs), do not hard delete locally. Instead, issue a deletion token by inserting the ID into `offline_sync_queue` and flagging the local cache with `syncStatus: 'PENDING_DELETE'`. The `syncEngine` must process these deletion tokens (Tier 1) *before* processing any new inserts/updates to prevent Unique Constraint violations.

@@ -199,14 +199,19 @@ function AppContent() {
     // Preload existing cached employees to support Delta Sync / Offline Mode
     let localCachedEmps = [];
     try {
-      const cached = await db.employees_cache.toArray();
-      if (cached) {
-        if (adminObj.role === 'estate_admin' && adminObj.kebun) {
-          localCachedEmps = cached.filter(e => e.nama_kebun === adminObj.kebun || e.kebun === adminObj.kebun);
-        } else if (adminObj.role === 'regional_admin' && adminObj.region) {
-          localCachedEmps = cached.filter(e => e.region === adminObj.region);
-        } else {
-          localCachedEmps = cached;
+      if (Capacitor.isNativePlatform()) {
+        const { sqliteGetEmployeesCache } = await import('./services/sqliteService');
+        localCachedEmps = await sqliteGetEmployeesCache();
+      } else {
+        const cached = await db.employees_cache.toArray();
+        if (cached) {
+          if (adminObj.role === 'estate_admin' && adminObj.kebun) {
+            localCachedEmps = cached.filter(e => e.nama_kebun === adminObj.kebun || e.kebun === adminObj.kebun);
+          } else if (adminObj.role === 'regional_admin' && adminObj.region) {
+            localCachedEmps = cached.filter(e => e.region === adminObj.region);
+          } else {
+            localCachedEmps = cached;
+          }
         }
       }
     } catch (e) {
@@ -318,7 +323,13 @@ function AppContent() {
 
     // Merge pending unsynced offline registered employees if any exist
     try {
-      const pendingEmps = await db.employee_sync_queue.toArray();
+      let pendingEmps = [];
+      if (Capacitor.isNativePlatform()) {
+        const { sqliteGetPendingEmployees } = await import('./services/sqliteService');
+        pendingEmps = await sqliteGetPendingEmployees();
+      } else {
+        pendingEmps = await db.employee_sync_queue.toArray();
+      }
       if (pendingEmps && pendingEmps.length > 0) {
         const empMap = new Map((empData || []).map(e => [String(e.id), e]));
         for (const p of pendingEmps) {
