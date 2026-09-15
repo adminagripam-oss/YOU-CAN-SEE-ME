@@ -600,62 +600,55 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           finalNik = 'OFF_NIK_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
         }
 
-        // 1. Insert employee record to Supabase
-        const { data: createdEmp, error: empErr } = await supabase
-          .from('employees')
-          .insert([{
-            nik: finalNik,
-            name: emp.name ?? '',
-            department: emp.department ?? emp.jabatan ?? '',
-            afdeling: emp.afdeling ?? '',
-            nama_kebun: emp.nama_kebun ?? '',
-            status_tk: emp.status_tk ?? '',
-            jabatan: emp.jabatan ?? '',
-            status_perkawinan: emp.status_perkawinan ?? '',
-            has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
-          }])
-          .select()
-          .single();
+        // 1. Call RPC for conflict resolution
+        const payload = {
+          nik: finalNik,
+          name: emp.name ?? '',
+          department: emp.department ?? emp.jabatan ?? '',
+          afdeling: emp.afdeling ?? '',
+          nama_kebun: emp.nama_kebun ?? '',
+          status_tk: emp.status_tk ?? '',
+          jabatan: emp.jabatan ?? '',
+          status_perkawinan: emp.status_perkawinan ?? '',
+          has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
+        };
 
-        if (empErr) {
-          if (empErr.code === '23505' || empErr.message?.includes('duplicate key') || empErr.message?.includes('already exists')) {
-            console.warn(`[Sync Employee] NIK ${emp.nik} sudah ada di Supabase. Mengambil ID karyawan yang ada...`);
-            const { data: existingEmp } = await supabase
-              .from('employees')
-              .select('id')
-              .eq('nik', emp.nik)
-              .single();
-            if (existingEmp) {
-              realEmpId = existingEmp.id;
-              
-              // Lakukan UPDATE untuk mengirim perubahan teks yang diedit saat offline
-              const { error: updErr } = await supabase.from('employees').update({
-                name: emp.name ?? '',
-                department: emp.department ?? emp.jabatan ?? '',
-                afdeling: emp.afdeling ?? '',
-                nama_kebun: emp.nama_kebun ?? '',
-                status_tk: emp.status_tk ?? '',
-                jabatan: emp.jabatan ?? '',
-                status_perkawinan: emp.status_perkawinan ?? '',
-                has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
-              }).eq('id', realEmpId);
-              
-              if (updErr) {
-                console.warn(`[Sync Employee] Gagal update data karyawan eksisting ${emp.nik}:`, updErr.message);
-              } else {
-                console.log(`[Sync Employee] Sukses update data karyawan eksisting ${emp.nik}`);
-              }
-            } else {
-              console.warn(`[Sync Employee Fail] Gagal menemukan ID untuk NIK duplikat ${emp.nik}`);
-              return false;
-            }
-          } else {
-            console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, empErr.message);
-            return false;
-          }
-        } else {
-          realEmpId = createdEmp.id;
+        const { data: rpcData, error: rpcError } = await supabase.rpc('sync_offline_employee', { payload });
+
+        if (rpcError) {
+          console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, rpcError.message);
+          window.alert(`[ERROR SINKRONISASI SUPABASE]\n\nGagal mengirim karyawan ${emp.name}.\n\nPesan Error: ${rpcError.message}`);
+          return false;
         }
+
+        if (rpcData && rpcData.status === 'rejected_deleted') {
+          console.warn(`[Sync Employee Edge Case] Edit ditolak! Karyawan ${emp.nik} sudah dihapus secara permanen di server (Soft Deleted).`);
+          // Skip updating server, but we must purge this local ghost edit
+          const { deleteLocalEmployee } = await import('./db');
+          await deleteLocalEmployee(emp.id);
+          if (isNative) {
+            const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
+            await sqliteRemovePendingEmployee(emp.id);
+          } else {
+            await db.employee_sync_queue.delete(emp.id);
+          }
+          return true; // Return true to mark as "processed" so it doesn't block queue
+        }
+
+        if (rpcData && rpcData.status === 'error') {
+           console.warn(`[Sync Employee Error] Error dari RPC:`, rpcData.message);
+           window.alert(`[ERROR SINKRONISASI DATABASE DOMINANT]\n\nPesan Error: ${rpcData.message}`);
+           return false;
+        }
+
+        if (rpcData && (rpcData.status === 'merged' || rpcData.status === 'inserted')) {
+          realEmpId = rpcData.id;
+          console.log(`[Sync Employee] Sukses (${rpcData.status}) data karyawan ${emp.nik}`);
+        } else {
+          console.warn(`[Sync Employee] Status RPC tidak dikenali:`, rpcData);
+          return false;
+        }
+
 
         // 2. Insert master biometrics descriptor if present
         let descObj = emp.descriptor_json;

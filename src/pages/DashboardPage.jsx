@@ -110,6 +110,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         groups[empIdStr] = {
           employee_id: empIdStr,
           nik: log.nik,
+          name: log.name,
+          department: log.department,
+          nama_kebun: log.nama_kebun || log.kebun || '-',
+          afdeling: log.afdeling || '-',
           inLog: null,
           outLog: null,
           keterangan: 'Hadir' // default
@@ -155,9 +159,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     return uniqueKebuns.map(kebunName => {
       const kebunEmployees = filteredEmployees.filter(e => e.nama_kebun === kebunName);
       const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
+      const kebunEmpNiks = new Set(kebunEmployees.map(e => String(e.nik))); // NIK Fallback untuk sinkronisasi offline
 
       // Hitung HK Hadir (TK Hadir) hari ini dari groupedLogs yang finalStatus-nya 'Hadir'
-      const kebunGroupedLogs = groupedLogs.filter(g => kebunEmpIds.has(String(g.employee_id)));
+      const kebunGroupedLogs = groupedLogs.filter(g => kebunEmpIds.has(String(g.employee_id)) || kebunEmpNiks.has(String(g.nik)));
       const hadirCount = kebunGroupedLogs.filter(g => g.finalStatus === 'Hadir').length;
       
       const totalCount = kebunEmployees.length || 1;
