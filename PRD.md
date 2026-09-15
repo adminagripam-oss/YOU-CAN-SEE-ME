@@ -930,3 +930,22 @@ Pembaruan versi **v4.3.0 (rilis versi aplikasi mobile v1.4.2)** menandai peluncu
 ### 25.5 Fine-Tuning Threshold Biometrik (0.85) & Network Permission Android
 * **Standarisasi Threshold Cosine Similarity**: Mengunci threshold kecocokan biometrik pada nilai $\ge 0.85$ (85%) untuk memastikan tingkat akurasi verifikasi 1-to-1 yang seimbang antara *False Acceptance Rate* (FAR) dan *False Rejection Rate* (FRR).
 * **Konfigurasi Network State Android**: Memperbarui `AndroidManifest.xml` dengan hak akses `ACCESS_NETWORK_STATE` dan `INTERNET` guna memastikan sensor status jaringan Capacitor Network mendeteksi transisi offline-ke-online secara presisi pada berbagai merk smartphone Android.
+
+
+## 26. Pembaruan v4.5.0: Database Dominant Sync & OTA Automation
+Pembaruan versi **v4.5.0** (rilis OTA v1.7.24) merupakan lompatan besar dalam keandalan sinkronisasi offline. Sistem tidak lagi membebani klien (HP) untuk memutuskan konflik data, melainkan memindahkannya ke dalam *engine database* terpusat (PostgreSQL RPC), serta memberlakukan automasi packaging OTA yang menjamin kompatibilitas ekstraksi antar platform.
+
+### 26.1 Database Dominant Architecture (Server-Wins Conflict Resolution)
+* **Supabase RPC (Remote Procedure Call)**: Menggantikan logika `upsert` sisi klien di `syncEngine.js` dengan pemanggilan `supabase.rpc('sync_offline_employee', { payload })`. Seluruh logika *decision making* kini dieksekusi secara atomik di dalam *database* Supabase.
+* **Soft-Delete Rejection & Auto-Cleanup**: Jika admin mencoba mengirimkan edit data karyawan dari perangkat offline, namun karyawan tersebut ternyata sudah dihapus secara permanen di server (`deleted_at IS NOT NULL`), RPC akan menolaknya dengan status `rejected_deleted`. `syncEngine.js` akan merespons ini dengan langsung bertindak sebagai *Tukang Sapu*, menghapus *Ghost Data* tersebut dari antrean SQLite lokal perangkat agar tidak terjadi stagnasi sinkronisasi.
+* **Smart Type Casting (BIGINT Fix)**: Mengamankan struktur variabel RPC dari UUID menjadi BIGINT (Angka) untuk mengakhiri error kompatibilitas tipe data `invalid input syntax for type uuid` saat memetakan data Karyawan.
+
+### 26.2 NIK Fallback & Dashboard KPI Alignment
+* **Sinkronisasi Metrik Offline**: Memperbaiki anomali di `DashboardPage.jsx` di mana log absensi dari karyawan offline (dengan ID sementara `off_emp_123`) tidak masuk ke dalam perhitungan total Hadir per Kebun (Kebun Summary) karena ID sementaranya tidak dikenali setelah karyawan disinkronisasi ke Cloud.
+* **Penerapan `kebunEmpNiks`**: Dashboard kini tidak hanya memfilter berdasarkan `employee_id`, melainkan mengaplikasikan jaring pengaman sekunder berupa pencocokan Nomor Induk Karyawan (`nik`) untuk memastikan log offline yang tertinggal di lokal tetap diakui sah dan dihitung ke dalam analitik secara presisi.
+* **Metadata Injection**: Menyelaraskan `groupedLogs` pada Dashboard agar mengusung metadata lengkap (seperti `name`, `department`, `afdeling`, dan `nama_kebun`) selayaknya logika di halaman `TabAttendanceLogs.jsx`, menjamin konsistensi format *database* luring di seluruh ekosistem UI.
+
+### 26.3 Standarisasi POSIX pada Dist OTA Update
+* **Solusi Capacitor Unzip Error**: Menyelesaikan masalah kritis `windows path not supported` yang menyebabkan APK Android selalu gagal mengekstrak paket pembaruan OTA hasil kompresi Windows PowerShell.
+* **POSIX-Compliant ZIP Automation**: Menulis ulang sistem kompresi rilis web menggunakan pustaka `jszip` via NodeJS (`create_posix_zip.js`), secara eksplisit memaksa struktur hirarki arsip ZIP menggunakan garis miring POSIX (`/`) standar yang diakui dan dapat diekstrak mulus oleh Capacitor Android (Linux).
+* **OTA Payload Manifest Alignment**: Mengotomatiskan `upload_ota.js` agar tidak hanya melempar file `.zip` ke Storage, namun juga memastikan *file manifest* `version.json` otomatis ter-*deploy* ke publik. Ini krusial agar UI pengecekan `App.jsx` di APK selalu menyadari eksistensi versi OTA terbaru.
