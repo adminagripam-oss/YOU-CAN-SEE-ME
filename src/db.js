@@ -344,11 +344,23 @@ export const db = {
       if (Capacitor.isNativePlatform()) {
         return await sqliteGetTodayAttendanceLogs(empId, dateStr);
       } else {
+        let combined = [];
+        
         try {
           const allLogs = await dexieDb.attendance_logs.toArray();
+          combined = combined.concat(allLogs);
+        } catch (eLogs) {
+          console.warn('[Dexie] Error fetching attendance_logs:', eLogs);
+        }
+        
+        try {
           const allQueue = await dexieDb.attendance_sync_queue.toArray();
-          const combined = [...allLogs, ...allQueue];
-          
+          combined = combined.concat(allQueue);
+        } catch (eQueue) {
+          console.warn('[Dexie] Error fetching attendance_sync_queue:', eQueue);
+        }
+        
+        try {
           const filtered = combined.filter(row => String(row.employee_id) === String(empId) && row.timestamp && row.timestamp.substring(0, 10) === dateStr);
           
           // Deduplicate by timestamp to prevent dual-write duplicates
@@ -358,7 +370,7 @@ export const db = {
           });
           
           const uniqueFiltered = Array.from(uniqueMap.values());
-          return uniqueFiltered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          return uniqueFiltered.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         } catch (e) {
           console.warn('[Dexie Attendance Logs getTodayLogs Error]:', e);
           return [];

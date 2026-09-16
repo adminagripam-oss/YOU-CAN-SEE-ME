@@ -1332,30 +1332,56 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
     const ready = await waitForConnection();
     if (!ready) return [];
   }
+  let combinedRows: any[] = [];
   try {
     const empIdStr = String(empId);
-    const res = await dbConnection!.query(
-      `SELECT * FROM (
-         SELECT id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at 
-         FROM local_attendance_logs 
-         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?
-         UNION ALL
-         SELECT id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at 
-         FROM local_attendance_queue
-         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?
-       ) ORDER BY timestamp ASC`,
-      [empIdStr, empId, dateStr, empIdStr, empId, dateStr]
-    );
-    const rows = res.values || [];
-    return rows.map((row: any) => ({
+    
+    // 1. Fetch from local_attendance_logs
+    try {
+      const resLogs = await dbConnection!.query(
+        `SELECT * FROM local_attendance_logs 
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?`,
+        [empIdStr, empId, dateStr]
+      );
+      if (resLogs.values) {
+        combinedRows = combinedRows.concat(resLogs.values);
+      }
+    } catch (errLogs: any) {
+      console.warn('[SQLite Service] Error querying local_attendance_logs:', errLogs?.message || errLogs);
+    }
+
+    // 2. Fetch from local_attendance_queue
+    try {
+      const resQueue = await dbConnection!.query(
+        `SELECT * FROM local_attendance_queue
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?`,
+        [empIdStr, empId, dateStr]
+      );
+      if (resQueue.values) {
+        combinedRows = combinedRows.concat(resQueue.values);
+      }
+    } catch (errQueue: any) {
+      console.warn('[SQLite Service] Error querying local_attendance_queue:', errQueue?.message || errQueue);
+    }
+
+    // Deduplicate by timestamp and sort ascending
+    const uniqueMap = new Map();
+    combinedRows.forEach((row: any) => {
+      uniqueMap.set(row.timestamp, row);
+    });
+    
+    const uniqueFiltered = Array.from(uniqueMap.values());
+    uniqueFiltered.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    return uniqueFiltered.map((row: any) => ({
       id: row.id,
       employee_id: row.employee_id,
       nik: row.nik,
       name: row.name,
       department: row.department,
-      afdeling: row.afdeling,
-      kebun: row.kebun,
-      nama_kebun: row.kebun,
+      afdeling: row.afdeling || null,
+      kebun: row.kebun || null,
+      nama_kebun: row.kebun || null,
       timestamp: row.timestamp,
       location: row.location,
       lat: row.lat,
@@ -1366,6 +1392,7 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
       is_synced: row.is_synced === 1,
       created_at: row.created_at
     }));
+
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetTodayAttendanceLogs Error]:', err?.message || err, err?.stack || '');
     return [];
