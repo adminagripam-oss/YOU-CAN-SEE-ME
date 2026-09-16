@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-rou
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
-import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors } from './db';
+import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes } from './db';
 import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
@@ -861,7 +861,16 @@ function AppContent() {
           empCount = 0;
         }
       }
-      const total = (logsList ? logsList.length : 0) + empCount;
+      
+      let empDeleteCount = 0;
+      try {
+        const empDeletes = await getEmployeeDeletes();
+        empDeleteCount = empDeletes ? empDeletes.length : 0;
+      } catch {
+        empDeleteCount = 0;
+      }
+
+      const total = (logsList ? logsList.length : 0) + empCount + empDeleteCount;
       setUnsyncedCount(total);
     } catch {
       setUnsyncedCount(0);
@@ -923,7 +932,15 @@ function AppContent() {
     try {
       // ─── FASE 1: PUSH DATA KE CLOUD (Strict Sequence) ───
       
-      // 1A. Push pending offline employees
+      // 1A. Push pending offline employee deletions (Tier 1)
+      try {
+        const { syncPendingEmployeeDeletes } = await import('./syncEngine');
+        await syncPendingEmployeeDeletes();
+      } catch (e) {
+        console.warn('[Manual Sync Employee Deletes Error]:', e);
+      }
+
+      // 1B. Push pending offline employees (Tier 2)
       try {
         const { syncPendingEmployees } = await import('./syncEngine');
         await syncPendingEmployees();
@@ -931,7 +948,7 @@ function AppContent() {
         console.warn('[Manual Sync Employees Error]:', e);
       }
 
-      // 1B. Push pending offline logs
+      // 1C. Push pending offline logs
       try {
         const { syncPendingAttendanceLogs } = await import('./syncEngine');
         await syncPendingAttendanceLogs(showToast);
@@ -939,7 +956,7 @@ function AppContent() {
         console.warn('[Manual Sync Logs Error]:', e);
       }
 
-      // 1C. Push pending offline requests (edit/hapus)
+      // 1D. Push pending offline requests (edit/hapus)
       try {
         const { syncPendingAttendanceRequests } = await import('./syncEngine');
         await syncPendingAttendanceRequests();
