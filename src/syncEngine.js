@@ -713,8 +713,8 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         // Karyawan real (ID numerik dari Supabase) TIDAK boleh dihapus di sini.
         const tempIdStr = String(emp.id);
         if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('off_emp_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
-          const { deleteLocalEmployee } = await import('./db');
-          await deleteLocalEmployee(emp.id);
+          const { hardDeleteLocalEmployee } = await import('./db');
+          await hardDeleteLocalEmployee(emp.id);
           console.log(`[Sync Employee] Ghost employee ${tempIdStr} dihapus dari cache lokal.`);
 
           // CRITICAL: Tambahkan ulang karyawan ke employees_cache dengan ID RESMI dari Supabase
@@ -733,9 +733,17 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               status_perkawinan: emp.status_perkawinan || null,
               // Fix SQLite boolean deserialization: SQLite stores 1/0, not true/false
               has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1,
-              is_synced: true
+              is_synced: true,
+              descriptor_json: emp.descriptor_json || null,
+              geometric_descriptor_json: emp.geometric_descriptor_json || null
             };
-            await db.employees_cache.put(realEmpEntry);
+            
+            if (isNative) {
+              const { sqliteBulkPutEmployeesCache } = await import('./services/sqliteService');
+              await sqliteBulkPutEmployeesCache([realEmpEntry]);
+            } else {
+              await db.employees_cache.put(realEmpEntry);
+            }
             console.log(`[Sync Employee] employees_cache diperbarui: ${tempIdStr} → ${realEmpId} untuk ${emp.name}`);
           } catch (cacheErr) {
             console.warn(`[Sync Employee] Gagal update employees_cache untuk ${emp.name}:`, cacheErr);

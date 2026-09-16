@@ -189,6 +189,29 @@ function AppContent() {
     if (!user) return;
     const adminObj = user;
 
+    // ─── KHUSUS HEAD OFFICE ADMIN: Langsung Fetch 100% dari Supabase & Abaikan Cache Lokal ───
+    if (adminObj.username === 'admin.hq') {
+      try {
+        const { data, error } = await supabase.from('employees').select('*').is('deleted_at', null).order('created_at', { ascending: false });
+        if (error) throw error;
+        const mapped = (data || []).map(emp => {
+          const rawHasBio = emp.has_master_biometric;
+          return {
+            ...emp,
+            nama_kebun: emp.kebun || emp.nama_kebun || '',
+            kebun: emp.kebun || emp.nama_kebun || '',
+            has_master_biometric: rawHasBio === true || rawHasBio === 1 || rawHasBio === '1' || rawHasBio === 'true'
+          };
+        });
+        setEmployees(mapped);
+        setEmployeesLoaded(true);
+        loadedUserRef.current = adminObj.username;
+        return;
+      } catch (e) {
+        console.error('[HO Fetch Employees Error]:', e);
+      }
+    }
+
     let empData = null;
     let dataSource = 'supabase';
     const lastSyncKey = `last_emp_sync_${adminObj.username}`;
@@ -379,6 +402,79 @@ function AppContent() {
 
   // Fetch Attendance Logs (Delta Sync + 2-Tier: Supabase + Offline Local Queue)
   const fetchLogs = useCallback(async (isFullSync = false) => {
+    if (!user) return;
+    
+    // ─── KHUSUS HEAD OFFICE ADMIN: Langsung Fetch 100% dari Supabase & Abaikan Cache Lokal ───
+    if (user.username === 'admin.hq') {
+      try {
+        const { data: rawLogs, error } = await supabase.from('attendance_logs').select('*').is('deleted_at', null).order('timestamp', { ascending: false }).limit(2000);
+        if (error) throw error;
+        
+        // 1. Fetch missing employee details for mapping
+        const hoMasterEmpMap = new Map();
+        const empIds = [...new Set((rawLogs || []).map((l) => l.employee_id))].filter(Boolean);
+        if (empIds.length > 0) {
+          const { data: empData } = await supabase
+            .from('employees')
+            .select('id, nik, name, department, afdeling, nama_kebun')
+            .in('id', empIds);
+          if (empData) {
+            empData.forEach(e => {
+              hoMasterEmpMap.set(String(e.id), e);
+            });
+          }
+        }
+
+        // Helper to normalize CHECK_IN
+        const normalizeType = (type) => {
+          if (!type) return 'CHECK-IN';
+          const clean = type.toUpperCase().replace('_', '-');
+          return clean === 'CHECKIN' ? 'CHECK-IN' : clean;
+        };
+
+        const mapped = (rawLogs || []).map(log => {
+          const emp = hoMasterEmpMap.get(String(log.employee_id)) || {};
+          const typeLabel = normalizeType(
+            log.attendance_type ||
+            (log.status?.includes('CHECK-OUT') || log.location?.includes('CHECK-OUT') ? 'CHECK-OUT' : 'CHECK-IN')
+          );
+
+          let parsedKebun = null;
+          let parsedAfdeling = null;
+          let cleanLocation = log.location || '';
+
+          if (cleanLocation.includes(' | ')) {
+            const parts = cleanLocation.split(' | ');
+            if (parts.length >= 3) {
+              parsedKebun = parts[0] === '-' ? null : parts[0];
+              parsedAfdeling = parts[1] === '-' ? null : parts[1];
+              cleanLocation = parts.slice(2).join(' | ');
+            }
+          }
+
+          return {
+            ...log,
+            nik: emp.nik || log.nik || '-',
+            name: emp.name || log.name || `Karyawan #${log.employee_id}`,
+            department: emp.department || log.department || '-',
+            afdeling: parsedAfdeling || log.afdeling || emp.afdeling || '-',
+            nama_kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
+            kebun: parsedKebun || log.kebun || emp.nama_kebun || '-',
+            location: cleanLocation,
+            attendance_type: typeLabel,
+            lat: log.latitude !== undefined && log.latitude !== null ? log.latitude : (log.lat !== undefined ? log.lat : null),
+            lng: log.longitude !== undefined && log.longitude !== null ? log.longitude : (log.lng !== undefined ? log.lng : null),
+            is_synced: true
+          };
+        });
+        
+        setLogs(mapped);
+        return;
+      } catch (e) {
+        console.error('[HO Fetch Logs Error]:', e);
+      }
+    }
+
     // (Offline-First Cut-Off): Sync luring otomatis saat refresh dinonaktifkan.
     // Data offline hanya dikirim saat cut-off 22:00 atau tombol sync manual.
 
@@ -882,6 +978,42 @@ function AppContent() {
   useEffect(() => {
     syncCallbacksRef.current = { fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast };
   }, [fetchEmployees, fetchLogs, refreshUnsyncedCount, showToast]);
+
+  // Realtime Supabase Subscription Khusus Head Office Admin
+  useEffect(() => {
+    if (user?.username === 'admin.hq') {
+      console.log('[Supabase Realtime] HO Admin Connected. Listening to changes...');
+      const channel = supabase
+        .channel('ho_realtime_data')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'attendance_logs' },
+          (payload) => {
+            console.log('[Supabase Realtime] Logs changed!', payload);
+            // Refresh logs directly from Supabase to ensure consistency, 
+            // or we could optimistically update state. Since HO is desktop mostly, fetching is fine.
+            if (syncCallbacksRef.current?.fetchLogs) {
+              syncCallbacksRef.current.fetchLogs();
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'employees' },
+          (payload) => {
+            console.log('[Supabase Realtime] Employees changed!', payload);
+            if (syncCallbacksRef.current?.fetchEmployees) {
+              syncCallbacksRef.current.fetchEmployees();
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
 
   // Listener untuk event refresh_logs dari komponen lain (misal setelah scan absen offline)
   useEffect(() => {

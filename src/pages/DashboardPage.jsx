@@ -5,12 +5,20 @@ import { Link } from 'react-router-dom';
 export default function DashboardPage({ employees = [], logs = [], modelsLoaded }) {
   const { user } = useAuth();
   
-  // Date Filter State (default to today YYYY-MM-DD)
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Helper to get local date string YYYY-MM-DD in local timezone (e.g. WIB)
+  const getLocalDateStr = (d) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Date Filter State (default to today YYYY-MM-DD local time)
+  const todayStr = getLocalDateStr(new Date());
   const yesterdayStr = (() => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    return getLocalDateStr(d);
   })();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedSegment, setSelectedSegment] = useState(null);
@@ -86,7 +94,8 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
     return logs.filter((l) => {
       if (!l.timestamp) return false;
-      const logDateStr = new Date(l.timestamp).toISOString().split('T')[0];
+      const logDate = new Date(l.timestamp);
+      const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
       if (logDateStr !== selectedDate) return false;
 
       // Filter by selected kebun
