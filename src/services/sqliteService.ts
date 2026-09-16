@@ -477,6 +477,26 @@ export async function initSQLite(): Promise<void> {
     } catch (e) {
       // Column might already exist, ignore error
     }
+
+    // Ensure all missing columns exist for local_attendance_queue due to v2 migration
+    const missingCols = ['path_foto_lokal', 'path_foto_storage', 'status_sync_teks', 'status_sync_foto', 'durasi'];
+    for (const col of missingCols) {
+      try {
+        await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN ${col} TEXT;`);
+      } catch (e) {
+        // Ignore if exists
+      }
+    }
+    // Ensure all missing columns exist for local_attendance_logs due to v2 migration
+    for (const col of missingCols) {
+      try {
+        await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN ${col} TEXT;`);
+      } catch (e) {
+        // Ignore if exists
+      }
+    }
+
+    // (V3 Migration follows below if any)
     try {
       await dbConnection.execute(`ALTER TABLE local_employees ADD COLUMN region TEXT;`);
       console.log('[SQLite Service] Migrated local_employees: added region column');
@@ -1315,10 +1335,16 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
   try {
     const empIdStr = String(empId);
     const res = await dbConnection!.query(
-      `SELECT * FROM local_attendance_logs 
-       WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ? 
-       ORDER BY timestamp ASC`,
-      [empIdStr, empId, dateStr]
+      `SELECT * FROM (
+         SELECT id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at 
+         FROM local_attendance_logs 
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?
+         UNION ALL
+         SELECT id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at 
+         FROM local_attendance_queue
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?
+       ) ORDER BY timestamp ASC`,
+      [empIdStr, empId, dateStr, empIdStr, empId, dateStr]
     );
     const rows = res.values || [];
     return rows.map((row: any) => ({

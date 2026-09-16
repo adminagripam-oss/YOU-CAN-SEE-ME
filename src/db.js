@@ -345,9 +345,20 @@ export const db = {
         return await sqliteGetTodayAttendanceLogs(empId, dateStr);
       } else {
         try {
-          const all = await dexieDb.attendance_logs.toArray();
-          const filtered = all.filter(row => String(row.employee_id) === String(empId) && row.timestamp && row.timestamp.substring(0, 10) === dateStr);
-          return filtered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          const allLogs = await dexieDb.attendance_logs.toArray();
+          const allQueue = await dexieDb.attendance_sync_queue.toArray();
+          const combined = [...allLogs, ...allQueue];
+          
+          const filtered = combined.filter(row => String(row.employee_id) === String(empId) && row.timestamp && row.timestamp.substring(0, 10) === dateStr);
+          
+          // Deduplicate by timestamp to prevent dual-write duplicates
+          const uniqueMap = new Map();
+          filtered.forEach(row => {
+            uniqueMap.set(row.timestamp, row);
+          });
+          
+          const uniqueFiltered = Array.from(uniqueMap.values());
+          return uniqueFiltered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         } catch (e) {
           console.warn('[Dexie Attendance Logs getTodayLogs Error]:', e);
           return [];
