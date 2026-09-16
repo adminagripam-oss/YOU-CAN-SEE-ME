@@ -915,9 +915,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
     return matchesSearch && matchesStatusTk && matchesStatusPerkawinan && matchesKebun && matchesAfdeling;
   }).sort((a, b) => {
-    const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return dateB - dateA;
+    return (a.name || '').localeCompare(b.name || '');
   });
 
   // ---------------------------------
@@ -930,9 +928,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       return;
     }
     
-    const headers = ['NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan', 'Biometrik Siap'];
+    const headers = ['No.', 'NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan', 'Biometrik Siap'];
     
-    const rows = filteredEmployees.map(emp => [
+    const rows = filteredEmployees.map((emp, index) => [
+      (index + 1).toString(),
       emp.nik || '',
       emp.name || '',
       emp.afdeling || '',
@@ -1032,8 +1031,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   };
 
   const exportToPDF = () => {
-    const headers = ['NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan'];
-    const rows = filteredEmployees.map(emp => [
+    const headers = ['No.', 'NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan'];
+    const rows = filteredEmployees.map((emp, index) => [
+      (index + 1).toString(),
       emp.nik || '',
       emp.name || '',
       emp.afdeling || '',
@@ -1317,9 +1317,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         </div>
 
         <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
-          <Table className="freeze-table-header">
+          <Table className="freeze-table-header compact-mobile-table">
             <TableHeader>
               <TableRow>
+                <TableHead style={{ width: '50px', textAlign: 'center' }}>No.</TableHead>
                 <TableHead>NIK</TableHead>
                 <TableHead>Nama</TableHead>
                 <TableHead>Afdeling</TableHead>
@@ -1334,19 +1335,20 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             <TableBody>
               {filteredEmployees.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
+                  <TableCell colSpan={10} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
                 </TableRow>
               ) : (
-                filteredEmployees.map((emp) => (
+                filteredEmployees.map((emp, index) => (
                   <TableRow key={emp.id}>
-                    <TableCell className="font-medium">{emp.nik}</TableCell>
-                    <TableCell>{emp.name}</TableCell>
-                    <TableCell>{emp.afdeling || '-'}</TableCell>
-                    <TableCell>{emp.nama_kebun || '-'}</TableCell>
-                    <TableCell>{emp.jabatan || emp.department || '-'}</TableCell>
-                    <TableCell>{emp.status_tk || '-'}</TableCell>
-                    <TableCell>{emp.status_perkawinan || '-'}</TableCell>
-                    <TableCell className="no-print">
+                    <TableCell data-label="No." style={{ textAlign: 'center' }}>{index + 1}</TableCell>
+                    <TableCell data-label="NIK" className="font-medium">{emp.nik}</TableCell>
+                    <TableCell data-label="Nama">{emp.name}</TableCell>
+                    <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
+                    <TableCell data-label="Nama Kebun">{emp.nama_kebun || '-'}</TableCell>
+                    <TableCell data-label="Jabatan">{emp.jabatan || emp.department || '-'}</TableCell>
+                    <TableCell data-label="Status TK">{emp.status_tk || '-'}</TableCell>
+                    <TableCell data-label="Status Pernikahan">{emp.status_perkawinan || '-'}</TableCell>
+                    <TableCell data-label="Biometrik" className="no-print">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
                         {(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') ? (
                           <span className="status-badge success">Siap</span>
@@ -1360,7 +1362,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="no-print">
+                    <TableCell data-label="Aksi" className="no-print">
                       <div style={{ display: 'flex', gap: '8px' }}>
                         {!(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') && (
                           <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Scan Wajah">

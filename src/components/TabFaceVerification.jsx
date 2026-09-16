@@ -1533,10 +1533,10 @@ export default function TabFaceVerification({
 
 
 
-  const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.afdeling).map(e => e.afdeling))).sort();
-  const filteredEmployees = selectedAfdelingFilter
+  const uniqueAfdelings = Array.from(new Set(employees.filter(e => e.afdeling).map(e => e.afdeling))).sort((a, b) => a.localeCompare(b));
+  const filteredEmployees = (selectedAfdelingFilter
     ? employees.filter(e => e.afdeling === selectedAfdelingFilter)
-    : employees;
+    : employees).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   return (
     <div className="glass-card">
@@ -1587,37 +1587,45 @@ export default function TabFaceVerification({
           {uniqueAfdelings.length > 0 && (
             <div className="form-group">
               <label htmlFor="verify-afdeling-filter">Filter Afdeling</label>
-              <select
-                id="verify-afdeling-filter"
-                value={selectedAfdelingFilter}
-                onChange={(e) => {
-                  setSelectedAfdelingFilter(e.target.value);
-                  setSelectedEmployeeId(''); // Reset employee when afdeling changes
-                }}
-              >
-                <option value="">-- Semua Afdeling --</option>
-                {uniqueAfdelings.map(afd => (
-                  <option key={afd} value={afd}>{afd}</option>
-                ))}
-              </select>
+              <div className="custom-select-wrapper">
+                <select
+                  id="verify-afdeling-filter"
+                  className="custom-select"
+                  value={selectedAfdelingFilter}
+                  onChange={(e) => {
+                    setSelectedAfdelingFilter(e.target.value);
+                    setSelectedEmployeeId(''); // Reset employee when afdeling changes
+                  }}
+                >
+                  <option value="">-- Semua Afdeling --</option>
+                  {uniqueAfdelings.map(afd => (
+                    <option key={afd} value={afd}>{afd}</option>
+                  ))}
+                </select>
+                <ChevronDown className="custom-select-icon" size={20} />
+              </div>
             </div>
           )}
 
           {/* Employee Select */}
           <div className="form-group">
             <label htmlFor="verify-emp-select">Pilih Karyawan</label>
-            <select
-              id="verify-emp-select"
-              value={selectedEmployeeId}
-              onChange={handleEmployeeSelect}
-            >
-              <option value="">-- Pilih Karyawan Absen --</option>
-              {filteredEmployees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.nik} — {emp.name} ({emp.afdeling ? `Afdeling: ${emp.afdeling}` : emp.department})
-                </option>
-              ))}
-            </select>
+            <div className="custom-select-wrapper">
+              <select
+                id="verify-emp-select"
+                className="custom-select"
+                value={selectedEmployeeId}
+                onChange={handleEmployeeSelect}
+              >
+                <option value="">-- Pilih Karyawan Absen --</option>
+                {filteredEmployees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} ({emp.nik ? String(emp.nik).slice(-4) : 'XXXX'})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="custom-select-icon" size={20} />
+            </div>
           </div>
 
           {/* Status Dropdown */}

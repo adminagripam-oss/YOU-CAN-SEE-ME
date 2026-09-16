@@ -1133,7 +1133,7 @@ export default function TabAttendanceLogs({
       {/* Table & Requests Tabs conditional rendering */}
       {activeTab === 'logs' ? (
         <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
-          <Table className="freeze-table-header">
+          <Table className="freeze-table-header compact-mobile-table">
             <TableHeader>
               <TableRow>
                 <TableHead style={{ width: '50px', textAlign: 'center' }}>No.</TableHead>
@@ -1160,11 +1160,11 @@ export default function TabAttendanceLogs({
               ) : (
                 filteredLogs.map((log, index) => (
                   <TableRow key={log.id}>
-                    <TableCell style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</TableCell>
-                    <TableCell style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
-                    <TableCell style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
-                    <TableCell className="nik-cell">{log.nik}</TableCell>
-                    <TableCell>
+                    <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</TableCell>
+                    <TableCell data-label="Tanggal" style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
+                    <TableCell data-label="Check In" style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
+                    <TableCell data-label="NIK" className="nik-cell">{log.nik}</TableCell>
+                    <TableCell data-label="Nama Karyawan">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>{log.name}</span>
                         {((log.inLog && (log.inLog.needs_resolution || log.inLog.sync_notes === 'Membutuhkan Resolusi NIK')) || (log.outLog && (log.outLog.needs_resolution || log.outLog.sync_notes === 'Membutuhkan Resolusi NIK'))) ? (
@@ -1205,18 +1205,18 @@ export default function TabAttendanceLogs({
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
-                    <TableCell style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
-                    <TableCell style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
-                    <TableCell>
+                    <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
+                    <TableCell data-label="Afdeling" style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
+                    <TableCell data-label="Check Out" style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
+                    <TableCell data-label="Durasi">
                       {log.durasi ? (
                         <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
                       ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
                         <span className="durasi-badge checkin" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Sedang Bekerja</span>
                       ) : '-'}
                     </TableCell>
-                    <TableCell>{renderKeteranganIcon(log.keterangan)}</TableCell>
-                    <TableCell style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
+                    <TableCell data-label="Keterangan">{renderKeteranganIcon(log.keterangan)}</TableCell>
+                    <TableCell data-label="Lokasi" style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
                       {(() => {
                         const gps = parseLokasiGPS(log.lokasi);
                         if (gps) {
@@ -1256,7 +1256,7 @@ export default function TabAttendanceLogs({
                         );
                       })()}
                     </TableCell>
-                    <TableCell className="no-print">
+                    <TableCell data-label="Aksi" className="no-print">
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {((log.inLog && log.inLog.isOfflineQueue) || (log.outLog && log.outLog.isOfflineQueue)) ? (
                           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Menunggu Sinkronisasi</span>
@@ -1286,7 +1286,7 @@ export default function TabAttendanceLogs({
               Memuat data request persetujuan...
             </div>
           ) : (
-            <Table className="freeze-table-header">
+            <Table className="freeze-table-header compact-mobile-table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Tipe Request</TableHead>
@@ -1309,7 +1309,7 @@ export default function TabAttendanceLogs({
                 ) : (
                   approvalRequests.map((req) => (
                     <TableRow key={req.id}>
-                      <TableCell>
+                      <TableCell data-label="Tipe Request">
                         <span 
                           style={{
                             fontSize: '0.7rem',
@@ -1324,16 +1324,16 @@ export default function TabAttendanceLogs({
                           {req.request_type}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Nama Karyawan">
                         <div style={{ fontWeight: 600 }}>{req.name}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>NIK: {req.nik}</div>
                       </TableCell>
-                      <TableCell style={{ color: 'var(--text-muted)' }}>{req.nama_kebun || '-'}</TableCell>
-                      <TableCell style={{ fontWeight: 600 }}>{req.requested_by}</TableCell>
-                      <TableCell style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <TableCell data-label="Kebun" style={{ color: 'var(--text-muted)' }}>{req.nama_kebun || '-'}</TableCell>
+                      <TableCell data-label="Pemohon" style={{ fontWeight: 600 }}>{req.requested_by}</TableCell>
+                      <TableCell data-label="Waktu Request" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         {req.requested_at ? new Date(req.requested_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="Status">
                         <span 
                           style={{
                             fontSize: '0.7rem',
@@ -1348,7 +1348,7 @@ export default function TabAttendanceLogs({
                           {req.status}
                         </span>
                       </TableCell>
-                      <TableCell style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'normal', wordBreak: 'break-word', color: 'var(--text-main)', textAlign: 'left' }}>
+                      <TableCell data-label="Detail Perubahan" style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'normal', wordBreak: 'break-word', color: 'var(--text-main)', textAlign: 'left' }}>
                         {req.request_type === 'DELETE' ? (
                           <span style={{ color: '#ef4444' }}>
                             Hapus absensi tanggal: <strong>{req.old_value?.date || '-'}</strong>
@@ -1373,7 +1373,7 @@ export default function TabAttendanceLogs({
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="no-print">
+                      <TableCell data-label="Aksi" className="no-print">
                         {req.status === 'PENDING' ? (
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button 

@@ -2001,3 +2001,52 @@ footer {
 .shadcn-btn-destructive:hover {
   background-color: #dc2626; /* bg-destructive/90 */
 }
+
+/* Native Select Custom Styling Rule */
+.custom-select-wrapper {
+  position: relative;
+  width: 100%;
+}
+.custom-select-wrapper select.custom-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  padding: 12px 40px 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius, 12px);
+  background-color: var(--bg-input);
+  color: var(--text-main);
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+.custom-select-wrapper select.custom-select option {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+}
+.custom-select-wrapper select.custom-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+.custom-select-icon {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-muted);
+}
+
+
+/* Responsive Table System for Mobile */
+@media (max-width: 768px) {
+  .compact-mobile-table th,
+  .compact-mobile-table td {
+    padding: 6px 8px !important;
+    font-size: 0.65rem !important;
+  }
+  .compact-mobile-table th {
+    font-size: 0.7rem !important;
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "short_name": "AgriFace",
+  "name": "AgriFace Biometric Attendance",
+  "description": "Aplikasi Absensi Biometrik Wajah Offline-First & Auto-Sync",
+  "icons": [
+    {
+      "src": "/logo-pwa.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait"
+}
