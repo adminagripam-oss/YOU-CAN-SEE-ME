@@ -1340,8 +1340,8 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
     try {
       const resLogs = await dbConnection!.query(
         `SELECT * FROM local_attendance_logs 
-         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?`,
-        [empIdStr, empId, dateStr]
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?)`,
+        [empIdStr, empId]
       );
       if (resLogs.values) {
         combinedRows = combinedRows.concat(resLogs.values);
@@ -1354,8 +1354,8 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
     try {
       const resQueue = await dbConnection!.query(
         `SELECT * FROM local_attendance_queue
-         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?) AND substr(timestamp, 1, 10) = ?`,
-        [empIdStr, empId, dateStr]
+         WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?)`,
+        [empIdStr, empId]
       );
       if (resQueue.values) {
         combinedRows = combinedRows.concat(resQueue.values);
@@ -1364,10 +1364,23 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
       console.warn('[SQLite Service] Error querying local_attendance_queue:', errQueue?.message || errQueue);
     }
 
-    // Deduplicate by timestamp and sort ascending
+    // 3. Filter by local timezone dateStr and Deduplicate
     const uniqueMap = new Map();
     combinedRows.forEach((row: any) => {
-      uniqueMap.set(row.timestamp, row);
+      if (!row.timestamp) return;
+      
+      // Convert UTC timestamp to local Date object
+      const d = new Date(row.timestamp);
+      
+      // Extract local YYYY-MM-DD
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const localDateStr = `${year}-${month}-${day}`;
+      
+      if (localDateStr === dateStr) {
+        uniqueMap.set(row.timestamp, row);
+      }
     });
     
     const uniqueFiltered = Array.from(uniqueMap.values());

@@ -361,7 +361,18 @@ export const db = {
         }
         
         try {
-          const filtered = combined.filter(row => String(row.employee_id) === String(empId) && row.timestamp && row.timestamp.substring(0, 10) === dateStr);
+          const filtered = combined.filter(row => {
+            if (String(row.employee_id) !== String(empId) || !row.timestamp) return false;
+            
+            // Convert UTC timestamp to local Date object
+            const d = new Date(row.timestamp);
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const localDateStr = `${year}-${month}-${day}`;
+            
+            return localDateStr === dateStr;
+          });
           
           // Deduplicate by timestamp to prevent dual-write duplicates
           const uniqueMap = new Map();
