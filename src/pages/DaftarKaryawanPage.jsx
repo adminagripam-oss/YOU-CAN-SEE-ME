@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -30,6 +30,12 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [filterStatusPerkawinan, setFilterStatusPerkawinan] = useState('');
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterStatusTk, filterStatusPerkawinan, filterKebun, filterAfdeling]);
 
   // List of all kebuns from regional CSV data
   const allKebunsFromCSV = useMemo(() => [
@@ -918,6 +924,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     return (a.name || '').localeCompare(b.name || '');
   });
 
+  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
+  const paginatedEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   // ---------------------------------
   // ---------------------------------
   // Export Logic (Formatted Excel & PDF Printout)
@@ -1338,9 +1347,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                   <TableCell colSpan={10} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
                 </TableRow>
               ) : (
-                filteredEmployees.map((emp, index) => (
+                paginatedEmployees.map((emp, index) => (
                   <TableRow key={emp.id}>
-                    <TableCell data-label="No." style={{ textAlign: 'center' }}>{index + 1}</TableCell>
+                    <TableCell data-label="No." style={{ textAlign: 'center' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
                     <TableCell data-label="NIK" className="font-medium">{emp.nik}</TableCell>
                     <TableCell data-label="Nama">{emp.name}</TableCell>
                     <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
@@ -1383,6 +1392,54 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             </TableBody>
           </Table>
         </div>
+
+        {totalPages > 1 && (
+          <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === 1 ? 0.5 : 1 }}
+                title="Previous"
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                if (totalPages > 7) {
+                  if (page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
+                    if (page === currentPage - 2 || page === currentPage + 2) return <span key={`ellipsis-${page}`} style={{ color: 'var(--text-muted)', margin: '0 4px' }}>...</span>;
+                    return null;
+                  }
+                }
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                      background: page === currentPage ? 'var(--accent-primary)' : 'transparent',
+                      color: page === currentPage ? '#fff' : 'var(--text-main)',
+                      fontWeight: page === currentPage ? 700 : 500,
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === totalPages ? 0.5 : 1 }}
+                title="Next"
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal Scan Wajah */}

@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
@@ -79,6 +79,12 @@ export default function TabAttendanceLogs({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterKebun, filterAfdeling]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
@@ -388,6 +394,9 @@ export default function TabAttendanceLogs({
       return matchSearch && matchKebun && matchAfdeling;
     });
   }, [groupedLogs, searchQuery, filterKebun, filterAfdeling]);
+
+  const totalPages = Math.ceil(filteredLogs.length / itemsPerPage);
+  const paginatedLogs = filteredLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const uniqueKebuns = useMemo(() => {
     return [...new Set(groupedLogs.map(g => g.nama_kebun).filter(Boolean))].sort();
@@ -1158,9 +1167,9 @@ export default function TabAttendanceLogs({
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredLogs.map((log, index) => (
+                paginatedLogs.map((log, index) => (
                   <TableRow key={log.id}>
-                    <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</TableCell>
+                    <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
                     <TableCell data-label="Tanggal" style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
                     <TableCell data-label="Check In" style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                     <TableCell data-label="NIK" className="nik-cell">{log.nik}</TableCell>
@@ -1398,6 +1407,54 @@ export default function TabAttendanceLogs({
                 )}
               </TableBody>
             </Table>
+          )}
+
+          {!isLoadingLogs && totalPages > 1 && (
+            <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === 1 ? 0.5 : 1 }}
+                  title="Previous"
+                >
+                  <ChevronLeftIcon size={16} />
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                  if (totalPages > 7) {
+                    if (page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
+                      if (page === currentPage - 2 || page === currentPage + 2) return <span key={`ellipsis-${page}`} style={{ color: 'var(--text-muted)', margin: '0 4px' }}>...</span>;
+                      return null;
+                    }
+                  }
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      style={{
+                        minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                        background: page === currentPage ? 'var(--accent-primary)' : 'transparent',
+                        color: page === currentPage ? '#fff' : 'var(--text-main)',
+                        fontWeight: page === currentPage ? 700 : 500,
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === totalPages ? 0.5 : 1 }}
+                  title="Next"
+                >
+                  <ChevronRightIcon size={16} />
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
