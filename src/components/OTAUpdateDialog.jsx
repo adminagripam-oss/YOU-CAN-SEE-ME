@@ -33,7 +33,7 @@ export default function OTAUpdateDialog({ isOpen, version, progress, onUpdate, o
       >
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '12px', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(14, 165, 233, 0.1)', border: '1px solid rgba(14, 165, 233, 0.2)' }}>
-            <img src="/assets/icon-foreground.png" alt="AgriFace Logo" style={{ width: '60px', height: '60px', objectFit: 'contain' }} />
+            <img src="/icon-foreground.png" alt="AgriFace Logo" style={{ width: '60px', height: '60px', objectFit: 'contain' }} />
           </div>
           <div>
             <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 6px 0' }}>
