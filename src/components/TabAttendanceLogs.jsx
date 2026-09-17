@@ -1289,7 +1289,7 @@ export default function TabAttendanceLogs({
           </Table>
         </div>
         
-        {!isLoadingLogs && filteredLogs.length > 0 && (
+        {filteredLogs.length > 0 && (
           <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button
