@@ -120,11 +120,44 @@ export default function Topbar({
 
         {/* User Account Info - RESPONSIVE FOR MOBILE */}
         {user && (
-          <div className="user-badge" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <i className="fa-solid fa-user-check"></i>
-            <span className="user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.name} ({user.nik})
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ 
+              width: '38px', 
+              height: '38px', 
+              borderRadius: '50%', 
+              overflow: 'hidden', 
+              border: '1.5px solid var(--border-color)',
+              flexShrink: 0,
+              background: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+            }}>
+              <img src="/logo.png" alt="AgriFace" style={{ width: '70%', height: '70%', objectFit: 'contain' }} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-main)', maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.name}
+                </span>
+                <span style={{ 
+                  background: 'var(--text-main)', 
+                  color: 'var(--bg-card)', 
+                  fontSize: '0.65rem', 
+                  fontWeight: 800, 
+                  padding: '2px 6px', 
+                  borderRadius: '4px',
+                  lineHeight: 1
+                }}>
+                  APN
+                </span>
+              </div>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '2px' }}>
+                {user.kebun || 'Head Office'}
+              </span>
+            </div>
           </div>
         )}
 
