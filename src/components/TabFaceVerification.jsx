@@ -573,7 +573,7 @@ export default function TabFaceVerification({
   const [gfvMode, setGfvMode] = useState(false);
 
   // Camera settings
-  const [facingMode, setFacingMode] = useState('user'); // 'user' = depan, 'environment' = belakang
+  const [facingMode, setFacingMode] = useState('environment'); // 'user' = depan, 'environment' = belakang
   const [lightingWarning, setLightingWarning] = useState('');
 
   // Attendance & Timer States

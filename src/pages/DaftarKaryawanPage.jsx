@@ -113,7 +113,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   // --- Scan Modal State ---
   const [scanModalOpen, setScanModalOpen] = useState(false);
   const [scanEmp, setScanEmp] = useState(null);
-  const [scanFacingMode, setScanFacingMode] = useState('user');
+  const [scanFacingMode, setScanFacingMode] = useState('environment');
   const [scanCameraStatusText, setScanCameraStatusText] = useState('Menunggu Wajah di Kamera...');
   const [scanCameraStatusColor, setScanCameraStatusColor] = useState('var(--accent-warning)');
   const [scanFaceCheckResult, setScanFaceCheckResult] = useState(null);
@@ -210,7 +210,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
   const openScanModal = (emp) => {
     setScanEmp(emp);
-    setScanFacingMode('user');
+    setScanFacingMode('environment');
     setScanFaceCheckResult(null);
     scanCurrentDescriptorRef.current = null;
     scanCurrentGFVRef.current = null;
@@ -412,7 +412,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     videoRef: editVideoRef,
     canvasRef: editCanvasRef,
     active: editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded,
-    facingMode: 'user',
+    facingMode: 'environment',
     smoothAlpha: 0.35,
     detectFaces: detectEditFacesCallback,
     onFaceProcessed: onEditFaceProcessed,

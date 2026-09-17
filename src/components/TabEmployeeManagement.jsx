@@ -36,7 +36,7 @@ export default function TabEmployeeManagement({
   const [empJabatan, setEmpJabatan] = useState('');
   const [empStatusPerkawinan, setEmpStatusPerkawinan] = useState('');
   const [formStep, setFormStep] = useState(1); // 1 = Data Karyawan, 2 = Biometrik
-  const [cameraFacingMode, setCameraFacingMode] = useState('user');
+  const [cameraFacingMode, setCameraFacingMode] = useState('environment');
   const [empFormMode, setEmpFormMode] = useState('camera'); // 'camera' | 'file'
   const [cameraStatusText, setCameraStatusText] = useState('Menunggu Wajah di Kamera...');
   const [cameraStatusColor, setCameraStatusColor] = useState('var(--accent-warning)');
