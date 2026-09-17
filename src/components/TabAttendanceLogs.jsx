@@ -1141,7 +1141,8 @@ export default function TabAttendanceLogs({
 
       {/* Table & Requests Tabs conditional rendering */}
       {activeTab === 'logs' ? (
-        <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
+        <>
+          <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
           <Table className="freeze-table-header compact-mobile-table">
             <TableHeader>
               <TableRow>
@@ -1287,6 +1288,55 @@ export default function TabAttendanceLogs({
             </TableBody>
           </Table>
         </div>
+        
+        {!isLoadingLogs && filteredLogs.length > 0 && (
+          <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === 1 ? 0.5 : 1 }}
+                title="Previous"
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                if (totalPages > 7) {
+                  if (page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
+                    if (page === currentPage - 2 || page === currentPage + 2) return <span key={`ellipsis-${page}`} style={{ color: 'var(--text-muted)', margin: '0 4px' }}>...</span>;
+                    return null;
+                  }
+                }
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                      background: page === currentPage ? 'var(--accent-primary)' : 'transparent',
+                      color: page === currentPage ? '#fff' : 'var(--text-main)',
+                      fontWeight: page === currentPage ? 700 : 500,
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === totalPages ? 0.5 : 1 }}
+                title="Next"
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+        </>
       ) : (
         /* PERSETUJUAN REQUESTS TABLE */
         <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
@@ -1407,54 +1457,6 @@ export default function TabAttendanceLogs({
                 )}
               </TableBody>
             </Table>
-          )}
-
-          {!isLoadingLogs && filteredLogs.length > 0 && (
-            <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === 1 ? 0.5 : 1 }}
-                  title="Previous"
-                >
-                  <ChevronLeftIcon size={16} />
-                </button>
-
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
-                  if (totalPages > 7) {
-                    if (page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
-                      if (page === currentPage - 2 || page === currentPage + 2) return <span key={`ellipsis-${page}`} style={{ color: 'var(--text-muted)', margin: '0 4px' }}>...</span>;
-                      return null;
-                    }
-                  }
-                  return (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      style={{
-                        minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                        background: page === currentPage ? 'var(--accent-primary)' : 'transparent',
-                        color: page === currentPage ? '#fff' : 'var(--text-main)',
-                        fontWeight: page === currentPage ? 700 : 500,
-                        fontSize: '0.85rem'
-                      }}
-                    >
-                      {page}
-                    </button>
-                  );
-                })}
-
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === totalPages ? 0.5 : 1 }}
-                  title="Next"
-                >
-                  <ChevronRightIcon size={16} />
-                </button>
-              </div>
-            </div>
           )}
         </div>
       )}
