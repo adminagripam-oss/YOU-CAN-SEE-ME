@@ -93,30 +93,6 @@ export default function Topbar({
       </div>
 
       <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        {/* Minimalist Black Camera Icon Scanner Button */}
-        <Link
-          to="/absensi"
-          style={{
-            width: '38px',
-            height: '38px',
-            borderRadius: '10px',
-            background: '#0f172a',
-            color: '#ffffff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '1.05rem',
-            textDecoration: 'none',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-            transition: 'all 0.2s ease',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            flexShrink: 0
-          }}
-          title="Buka Scanner Absensi Mandor"
-          aria-label="Scanner Absensi"
-        >
-          <i className="fa-solid fa-camera"></i>
-        </Link>
 
         {/* User Account Info - RESPONSIVE FOR MOBILE */}
         {user && (
