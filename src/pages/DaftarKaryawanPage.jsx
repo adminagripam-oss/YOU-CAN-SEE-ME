@@ -1152,7 +1152,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   };
 
   return (
-    <div style={{ width: '100%', padding: '1rem', boxSizing: 'border-box' }} className="print-container">
+    <div style={{ width: '100%', padding: 0, boxSizing: 'border-box' }} className="print-container">
       {/* Table & Print Styles */}
       <style>{`
         .freeze-table-header th, 
