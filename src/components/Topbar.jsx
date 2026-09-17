@@ -134,7 +134,7 @@ export default function Topbar({
               justifyContent: 'center',
               boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
             }}>
-              <img src="/logo.png" alt="AgriFace" style={{ width: '70%', height: '70%', objectFit: 'contain' }} />
+              <img src="/icon-foreground.png" alt="AgriFace" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
