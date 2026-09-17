@@ -25,6 +25,7 @@
     "dexie": "^4.4.4",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
+    "framer-motion": "^13.4.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.27.0",
     "react": "^19.2.8",
