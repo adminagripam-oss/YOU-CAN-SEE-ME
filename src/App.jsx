@@ -25,7 +25,7 @@ import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
-import OTAUpdateModal from './components/OTAUpdateModal';
+import OTAUpdateDialog from './components/OTAUpdateDialog';
 
 function AppContent() {
   const { user } = useAuth();
@@ -41,6 +41,7 @@ function AppContent() {
   const [updateVersion, setUpdateVersion] = useState('');
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateAvailableInfo, setUpdateAvailableInfo] = useState(null);
+  const [hasOTAUpdate, setHasOTAUpdate] = useState(false);
   
   const [toasts, setToasts] = useState([]);
 
@@ -103,10 +104,56 @@ function AppContent() {
     }, 4500);
   }, []);
 
+  // Proactive Background Polling for OTA Updates
+  useEffect(() => {
+    let intervalId;
+
+    const checkBackgroundUpdate = async () => {
+      if (!isOnline || Capacitor.getPlatform() === 'web') return;
+      try {
+        const response = await fetch('https://qrtvawixmlekbitvfuav.supabase.co/storage/v1/object/public/ota-updates/version.json?t=' + Date.now());
+        if (!response.ok) return;
+        
+        const versionInfo = await response.json();
+        let currentVersion = '1.0.0';
+        try {
+          const current = await CapacitorUpdater.current();
+          if (current && current.version) currentVersion = current.version;
+        } catch (err) {}
+        
+        if (versionInfo.version !== currentVersion) {
+          setUpdateAvailableInfo(versionInfo);
+          setUpdateVersion(versionInfo.version);
+          setHasOTAUpdate(true);
+        } else {
+          setHasOTAUpdate(false);
+        }
+      } catch (e) {
+        // Silently ignore background polling errors
+      }
+    };
+
+    if (isOnline) {
+      checkBackgroundUpdate();
+      // Poll every 60 seconds
+      intervalId = setInterval(checkBackgroundUpdate, 60000);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isOnline]);
+
   // OTA Update Logic (Self-Hosted Supabase)
   const checkForUpdates = async () => {
     if (Capacitor.getPlatform() === 'web') {
       showToast('Info Pembaruan', 'Fitur pembaruan OTA (Over-The-Air) ini hanya berjalan pada aplikasi Native Android (APK), bukan di Web Browser.', 'info');
+      return;
+    }
+
+    // If background check already found an update, just open the dialog
+    if (hasOTAUpdate && updateAvailableInfo) {
+      setUpdateModalOpen(true);
       return;
     }
     try {
@@ -1317,11 +1364,12 @@ function AppContent() {
               onCancel={closeConfirmModal}
             />
 
-            <OTAUpdateModal
+            <OTAUpdateDialog
               isOpen={updateModalOpen}
               version={updateVersion}
               progress={updateProgress}
               onUpdate={performUpdate}
+              onCancel={() => setUpdateModalOpen(false)}
             />
             <Outlet />
           </>
@@ -1373,6 +1421,7 @@ function AppContent() {
                 pendingCheckOutsCount={pendingCheckOutsCount}
                 isPastShiftEnd={isPastShiftEnd}
                 onCheckUpdate={checkForUpdates}
+                hasOTAUpdate={hasOTAUpdate}
               />
             ),
             children: [
@@ -1407,6 +1456,7 @@ function AppContent() {
                     pendingCheckOutsCount={pendingCheckOutsCount}
                     isPastShiftEnd={isPastShiftEnd}
                     onCheckUpdate={checkForUpdates}
+                    hasOTAUpdate={hasOTAUpdate}
                   />
                 ),
                 children: [

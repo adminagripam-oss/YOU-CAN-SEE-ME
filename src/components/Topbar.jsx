@@ -14,6 +14,7 @@ export default function Topbar({
   pendingCheckOutsCount = 0,
   isPastShiftEnd = false,
   onCheckUpdate,
+  hasOTAUpdate,
 }) {
   const { user } = useAuth();
 
@@ -61,11 +62,19 @@ export default function Topbar({
             type="button"
             className="topbar-sync-btn"
             onClick={onCheckUpdate}
-            title="Cek Pembaruan Aplikasi (OTA)"
-            style={{ background: 'var(--accent-primary)', color: 'white', border: 'none' }}
+            title={hasOTAUpdate ? "Pembaruan Tersedia!" : "Cek Pembaruan Aplikasi (OTA)"}
+            style={{ background: 'var(--accent-primary)', color: 'white', border: 'none', position: 'relative' }}
           >
             <i className="fa-solid fa-cloud-arrow-down"></i>
-            <span style={{ marginLeft: '6px' }}>Cek Pembaruan</span>
+            <span style={{ marginLeft: '6px' }}>{hasOTAUpdate ? 'Update Baru!' : 'Cek Pembaruan'}</span>
+            
+            {/* Notification Badge */}
+            {hasOTAUpdate && (
+              <span style={{ position: 'absolute', top: '-4px', right: '-4px', display: 'flex', height: '12px', width: '12px' }}>
+                <span style={{ animation: 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: '#f87171', opacity: 0.75 }}></span>
+                <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '12px', width: '12px', backgroundColor: '#ef4444' }}></span>
+              </span>
+            )}
           </button>
         )}
 
