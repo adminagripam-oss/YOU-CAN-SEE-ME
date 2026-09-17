@@ -851,6 +851,28 @@ export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
 }
 
 /**
+ * Clear ALL local caches on Logout to prevent sticky data.
+ * This ensures the next user logs into a clean slate.
+ * We DO NOT clear sync queues or admin tables.
+ */
+export async function sqliteClearAll(): Promise<void> {
+  if (!dbConnection) {
+    const ready = await waitForConnection();
+    if (!ready) return;
+  }
+  try {
+    await dbConnection.execute(`DELETE FROM local_employees`);
+    await dbConnection.execute(`DELETE FROM local_today_attendance_cache`);
+    await dbConnection.execute(`DELETE FROM local_attendance_logs`);
+    await dbConnection.execute(`DELETE FROM local_attendance_requests`);
+    await dbConnection.execute(`DELETE FROM local_master_descriptors`);
+    console.log('[SQLite Service] Cleared all local caches for logout.');
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteClearAll Error]:', err?.message || err);
+  }
+}
+
+/**
  * Clear the local employees cache.
  */
 export async function sqliteClearEmployeesCache(filter?: { kebun?: string | null; region?: string | null }): Promise<void> {
