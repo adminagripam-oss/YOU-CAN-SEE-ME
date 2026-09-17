@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const KEBUN_TO_REGION = {
   'Bukit Harapan I': 'Sumut 2',
@@ -39,6 +40,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [kebunSearch, setKebunSearch] = useState('');
   const [selectedKebun, setSelectedKebun] = useState('All');
+  
+  // Pagination States
+  const [kebunPage, setKebunPage] = useState(1);
+  const [logsPage, setLogsPage] = useState(1);
+  const ITEMS_PER_PAGE = 25;
 
   // List of all kebuns from regional CSV data
   const allKebunsFromCSV = useMemo(() => [
@@ -654,8 +660,9 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
               <p>Tidak ada data kebun yang cocok untuk tanggal <strong>{selectedDate}</strong>.</p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
                     <th style={{ padding: '10px 12px', fontWeight: 700 }}>NAMA KEBUN</th>
@@ -666,7 +673,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredKebunSummary.map((k, idx) => {
+                  {filteredKebunSummary.slice((kebunPage - 1) * ITEMS_PER_PAGE, kebunPage * ITEMS_PER_PAGE).map((k, idx) => {
                     const pctNum = parseFloat(k.percentage);
                     const isGood = pctNum >= 85;
                     const isWarn = pctNum < 85 && pctNum >= 50;
@@ -698,6 +705,48 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                 </tbody>
               </table>
             </div>
+            {filteredKebunSummary.length > ITEMS_PER_PAGE && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <div>
+                  Halaman {kebunPage} dari {Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => setKebunPage(p => Math.max(p - 1, 1))}
+                    disabled={kebunPage === 1}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: kebunPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
+                      color: kebunPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
+                      cursor: kebunPage === 1 ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      opacity: kebunPage === 1 ? 0.6 : 1
+                    }}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    onClick={() => setKebunPage(p => Math.min(p + 1, Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)))}
+                    disabled={kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
+                      color: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
+                      cursor: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      opacity: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 0.6 : 1
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       ) : (
@@ -717,8 +766,9 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
               <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{selectedDate}</strong>.</p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
                     <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
@@ -729,7 +779,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLogs.slice(0, 10).map((l, idx) => {
+                  {filteredLogs.slice((logsPage - 1) * ITEMS_PER_PAGE, logsPage * ITEMS_PER_PAGE).map((l, idx) => {
                     const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
                     const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
                     const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
@@ -778,8 +828,53 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
+            
+            {/* Pagination Controls for Logs */}
+            {filteredLogs.length > ITEMS_PER_PAGE && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <div>
+                  Halaman {logsPage} dari {Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => setLogsPage(p => Math.max(p - 1, 1))}
+                    disabled={logsPage === 1}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: logsPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
+                      color: logsPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
+                      cursor: logsPage === 1 ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      opacity: logsPage === 1 ? 0.6 : 1
+                    }}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    onClick={() => setLogsPage(p => Math.min(p + 1, Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)))}
+                    disabled={logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
+                      color: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
+                      cursor: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      opacity: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 0.6 : 1
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+            
+          </>
+        )}
+      </div>
       )}
     </div>
   );
