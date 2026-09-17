@@ -2,6 +2,21 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
+const KEBUN_TO_REGION = {
+  'Bukit Harapan I': 'Sumut 2',
+  'Bukit Harapan II': 'Sumut 2',
+  'Parsub': 'Sumut 2',
+  'Patogu Janji': 'Sumut 2',
+  'Panca Agro Lestari (Pal)': 'Riau 1',
+  'Wana Jingga Timur (Wjt)': 'Riau 1',
+  'Duta Palma Nusantara (Dpn) I': 'Riau 1',
+  'Duta Palma Nusantara (Dpn) II': 'Riau 1',
+  'Duta Palma Nusantara (Dpn) III': 'Riau 1',
+  'Eluan Mahkota (EMA) - KT': 'Riau 1',
+  'Johan Sentosa': 'Riau 1',
+  'Palma Inti Lestari (PIL)': 'Riau 1'
+};
+
 export default function DashboardPage({ employees = [], logs = [], modelsLoaded }) {
   const { user } = useAuth();
   
@@ -181,8 +196,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
       return {
         nama_kebun: kebunName,
-        regional: firstEmp?.regional || firstEmp?.region || '-',
-        distrik: firstEmp?.distrik || '-',
+        regional: KEBUN_TO_REGION[kebunName] || '-',
         totalEmployees: kebunEmployees.length,
         hadirCount,
         percentage: percent
@@ -195,8 +209,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       const q = kebunSearch.toLowerCase();
       return (
         k.nama_kebun.toLowerCase().includes(q) ||
-        k.regional.toLowerCase().includes(q) ||
-        k.distrik.toLowerCase().includes(q)
+        k.regional.toLowerCase().includes(q)
       );
     });
   }, [kebunSummary, kebunSearch]);
@@ -647,7 +660,6 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
                     <th style={{ padding: '10px 12px', fontWeight: 700 }}>NAMA KEBUN</th>
                     <th style={{ padding: '10px 12px', fontWeight: 700 }}>REGIONAL</th>
-                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>DISTRIK</th>
                     <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>TOTAL TK</th>
                     <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>HK HADIR</th>
                     <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>% KEHADIRAN</th>
@@ -663,7 +675,6 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                       <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
                         <td style={{ padding: '12px 12px', fontWeight: 800, color: 'var(--text-main)' }}>{k.nama_kebun}</td>
                         <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.regional}</td>
-                        <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.distrik}</td>
                         <td style={{ padding: '12px 12px', color: 'var(--text-main)', textAlign: 'right', fontWeight: 700 }}>{k.totalEmployees} Orang</td>
                         <td style={{ padding: '12px 12px', color: '#15803d', textAlign: 'right', fontWeight: 800 }}>{k.hadirCount} HK</td>
                         <td style={{ padding: '12px 12px', textAlign: 'right' }}>

@@ -1189,14 +1189,12 @@ footer {
   flex-direction: column;
   background: var(--bg-primary);
   max-width: 100%;
-  overflow-x: hidden;
 }
 
 .dashboard-body {
   display: flex;
   flex: 1;
   max-width: 100%;
-  overflow-x: hidden;
 }
 
 .app-sidebar {
