@@ -71,12 +71,12 @@ export default function TabEmployeeManagement({
   const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx }) => {
     if (detection.embedding) {
       const newVec = Array.from(detection.embedding);
-      
+
       // Multi-Template Averaging (Buffer 5 frames)
       const hist = descriptorHistoryRef.current;
       hist.push(newVec);
       if (hist.length > 5) hist.shift();
-      
+
       const vecLength = newVec.length;
       const avgVec = new Array(vecLength).fill(0);
       for (const v of hist) {

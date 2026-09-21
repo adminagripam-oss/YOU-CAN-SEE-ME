@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const KEBUN_TO_REGION = {
   'Bukit Harapan I': 'Sumut 2',
@@ -40,6 +41,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [kebunSearch, setKebunSearch] = useState('');
   const [selectedKebun, setSelectedKebun] = useState('All');
+  const [chartView, setChartView] = useState('Harian'); // Harian, Mingguan, Bulanan
   
   // Pagination States
   const [kebunPage, setKebunPage] = useState(1);
@@ -209,6 +211,180 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       };
     }).sort((a, b) => b.hadirCount - a.hadirCount);
   }, [filteredEmployees, groupedLogs]);
+
+  // Grouping data by date (for 7-day trend chart)
+  const trendChartData = useMemo(() => {
+    const endDate = new Date(selectedDate);
+    if (isNaN(endDate.getTime())) return [];
+    
+    const trendData = [];
+    const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
+    const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
+    
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(endDate);
+      d.setDate(d.getDate() - i);
+      
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const displayDate = `${day}/${month}`;
+      
+      const logsForDay = logs.filter((l) => {
+        if (!l.timestamp) return false;
+        const logDate = new Date(l.timestamp);
+        const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
+        if (logDateStr !== dateStr) return false;
+        
+        if (selectedKebun && selectedKebun !== 'All') {
+          const empIdStr = String(l.employee_id);
+          const nikStr = String(l.nik);
+          return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
+        }
+        return true;
+      });
+      
+      const groups = {};
+      logsForDay.forEach(log => {
+        const empIdStr = String(log.employee_id);
+        const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT')) || (log.location && log.location.includes('CHECK-OUT'));
+        let ket = 'Hadir';
+        if (log.status) {
+          if (log.status.includes('Izin')) ket = 'Izin';
+          else if (log.status.includes('Sakit')) ket = 'Sakit';
+          else if (log.status.includes('Mangkir')) ket = 'Mangkir';
+          else if (log.status.toLowerCase().includes('lupa_checkout') || log.status.toLowerCase().includes('lupa check-out')) ket = 'Hadir';
+        }
+        
+        // If employee already had 'Hadir', keep it. Else assign new ket.
+        if (!groups[empIdStr] || groups[empIdStr] !== 'Hadir') {
+          groups[empIdStr] = ket;
+        }
+      });
+      
+      const hadirCount = Object.values(groups).filter(v => v === 'Hadir').length;
+      
+      trendData.push({
+        date: displayDate,
+        signups: hadirCount
+      });
+    }
+    return trendData;
+  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+
+  // Grouping data by Week (W1-W5) for the selected month
+  const weeklyChartData = useMemo(() => {
+    const targetDate = new Date(selectedDate);
+    if (isNaN(targetDate.getTime())) return [];
+    
+    const currentMonth = targetDate.getMonth();
+    const currentYear = targetDate.getFullYear();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate(); // 28, 29, 30, or 31
+    
+    const weeklyData = [
+      { week: 'W1', desktop: 0 },
+      { week: 'W2', desktop: 0 },
+      { week: 'W3', desktop: 0 },
+      { week: 'W4', desktop: 0 },
+      { week: 'W5', desktop: 0 }
+    ];
+    
+    const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
+    const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
+    
+    const logsForMonth = logs.filter((l) => {
+      if (!l.timestamp) return false;
+      const logDate = new Date(l.timestamp);
+      if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== currentMonth) return false;
+      
+      if (selectedKebun && selectedKebun !== 'All') {
+        const empIdStr = String(l.employee_id);
+        const nikStr = String(l.nik);
+        return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
+      }
+      return true;
+    });
+    
+    // Process unique attendances per day per employee
+    const groups = {};
+    logsForMonth.forEach(log => {
+      const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT'));
+      let ket = 'Hadir';
+      if (log.status && (log.status.includes('Izin') || log.status.includes('Sakit') || log.status.includes('Mangkir'))) {
+        ket = 'Tidak Hadir';
+      }
+      if (ket === 'Hadir') {
+        const dateStrKey = new Date(log.timestamp).toLocaleDateString();
+        groups[`${log.employee_id}_${dateStrKey}`] = new Date(log.timestamp).getDate(); // store the date number (1-31)
+      }
+    });
+    
+    Object.values(groups).forEach(dateNum => {
+      if (dateNum >= 1 && dateNum <= 7) weeklyData[0].desktop++;
+      else if (dateNum >= 8 && dateNum <= 14) weeklyData[1].desktop++;
+      else if (dateNum >= 15 && dateNum <= 21) weeklyData[2].desktop++;
+      else if (dateNum >= 22 && dateNum <= 28) weeklyData[3].desktop++;
+      else if (dateNum >= 29 && dateNum <= 31) weeklyData[4].desktop++;
+    });
+    
+    // Optionally remove W5 if there are no days 29-31 in a non-leap February, but usually keeping it constant W1-W5 is better for UI consistency.
+    // Let's filter out W5 if daysInMonth < 29
+    if (daysInMonth < 29) {
+      return weeklyData.slice(0, 4);
+    }
+    
+    return weeklyData;
+  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+
+  // Grouping data by Month (All months this year)
+  const monthlyChartData = useMemo(() => {
+    const endDate = new Date(selectedDate);
+    if (isNaN(endDate.getTime())) return [];
+    
+    const currentYear = endDate.getFullYear();
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    const monthlyData = [];
+    const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
+    const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
+    
+    for (let m = 0; m < 12; m++) {
+      const logsForMonth = logs.filter((l) => {
+        if (!l.timestamp) return false;
+        const logDate = new Date(l.timestamp);
+        if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== m) return false;
+        
+        if (selectedKebun && selectedKebun !== 'All') {
+          const empIdStr = String(l.employee_id);
+          const nikStr = String(l.nik);
+          return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
+        }
+        return true;
+      });
+      
+      const groups = {};
+      logsForMonth.forEach(log => {
+        const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT'));
+        let ket = 'Hadir';
+        if (log.status && (log.status.includes('Izin') || log.status.includes('Sakit') || log.status.includes('Mangkir'))) {
+          ket = 'Tidak Hadir';
+        }
+        if (ket === 'Hadir') {
+          const dateStrKey = new Date(log.timestamp).toLocaleDateString();
+          groups[`${log.employee_id}_${dateStrKey}`] = true;
+        }
+      });
+      
+      const hadirCount = Object.keys(groups).length;
+      
+      monthlyData.push({
+        month: months[m],
+        desktop: hadirCount
+      });
+    }
+    return monthlyData;
+  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
 
   const filteredKebunSummary = useMemo(() => {
     return kebunSummary.filter(k => {
@@ -635,25 +811,135 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
             <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
               Ringkasan HK (Hari Kerja) Per Kebun ({selectedDate})
             </h3>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <i className="fa-solid fa-magnifying-glass" style={{ color: 'var(--text-muted)' }}></i>
-              <input
-                type="text"
-                placeholder="Cari Kebun, Distrik, Regional..."
-                value={kebunSearch}
-                onChange={(e) => setKebunSearch(e.target.value)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-main)',
-                  fontSize: '0.8rem',
-                  outline: 'none'
-                }}
-              />
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--bg-primary)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              {['Harian', 'Mingguan', 'Bulanan'].map(view => (
+                <button
+                  key={view}
+                  onClick={() => setChartView(view)}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: chartView === view ? '#1e40af' : 'transparent',
+                    color: chartView === view ? '#fff' : 'var(--text-muted)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {view}
+                </button>
+              ))}
             </div>
           </div>
+
+          {/* DYNAMIC CHARTS BASED ON SELECTED BADGE */}
+          {chartView === 'Harian' && trendChartData.length > 0 && (
+            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={trendChartData}
+                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="chart-glow-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                    <filter id="chart-dot-glow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="chart-line-glow" x="-10%" y="-20%" width="120%" height="140%">
+                      <feGaussianBlur stdDeviation="6" result="blur" />
+                      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                  </defs>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} 
+                    tickLine={false} 
+                    axisLine={{ stroke: 'var(--border-color)' }} 
+                  />
+                  <YAxis 
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} 
+                    tickLine={false} 
+                    axisLine={false} 
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                    cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  />
+                  <Area
+                    type="natural"
+                    dataKey="signups"
+                    name="TK Hadir"
+                    fill="url(#chart-glow-fill)"
+                    stroke="#10b981"
+                    strokeWidth={3}
+                    filter="url(#chart-line-glow)"
+                    dot={{
+                      r: 4,
+                      fill: "#10b981",
+                      strokeWidth: 2,
+                      stroke: "var(--bg-card)",
+                      filter: "url(#chart-dot-glow)",
+                    }}
+                    activeDot={{ r: 6, strokeWidth: 3, stroke: "var(--bg-card)" }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {chartView === 'Mingguan' && weeklyChartData.length > 0 && (
+            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklyChartData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
+                  <XAxis
+                    dataKey="week"
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--border-color)' }}
+                  />
+                  <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  />
+                  <Bar dataKey="desktop" name="TK Hadir" fill="#10b981" radius={4} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {chartView === 'Bulanan' && monthlyChartData.length > 0 && (
+            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyChartData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--border-color)' }}
+                  />
+                  <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  />
+                  <Bar dataKey="desktop" name="TK Hadir" fill="#10b981" radius={4} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
           {filteredKebunSummary.length === 0 ? (
             <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
