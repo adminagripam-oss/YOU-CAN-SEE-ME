@@ -24,3 +24,8 @@
 - **UI Recharts Typography Standard**: Whenever implementing or modifying charts using Recharts (`<BarChart>`, `<AreaChart>`, etc.), ALWAYS style the XAxis and YAxis tick text to be bold and inherit the project's font. Use the following prop configuration: `tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}`.
 - **Git Merge Standard**: When simulating a Pull Request locally or merging a feature branch into main, ALWAYS use the `--no-ff` (no fast-forward) flag. This forces a merge commit and ensures the feature branch topology is preserved in the Git graph for visual clarity.
 - **ZIP Creation Standard**: Never use PowerShell's `Compress-Archive` to package OTA updates or build folders, as it may cause corruption. ALWAYS use the native Windows `tar -a -c -f` command inside the target directory.
+- **Solid Background Asset Standard (GIF/Image)**:
+  - **Android/Capacitor Safemode**: NEVER use `mix-blend-mode` combined with CSS animations (`@keyframes opacity/transform`) on `<img src="...gif">` tags. This causes a total rendering failure (White Screen) on Android WebViews.
+  - **Light Mode**: Leave the image as is. Ensure the container background uses `var(--bg-primary)`.
+  - **Dark Mode**: Use `filter: invert(1)` to safely flip the colors. Avoid `mix-blend-mode: screen`.
+  - **Hardware Acceleration**: Always add `transform: translateZ(0); will-change: transform;` to force hardware acceleration and prevent rendering freezes for GIFs.

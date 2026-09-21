@@ -6,7 +6,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: var(--bg-main, #ffffff);
+  background-color: var(--bg-primary, #ffffff);
   z-index: 99999;
   transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out;
 }
@@ -20,23 +20,13 @@
   width: 180px;
   height: 180px;
   object-fit: contain;
-  animation: pulse-intro 3.5s ease-in-out forwards;
+  /* Safe fallback to ensure it renders on Android WebViews (disabling problematic animations/mix-blend-mode) */
+  transform: translateZ(0); 
+  will-change: transform;
 }
 
-/* Trik Tema Gelap / Terang (Dark / Light Mode) untuk GIF Solid */
-[data-theme='light'] .agri-splash-image {
-  mix-blend-mode: multiply; /* Menghapus background putih pada GIF sehingga menyatu */
-}
-
+/* Trik Tema Gelap (Dark Mode) yang aman untuk Android WebView (tanpa mix-blend-mode) */
 [data-theme='dark'] .agri-splash-image {
-  /* Membalikkan warna: background putih jadi hitam (sesuai dark mode), dan logo terang */
+  /* Membalikkan warna putih menjadi hitam agar menyatu dengan var(--bg-primary) gelap */
   filter: invert(1);
-  mix-blend-mode: screen; /* Agar hitam pekat menyatu dengan background abu-abu gelap container */
-}
-
-@keyframes pulse-intro {
-  0% { transform: scale(0.9); opacity: 0; }
-  10% { transform: scale(1); opacity: 1; }
-  90% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1.1); opacity: 0; }
 }
