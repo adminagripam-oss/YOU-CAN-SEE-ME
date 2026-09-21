@@ -17,14 +17,19 @@ const _dbReadyPromise: Promise<void> = new Promise((res, rej) => {
  * Await this before any DB operation to guarantee initSQLite has finished.
  * On non-native platforms it resolves immediately (no-op).
  */
-async function waitForConnection(): Promise<boolean> {
-  if (!Capacitor.isNativePlatform()) return false; // web — SQLite not used
-  try {
-    await _dbReadyPromise;
-    return !!dbConnection;
-  } catch {
-    return false;
-  }
+async function waitForConnection(): Promise<SQLiteDBConnection | null> {
+      if (!Capacitor.isNativePlatform()) return null; // web — SQLite not used
+      if (dbConnection) return dbConnection;
+      try {
+        await Promise.race([
+          _dbReadyPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for SQLite init')), 3000))
+        ]);
+        return dbConnection;
+      } catch (err) {
+        console.error('[SQLite] waitForConnection timeout or error:', err);
+        return null;
+      }
 }
 
 /**
@@ -576,13 +581,11 @@ export function getSQLiteConnection(): SQLiteDBConnection | null {
  * Cache master descriptor for a single employee.
  */
 export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) {
-      console.error('[SQLite Service sqliteCacheUserMasterVector] dbConnection null even after wait. Skipping cache.');
-      return;
-    }
-  }
+    const db = await waitForConnection();
+    if (!db) {
+          console.error('[SQLite Service sqliteCacheUserMasterVector] dbConnection null even after wait. Skipping cache.');
+          return;
+        }
   try {
     const empId = user.employee_id || user.id;
     if (!empId) return;
@@ -619,7 +622,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
     const gfvStr = gfv ? JSON.stringify(gfv) : null;
 
     // 1. Cache to local_employees
-    await dbConnection!.run(
+    await db.run(
       `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -639,7 +642,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
     );
 
     // 2. Cache to local_master_descriptors
-    await dbConnection!.run(
+    await db.run(
       `INSERT OR REPLACE INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
        VALUES (?, ?, ?, ?)`,
       [
@@ -677,13 +680,11 @@ export async function sqliteCacheGeometricVector(employeeId: number | string, gf
  * Retrieves cached master vectors and employee info from SQLite.
  */
 export async function sqliteGetCachedUserMasterVector(employeeId: number | string): Promise<any | null> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return null;
-  }
+    const db = await waitForConnection();
+    if (!db) return null;
   try {
     const empIdStr = String(employeeId);
-    const res = await dbConnection!.query(
+    const res = await db.query(
       `SELECT md.*, e.nik, e.name, e.department, e.afdeling, e.nama_kebun, e.status_tk, e.jabatan, e.status_perkawinan
        FROM local_master_descriptors md
        LEFT JOIN local_employees e ON CAST(md.employee_id AS TEXT) = CAST(e.id AS TEXT)
@@ -693,7 +694,7 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
 
     if (!res.values || res.values.length === 0 || !res.values[0].descriptor_json) {
       // Jika tidak ada di master_descriptors, coba cek apakah ini karyawan yang didaftarkan offline (belum di-sync)
-      const qRes = await dbConnection!.query(
+      const qRes = await db.query(
         `SELECT * FROM local_employee_sync_queue WHERE CAST(id AS TEXT) = ? OR id = ? OR CAST(nik AS TEXT) = ? LIMIT 1`,
         [empIdStr, employeeId, empIdStr]
       );
@@ -746,10 +747,8 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
  * Queue an offline attendance log.
  */
 export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) throw new Error('Database SQLite tidak terhubung.');
-  }
+    const db = await waitForConnection();
+    if (!db) throw new Error('Database SQLite tidak terhubung.');
   try {
     const createdAt = new Date().toISOString();
     const timestamp = logData.timestamp || createdAt;
@@ -757,7 +756,7 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
     const statusSyncFoto = logData.status_sync_foto || 'pending';
     const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : 0;
 
-    const runRes = await dbConnection!.run(
+    const runRes = await db.run(
       `INSERT INTO local_attendance_queue (
         employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -814,12 +813,10 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
  * Retrieve all unsynced logs.
  */
 export async function sqliteGetUnsyncedLogs(): Promise<any[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   try {
-    const res = await dbConnection!.query(
+    const res = await db.query(
       `SELECT * FROM local_attendance_queue WHERE is_synced = 0`
     );
     return res.values || [];
@@ -834,16 +831,14 @@ export async function sqliteGetUnsyncedLogs(): Promise<any[]> {
  */
 export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
   if (!ids || ids.length === 0) return;
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
     const set = ids.map(id => ({
       statement: `DELETE FROM local_attendance_queue WHERE id = ?`,
       values: [id]
     }));
-    await dbConnection!.executeSet(set);
+    await db.executeSet(set);
     console.log(`[SQLite Service] Successfully removed ${ids.length} synced logs from queue.`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemoveSyncedLogs Error]:', err?.message || err);
@@ -856,16 +851,14 @@ export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
  * We DO NOT clear sync queues or admin tables.
  */
 export async function sqliteClearAll(): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection.execute(`DELETE FROM local_employees`);
-    await dbConnection.execute(`DELETE FROM local_today_attendance_cache`);
-    await dbConnection.execute(`DELETE FROM local_attendance_logs`);
-    await dbConnection.execute(`DELETE FROM local_attendance_requests`);
-    await dbConnection.execute(`DELETE FROM local_master_descriptors`);
+    await db.execute(`DELETE FROM local_employees`);
+    await db.execute(`DELETE FROM local_today_attendance_cache`);
+    await db.execute(`DELETE FROM local_attendance_logs`);
+    await db.execute(`DELETE FROM local_attendance_requests`);
+    await db.execute(`DELETE FROM local_master_descriptors`);
     console.log('[SQLite Service] Cleared all local caches for logout.');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAll Error]:', err?.message || err);
@@ -1147,16 +1140,14 @@ export async function sqliteClearTodayAttendanceCache(): Promise<void> {
  * Save a single attendance log to local SQLite.
  */
 export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
     const statusSyncTeks = log.status_sync_teks || (log.is_synced ? 'done' : 'pending');
     const statusSyncFoto = log.status_sync_foto || (log.is_synced ? 'done' : 'pending');
     const isSynced = (statusSyncTeks === 'done' && statusSyncFoto === 'done') ? 1 : (log.is_synced ? 1 : 0);
 
-    await dbConnection!.run(
+    await db.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
       (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1193,10 +1184,8 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
  * Bulk save attendance logs to local SQLite.
  */
 export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
     const statements = logs.map(log => {
       const statusSyncTeks = log.status_sync_teks || (log.is_synced ? 'done' : 'pending');
@@ -1233,7 +1222,7 @@ export async function sqliteBulkSaveAttendanceLogs(logs: any[]): Promise<void> {
       };
     });
     if (statements.length > 0) {
-      await dbConnection!.executeSet(statements);
+      await db.executeSet(statements);
     }
     console.log(`[SQLite Service] Bulk saved ${logs.length} attendance logs to local SQLite`);
   } catch (err: any) {
@@ -1250,10 +1239,8 @@ export async function sqliteUpdateSyncStatus(
   photoStatus?: string | null,
   syncNotes?: string | null
 ): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
     const idStr = String(id);
     const cleanId = idStr.startsWith('offline_') ? idStr.replace('offline_', '') : idStr;
@@ -1287,13 +1274,13 @@ export async function sqliteUpdateSyncStatus(
     const setClause = updates.join(', ');
 
     if (!isNaN(cleanIdInt)) {
-      await dbConnection!.run(
+      await db.run(
         `UPDATE local_attendance_queue SET ${setClause} WHERE id = ?`,
         [...params, cleanIdInt]
       );
     }
 
-    await dbConnection!.run(
+    await db.run(
       `UPDATE local_attendance_logs SET ${setClause} WHERE id = ? OR id = ?`,
       [...params, idStr, `offline_${cleanIdInt}`]
     );
@@ -1307,12 +1294,10 @@ export async function sqliteUpdateSyncStatus(
  * Get all attendance logs from local SQLite.
  */
 export async function sqliteGetAttendanceLogs(): Promise<any[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   try {
-    const res = await dbConnection!.query(
+    const res = await db.query(
       `SELECT * FROM local_attendance_logs ORDER BY timestamp DESC`
     );
     const rows = res.values || [];
@@ -1350,17 +1335,15 @@ export async function sqliteGetAttendanceLogs(): Promise<any[]> {
  * Get today's attendance logs for a single employee from SQLite.
  */
 export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateStr: string): Promise<any[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   let combinedRows: any[] = [];
   try {
     const empIdStr = String(empId);
     
     // 1. Fetch from local_attendance_logs
     try {
-      const resLogs = await dbConnection!.query(
+      const resLogs = await db.query(
         `SELECT * FROM local_attendance_logs 
          WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?)`,
         [empIdStr, empId]
@@ -1374,7 +1357,7 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
 
     // 2. Fetch from local_attendance_queue
     try {
-      const resQueue = await dbConnection!.query(
+      const resQueue = await db.query(
         `SELECT * FROM local_attendance_queue
          WHERE (CAST(employee_id AS TEXT) = ? OR employee_id = ?)`,
         [empIdStr, empId]
@@ -1438,12 +1421,10 @@ export async function sqliteGetTodayAttendanceLogs(empId: number | string, dateS
  * Hard Delete a single local attendance log from SQLite.
  */
 export async function sqliteHardDeleteAttendanceLog(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(
+    await db.run(
       `DELETE FROM local_attendance_logs WHERE id = ?`,
       [id]
     );
@@ -1457,12 +1438,10 @@ export async function sqliteHardDeleteAttendanceLog(id: string): Promise<void> {
  * Clear all local attendance logs from SQLite.
  */
 export async function sqliteClearAttendanceLogs(): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.execute(`DELETE FROM local_attendance_logs`);
+    await db.execute(`DELETE FROM local_attendance_logs`);
     console.log('[SQLite Service] Cleared local attendance logs table.');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAttendanceLogs Error]:', err?.message || err, err?.stack || '');
@@ -1526,13 +1505,11 @@ export async function sqliteGetAdmin(username: string): Promise<any | null> {
  * Save an offline registered employee to pending sync queue
  */
 export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) {
-      console.error('[SQLite Service sqliteSavePendingEmployee] dbConnection null even after wait. Skipping save.');
-      return;
-    }
-  }
+    const db = await waitForConnection();
+    if (!db) {
+          console.error('[SQLite Service sqliteSavePendingEmployee] dbConnection null even after wait. Skipping save.');
+          return;
+        }
   try {
     const descJson = empData.descriptor_json ? (typeof empData.descriptor_json === 'string' ? empData.descriptor_json : JSON.stringify(empData.descriptor_json)) : null;
     const geomJson = empData.geometric_descriptor_json ? (typeof empData.geometric_descriptor_json === 'string' ? empData.geometric_descriptor_json : JSON.stringify(empData.geometric_descriptor_json)) : null;
@@ -1559,7 +1536,7 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       geomJson,
       empData.created_at || new Date().toISOString()
     ];
-    await dbConnection!.run(sql, params);
+    await db.run(sql, params);
 
     // 2. Simpan juga ke Cache Karyawan agar langsung muncul di UI dengan status lengkap (konsisten dengan Web/IndexedDB)
     const cacheSql = `
@@ -1581,7 +1558,7 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.region || null,
       0
     ];
-    await dbConnection!.run(cacheSql, cacheParams);
+    await db.run(cacheSql, cacheParams);
 
     // 3. Simpan Vektor Wajah ke local_master_descriptors agar bisa langsung dipakai absen offline
     if (descJson || geomJson) {
@@ -1596,7 +1573,7 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
         geomJson,
         new Date().toISOString()
       ];
-      await dbConnection!.run(descSql, descParams);
+      await db.run(descSql, descParams);
     }
 
     console.log(`[SQLite Service] Saved pending offline employee: ${empData.name} (${empData.id}) into queue and cache.`);
@@ -1609,12 +1586,10 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
  * Retrieve all unsynced pending employees
  */
 export async function sqliteGetPendingEmployees(): Promise<any[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   try {
-    const res = await dbConnection!.query(`SELECT * FROM local_employee_sync_queue WHERE is_synced = 0`);
+    const res = await db.query(`SELECT * FROM local_employee_sync_queue WHERE is_synced = 0`);
     return res.values || [];
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetPendingEmployees Error]:', err?.message || err);
@@ -1626,12 +1601,10 @@ export async function sqliteGetPendingEmployees(): Promise<any[]> {
  * Remove a synced employee from pending queue
  */
 export async function sqliteRemovePendingEmployee(id: string | number): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
+    await db.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Removed pending employee from queue: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemovePendingEmployee Error]:', err?.message || err);
@@ -1642,17 +1615,15 @@ export async function sqliteRemovePendingEmployee(id: string | number): Promise<
  * Update employee_id in pending attendance queue when temp employee ID is replaced by real ID from Supabase
  */
 export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: string | number, newRealEmpId: string | number): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(
+    await db.run(
       `UPDATE local_attendance_queue SET employee_id = ? WHERE employee_id = ?`,
       [String(newRealEmpId), String(oldTempEmpId)]
     );
     // Also update the UI logs display table so that Deduplication works post-sync
-    await dbConnection!.run(
+    await db.run(
       `UPDATE local_attendance_logs SET employee_id = ? WHERE employee_id = ?`,
       [String(newRealEmpId), String(oldTempEmpId)]
     );
@@ -1666,10 +1637,8 @@ export async function sqliteUpdatePendingAttendanceEmployeeId(oldTempEmpId: stri
  * Attendance Requests (Offline HQ Admin Operations)
  */
 export async function sqliteSaveAttendanceRequest(req: any): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
     const oldValJson = req.old_value ? JSON.stringify(req.old_value) : null;
     const newValJson = req.new_value ? JSON.stringify(req.new_value) : null;
@@ -1695,7 +1664,7 @@ export async function sqliteSaveAttendanceRequest(req: any): Promise<void> {
       isSyncedInt
     ];
 
-    await dbConnection!.run(sql, params);
+    await db.run(sql, params);
     console.log(`[SQLite Service] Saved attendance request: ${req.id} (Type: ${req.request_type})`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSaveAttendanceRequest Error]:', err?.message || err);
@@ -1703,12 +1672,10 @@ export async function sqliteSaveAttendanceRequest(req: any): Promise<void> {
 }
 
 export async function sqliteGetAttendanceRequests(): Promise<any[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   try {
-    const res = await dbConnection!.query(`SELECT * FROM local_attendance_requests`);
+    const res = await db.query(`SELECT * FROM local_attendance_requests`);
     const rows = res.values || [];
     return rows.map((r: any) => ({
       ...r,
@@ -1723,12 +1690,10 @@ export async function sqliteGetAttendanceRequests(): Promise<any[]> {
 }
 
 export async function sqliteDeleteAttendanceRequest(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`DELETE FROM local_attendance_requests WHERE id = ?`, [String(id)]);
+    await db.run(`DELETE FROM local_attendance_requests WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Deleted attendance request: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteDeleteAttendanceRequest Error]:', err?.message || err);
@@ -1736,12 +1701,10 @@ export async function sqliteDeleteAttendanceRequest(id: string): Promise<void> {
 }
 
 export async function sqliteClearAttendanceRequests(): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.execute(`DELETE FROM local_attendance_requests`);
+    await db.execute(`DELETE FROM local_attendance_requests`);
     console.log('[SQLite Service] Cleared all attendance requests.');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAttendanceRequests Error]:', err?.message || err);
@@ -1749,12 +1712,10 @@ export async function sqliteClearAttendanceRequests(): Promise<void> {
 }
 
 export async function sqliteQueueEmployeeDelete(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`INSERT OR REPLACE INTO local_employee_delete_queue (id) VALUES (?)`, [String(id)]);
+    await db.run(`INSERT OR REPLACE INTO local_employee_delete_queue (id) VALUES (?)`, [String(id)]);
     console.log(`[SQLite Service] Queued employee delete for ID: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteQueueEmployeeDelete Error]:', err?.message || err);
@@ -1762,12 +1723,10 @@ export async function sqliteQueueEmployeeDelete(id: string): Promise<void> {
 }
 
 export async function sqliteGetEmployeeDeletes(): Promise<string[]> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return [];
-  }
+    const db = await waitForConnection();
+    if (!db) return [];
   try {
-    const res = await dbConnection!.query(`SELECT id FROM local_employee_delete_queue`);
+    const res = await db.query(`SELECT id FROM local_employee_delete_queue`);
     return (res.values || []).map((row: any) => row.id);
   } catch (err: any) {
     console.error('[SQLite Service sqliteGetEmployeeDeletes Error]:', err?.message || err);
@@ -1776,12 +1735,10 @@ export async function sqliteGetEmployeeDeletes(): Promise<string[]> {
 }
 
 export async function sqliteRemoveEmployeeDelete(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`DELETE FROM local_employee_delete_queue WHERE id = ?`, [String(id)]);
+    await db.run(`DELETE FROM local_employee_delete_queue WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Removed employee delete from queue: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemoveEmployeeDelete Error]:', err?.message || err);
@@ -1789,12 +1746,10 @@ export async function sqliteRemoveEmployeeDelete(id: string): Promise<void> {
 }
 
 export async function sqliteSoftDeleteEmployee(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`UPDATE local_employees SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
+    await db.run(`UPDATE local_employees SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Soft deleted employee: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSoftDeleteEmployee Error]:', err?.message || err);
@@ -1802,12 +1757,10 @@ export async function sqliteSoftDeleteEmployee(id: string): Promise<void> {
 }
 
 export async function sqliteSoftDeleteAttendanceLog(id: string): Promise<void> {
-  if (!dbConnection) {
-    const ready = await waitForConnection();
-    if (!ready) return;
-  }
+    const db = await waitForConnection();
+    if (!db) return;
   try {
-    await dbConnection!.run(`UPDATE local_attendance_logs SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
+    await db.run(`UPDATE local_attendance_logs SET syncStatus = 'PENDING_DELETE' WHERE id = ?`, [String(id)]);
     console.log(`[SQLite Service] Soft deleted attendance log: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSoftDeleteAttendanceLog Error]:', err?.message || err);
