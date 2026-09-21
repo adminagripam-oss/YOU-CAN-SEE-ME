@@ -20,102 +20,10 @@
   pointer-events: none;
 }
 
-/* Make it responsive for mobile */
-.agri-splash-content {
-  width: 300px;
-  height: 300px;
-  max-width: 90vw;
-}
-
-.agri-splash-svg {
+.agri-splash-video {
   width: 100%;
   height: 100%;
-  overflow: visible;
-}
-
-/* PHASE 2: Face Mesh Scanning (0.5s - 1.5s) */
-.agri-face-mesh path, .agri-face-mesh circle {
-  stroke: #38bdf8;
-  stroke-width: 2;
-  fill: none;
-  opacity: 0;
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
-}
-
-.agri-face-mesh circle {
-  fill: #38bdf8;
-  stroke: none;
-}
-
-.agri-face-mesh path {
-  stroke-dasharray: 400;
-  stroke-dashoffset: 400;
-  /* Start drawing at 0.5s */
-  animation: meshDraw 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  animation-delay: 0.5s;
-}
-
-.agri-face-mesh circle {
-  /* Nodes appear slightly after lines start */
-  animation: meshNodeFadeIn 0.5s ease forwards;
-  animation-delay: 1.0s;
-}
-
-@keyframes meshDraw {
-  to {
-    stroke-dashoffset: 0;
-    opacity: 1;
-  }
-}
-
-@keyframes meshNodeFadeIn {
-  to {
-    opacity: 1;
-  }
-}
-
-/* PHASE 3: Agriculture Elements (1.5s - 2.5s) */
-.agri-leaves {
-  opacity: 0;
-  transform-origin: 50% 70%;
-  /* Grow effect starting at 1.5s */
-  animation: leavesGrow 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  animation-delay: 1.5s;
-}
-
-@keyframes leavesGrow {
-  0% { transform: scale(0.5); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-/* PHASE 4: Face Solidify (2.5s - 3.0s) */
-.agri-face-solid {
-  opacity: 0;
-  /* Fills in the mesh starting at 2.5s */
-  animation: faceSolidify 0.5s ease-out forwards;
-  animation-delay: 2.5s;
-}
-
-@keyframes faceSolidify {
-  to { opacity: 1; }
-}
-
-/* PHASE 5: Typography Brand (3.0s - 4.0s) */
-.agri-brand-text {
-  font-family: 'Inter', sans-serif;
-  font-size: 32px;
-  font-weight: 700;
-  fill: #ffffff;
-  opacity: 0;
-  transform: translateY(20px);
-  /* Slide up and fade in starting at 3.0s */
-  animation: textSlideUp 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  animation-delay: 3.0s;
-}
-
-@keyframes textSlideUp {
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  object-fit: contain; /* Center & Contain as requested */
+  outline: none;
+  border: none;
 }
