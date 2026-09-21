@@ -7,12 +7,13 @@ export default function Sidebar({ isOpen, onClose }) {
   const navigate = useNavigate();
 
   const isEstateAdmin = !user || user.role === 'estate_admin';
+  const isCollapsed = false;
 
   return (
     <>
       <aside className={`app-sidebar ${isOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
         <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <img src="/icon-foreground.png" alt="AgriFace Logo" style={{ width: '1.5rem', height: '1.5rem', objectFit: 'contain', flexShrink: 0 }} />
+          <img src="/icon-foreground.png" alt="AgriFace Logo" style={{ width: '2.5rem', height: '2.5rem', objectFit: 'contain', flexShrink: 0 }} />
           <div className="brand-text" style={{ transition: 'opacity 0.2s ease' }}>
             <h2>AgriFace</h2>
             <p>1-to-1 Biometric Engine</p>
