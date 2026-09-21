@@ -27,6 +27,8 @@ import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
 import OTAUpdateDialog from './components/OTAUpdateDialog';
 
+import AnimatedSplash from './components/AnimatedSplash';
+
 function AppContent() {
   const { user } = useAuth();
   const loadedUserRef = useRef(null);
@@ -1532,8 +1534,18 @@ function AppContent() {
 }
 
 export default function App() {
+  // Use a simple timeout or combined check to determine when the app is "ready".
+  // Assuming 2000ms is enough for initial paint and local DB init.
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsReady(true), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <AuthProvider>
+      <AnimatedSplash isAppReady={isReady} />
       <AppContent />
     </AuthProvider>
   );
