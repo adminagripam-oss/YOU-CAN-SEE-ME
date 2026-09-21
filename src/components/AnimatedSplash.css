@@ -24,13 +24,4 @@
   width: 100%;
   height: 100%;
   object-fit: contain; /* Center & Contain as requested */
-  
-  /* 3 Second Fade Effect */
-  opacity: 0;
-  animation: staticImageFadeIn 3s ease-in-out forwards;
-}
-
-@keyframes staticImageFadeIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
 }
