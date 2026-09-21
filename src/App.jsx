@@ -26,8 +26,8 @@ import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
 import OTAUpdateDialog from './components/OTAUpdateDialog';
-
 import AnimatedSplash from './components/AnimatedSplash';
+
 
 function AppContent() {
   const { user } = useAuth();
@@ -1535,9 +1535,6 @@ function AppContent() {
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
-
-  // We rely entirely on the AnimatedSplash component to trigger onAnimationComplete
-  // after its 4s internal timer, so we no longer need the setTimeout here.
 
   return (
     <AuthProvider>

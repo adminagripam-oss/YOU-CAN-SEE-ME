@@ -1,27 +1,42 @@
-/* AnimatedSplash.css */
-
 .agri-splash-container {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100vw;
   height: 100vh;
-  background-color: #0d1117; /* PRD dark theme */
   display: flex;
   justify-content: center;
   align-items: center;
+  background-color: var(--bg-main, #ffffff);
   z-index: 99999;
-  transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
+  transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out;
 }
 
 .agri-splash-container.fade-out {
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
 }
 
 .agri-splash-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* Center & Contain as requested */
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  animation: pulse-intro 3.5s ease-in-out forwards;
+}
+
+/* Trik Tema Gelap / Terang (Dark / Light Mode) untuk GIF Solid */
+[data-theme='light'] .agri-splash-image {
+  mix-blend-mode: multiply; /* Menghapus background putih pada GIF sehingga menyatu */
+}
+
+[data-theme='dark'] .agri-splash-image {
+  /* Membalikkan warna: background putih jadi hitam (sesuai dark mode), dan logo terang */
+  filter: invert(1);
+  mix-blend-mode: screen; /* Agar hitam pekat menyatu dengan background abu-abu gelap container */
+}
+
+@keyframes pulse-intro {
+  0% { transform: scale(0.9); opacity: 0; }
+  10% { transform: scale(1); opacity: 1; }
+  90% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.1); opacity: 0; }
 }
