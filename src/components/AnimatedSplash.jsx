@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './AnimatedSplash.css';
-import splashGif from '../assets/splash.gif';
+import splashAnimation from '../assets/splash.webp';
 
 export default function AnimatedSplash({ isAppReady, onAnimationComplete }) {
   const [shouldRender, setShouldRender] = useState(true);
@@ -31,7 +31,7 @@ export default function AnimatedSplash({ isAppReady, onAnimationComplete }) {
     <div className={`agri-splash-container ${isAppReady ? 'fade-out' : ''}`}>
       <img 
         className="agri-splash-image"
-        src={splashGif}
+        src={splashAnimation}
         alt="Agriface Splash Screen"
       />
     </div>

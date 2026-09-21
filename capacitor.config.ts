@@ -9,8 +9,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     CapacitorUpdater: {
-      autoUpdate: false,
-      stats: false
+      autoUpdate: false
     },
     SplashScreen: {
       launchShowDuration: 500,
