@@ -26,6 +26,5 @@
 - **ZIP Creation Standard**: Never use PowerShell's `Compress-Archive` to package OTA updates or build folders, as it may cause corruption. ALWAYS use the native Windows `tar -a -c -f` command inside the target directory.
 - **Solid Background Asset Standard (GIF/Image)**:
   - **Android/Capacitor Safemode**: NEVER use `mix-blend-mode` combined with CSS animations (`@keyframes opacity/transform`) on `<img src="...gif">` tags. This causes a total rendering failure (White Screen) on Android WebViews.
-  - **Light Mode**: Leave the image as is. Ensure the container background uses `var(--bg-primary)`.
-  - **Dark Mode**: Use `filter: invert(1)` to safely flip the colors. Avoid `mix-blend-mode: screen`.
+  - **Brand Colors Safety**: NEVER use `filter: invert(1)` to adapt a logo to Dark Mode. This will distort the original brand colors (e.g., green becomes purple). If a transparent asset is unavailable, allow the solid background to render as a box, or ask the user to provide a transparent asset.
   - **Hardware Acceleration**: Always add `transform: translateZ(0); will-change: transform;` to force hardware acceleration and prevent rendering freezes for GIFs.

@@ -17,16 +17,11 @@
 }
 
 .agri-splash-image {
-  width: 180px;
-  height: 180px;
+  width: 65vw;
+  max-width: 300px;
+  height: auto;
   object-fit: contain;
-  /* Safe fallback to ensure it renders on Android WebViews (disabling problematic animations/mix-blend-mode) */
+  /* Safe fallback for Android WebViews */
   transform: translateZ(0); 
   will-change: transform;
-}
-
-/* Trik Tema Gelap (Dark Mode) yang aman untuk Android WebView (tanpa mix-blend-mode) */
-[data-theme='dark'] .agri-splash-image {
-  /* Membalikkan warna putih menjadi hitam agar menyatu dengan var(--bg-primary) gelap */
-  filter: invert(1);
 }
