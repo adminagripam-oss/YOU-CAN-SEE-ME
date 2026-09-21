@@ -1534,18 +1534,17 @@ function AppContent() {
 }
 
 export default function App() {
-  // Use a simple timeout or combined check to determine when the app is "ready".
-  // Assuming 2000ms is enough for initial paint and local DB init.
   const [isReady, setIsReady] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setIsReady(true), 1500);
-    return () => clearTimeout(timer);
-  }, []);
+  // We rely entirely on the AnimatedSplash component to trigger onAnimationComplete
+  // after its 4s internal timer, so we no longer need the setTimeout here.
 
   return (
     <AuthProvider>
-      <AnimatedSplash isAppReady={isReady} />
+      <AnimatedSplash 
+        isAppReady={isReady} 
+        onAnimationComplete={() => setIsReady(true)} 
+      />
       <AppContent />
     </AuthProvider>
   );
