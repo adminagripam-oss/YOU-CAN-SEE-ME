@@ -1,0 +1,238 @@
+/* =============================================
+   DateRangePicker.css
+   Custom navigation — no dependency on rdp-nav DOM structure
+   ============================================= */
+
+.drp-root {
+  position: relative;
+  display: inline-block;
+}
+
+/* ── TRIGGER BUTTON ── */
+.drp-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 240px;
+  height: 36px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-main);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  outline: none;
+}
+
+.drp-trigger:hover {
+  background: var(--bg-card);
+}
+
+.drp-trigger--open {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.drp-trigger__label {
+  flex: 1;
+  text-align: left;
+}
+
+.drp-trigger__label--placeholder {
+  color: var(--text-muted);
+}
+
+.drp-trigger__icon {
+  color: var(--text-muted);
+}
+
+/* ── POPOVER ── */
+.drp-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 12px;
+  animation: drp-fade-in 0.1s ease;
+}
+
+@keyframes drp-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── CUSTOM NAV HEADER ── */
+/* Arrow left | Month Labels centered | Arrow right */
+.drp-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0 8px 0;
+  gap: 8px;
+}
+
+.drp-nav-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  z-index: 1;
+}
+
+.drp-nav-btn:hover {
+  background: var(--bg-card);
+}
+
+/* Month label(s) container: centered with equal space for each month */
+.drp-nav-months-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.drp-nav-month-label {
+  font-size: 0.875rem;
+  font-weight: bold;
+  font-family: inherit;
+  color: var(--text-main);
+  text-align: center;
+}
+
+/* ── HIDE BUILT-IN LIBRARY NAV ── */
+.drp-hidden-nav,
+.drp-popover .rdp-nav,
+.drp-popover .rdp-caption_button {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* ── DESKTOP: side-by-side two months ── */
+.drp-dual-months {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* ── RDP ROOT overrides ── */
+.drp-popover .rdp {
+  --rdp-cell-size: 36px;
+  margin: 0;
+}
+
+/* Hide the default caption row entirely since we have custom header */
+.drp-popover .rdp-caption {
+  display: none !important;
+}
+
+.drp-popover .rdp-months {
+  margin: 0;
+}
+
+.drp-popover .rdp-month {
+  margin: 0;
+}
+
+/* ── TABLE ── */
+.drp-popover .rdp-table {
+  border-collapse: collapse;
+  margin: 0;
+}
+
+/* ── HEAD CELLS (Su Mo Tu etc.) ── */
+.drp-popover .rdp-head_cell {
+  font-size: 0.75rem;
+  font-weight: bold !important;
+  font-family: inherit;
+  color: var(--text-muted);
+  width: var(--rdp-cell-size);
+  height: var(--rdp-cell-size);
+  vertical-align: middle;
+  text-align: center;
+}
+
+/* ── DAY CELLS ── */
+.drp-popover .rdp-cell {
+  width: var(--rdp-cell-size);
+  height: var(--rdp-cell-size);
+  padding: 0;
+  text-align: center;
+}
+
+/* ── DAY BUTTON ── */
+.drp-popover .rdp-day {
+  width: 100%;
+  height: 100%;
+  font-size: 0.875rem;
+  font-weight: bold !important;
+  font-family: inherit !important;
+  color: var(--text-main);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.drp-popover .rdp-day:hover:not(.rdp-day_selected):not(.rdp-day_outside) {
+  background: var(--bg-card);
+}
+
+/* Outside days (days from prev/next month) */
+.drp-popover .rdp-day_outside,
+.drp-popover .rdp-outside {
+  color: var(--text-muted);
+  opacity: 0.4;
+  font-weight: normal !important;
+}
+
+/* ── SELECTED RANGE ── */
+/* 
+  1 unified style: filled rounded box
+  Light mode: black bg + white text
+  Dark mode: white bg + black text  (via var(--text-main) / var(--bg-primary))
+*/
+.drp-popover .rdp-day_selected,
+.drp-popover .rdp-selected {
+  background: var(--text-main) !important;
+  color: var(--bg-primary) !important;
+  border-radius: 6px !important;
+}
+
+/* ── MOBILE ── */
+@media (max-width: 600px) {
+  .drp-popover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    transform: translate(-50%, -50%);
+    max-width: 95vw;
+    width: max-content;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  /* On mobile, stack the nav month label to single centered label */
+  .drp-nav-months-label {
+    justify-content: center;
+  }
+}

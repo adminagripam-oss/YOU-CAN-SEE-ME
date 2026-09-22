@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { DateRangePicker } from '../components/DateRangePicker';
 
 const KEBUN_TO_REGION = {
   'Bukit Harapan I': 'Sumut 2',
@@ -21,7 +22,7 @@ const KEBUN_TO_REGION = {
 
 export default function DashboardPage({ employees = [], logs = [], modelsLoaded }) {
   const { user } = useAuth();
-  
+
   // Helper to get local date string YYYY-MM-DD in local timezone (e.g. WIB)
   const getLocalDateStr = (d) => {
     const year = d.getFullYear();
@@ -37,12 +38,12 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     d.setDate(d.getDate() - 1);
     return getLocalDateStr(d);
   })();
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [dateRange, setDateRange] = useState({ start: todayStr, end: todayStr });
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [kebunSearch, setKebunSearch] = useState('');
   const [selectedKebun, setSelectedKebun] = useState('All');
   const [chartView, setChartView] = useState('Harian'); // Harian, Mingguan, Bulanan
-  
+
   // Pagination States
   const [kebunPage, setKebunPage] = useState(1);
   const [logsPage, setLogsPage] = useState(1);
@@ -110,7 +111,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   const totalEmployees = filteredEmployees.length || 0;
 
-  // Filter logs dynamically based on selectedDate and selectedKebun
+  // Filter logs dynamically based on dateRange and selectedKebun
   const filteredLogs = useMemo(() => {
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
@@ -119,7 +120,13 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       if (!l.timestamp) return false;
       const logDate = new Date(l.timestamp);
       const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
-      if (logDateStr !== selectedDate) return false;
+
+      // Range check
+      if (dateRange.start && dateRange.end) {
+        if (logDateStr < dateRange.start || logDateStr > dateRange.end) return false;
+      } else if (dateRange.start) {
+        if (logDateStr !== dateRange.start) return false;
+      }
 
       // Filter by selected kebun
       if (selectedKebun && selectedKebun !== 'All') {
@@ -129,7 +136,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       }
       return true;
     });
-  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees]);
 
   const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
 
@@ -151,9 +158,9 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           keterangan: 'Hadir' // default
         };
       }
-      
+
       const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT')) || (log.location && log.location.includes('CHECK-OUT'));
-      
+
       let ket = 'Hadir';
       if (log.status) {
         if (log.status.includes('Izin')) ket = 'Izin';
@@ -173,12 +180,12 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
     // Resolve final status for the employee for this day
     Object.values(groups).forEach(g => {
-       // According to rule: 'Lupa Check-out' is counted under 'TK Hadir'
-       if (g.keterangan === 'Lupa Check-out') {
-          g.finalStatus = 'Hadir'; 
-       } else {
-          g.finalStatus = g.keterangan;
-       }
+      // According to rule: 'Lupa Check-out' is counted under 'TK Hadir'
+      if (g.keterangan === 'Lupa Check-out') {
+        g.finalStatus = 'Hadir';
+      } else {
+        g.finalStatus = g.keterangan;
+      }
     });
 
     return Object.values(groups);
@@ -187,7 +194,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   // Grouping data by kebun (for Regional & Head Office dashboards)
   const kebunSummary = useMemo(() => {
     const uniqueKebuns = [...new Set(filteredEmployees.map(e => e.nama_kebun).filter(Boolean))];
-    
+
     return uniqueKebuns.map(kebunName => {
       const kebunEmployees = filteredEmployees.filter(e => e.nama_kebun === kebunName);
       const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
@@ -196,7 +203,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       // Hitung HK Hadir (TK Hadir) hari ini dari groupedLogs yang finalStatus-nya 'Hadir'
       const kebunGroupedLogs = groupedLogs.filter(g => kebunEmpIds.has(String(g.employee_id)) || kebunEmpNiks.has(String(g.nik)));
       const hadirCount = kebunGroupedLogs.filter(g => g.finalStatus === 'Hadir').length;
-      
+
       const totalCount = kebunEmployees.length || 1;
       const percent = ((hadirCount / totalCount) * 100).toFixed(1);
 
@@ -214,29 +221,29 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   // Grouping data by date (for 7-day trend chart)
   const trendChartData = useMemo(() => {
-    const endDate = new Date(selectedDate);
+    const endDate = new Date(dateRange.end || dateRange.start);
     if (isNaN(endDate.getTime())) return [];
-    
+
     const trendData = [];
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
-    
+
     for (let i = 6; i >= 0; i--) {
       const d = new Date(endDate);
       d.setDate(d.getDate() - i);
-      
+
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
       const displayDate = `${day}/${month}`;
-      
+
       const logsForDay = logs.filter((l) => {
         if (!l.timestamp) return false;
         const logDate = new Date(l.timestamp);
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
         if (logDateStr !== dateStr) return false;
-        
+
         if (selectedKebun && selectedKebun !== 'All') {
           const empIdStr = String(l.employee_id);
           const nikStr = String(l.nik);
@@ -244,7 +251,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         }
         return true;
       });
-      
+
       const groups = {};
       logsForDay.forEach(log => {
         const empIdStr = String(log.employee_id);
@@ -256,32 +263,32 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           else if (log.status.includes('Mangkir')) ket = 'Mangkir';
           else if (log.status.toLowerCase().includes('lupa_checkout') || log.status.toLowerCase().includes('lupa check-out')) ket = 'Hadir';
         }
-        
+
         // If employee already had 'Hadir', keep it. Else assign new ket.
         if (!groups[empIdStr] || groups[empIdStr] !== 'Hadir') {
           groups[empIdStr] = ket;
         }
       });
-      
+
       const hadirCount = Object.values(groups).filter(v => v === 'Hadir').length;
-      
+
       trendData.push({
         date: displayDate,
         signups: hadirCount
       });
     }
     return trendData;
-  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees]);
 
   // Grouping data by Week (W1-W5) for the selected month
   const weeklyChartData = useMemo(() => {
-    const targetDate = new Date(selectedDate);
+    const targetDate = new Date(dateRange.start);
     if (isNaN(targetDate.getTime())) return [];
-    
+
     const currentMonth = targetDate.getMonth();
     const currentYear = targetDate.getFullYear();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate(); // 28, 29, 30, or 31
-    
+
     const weeklyData = [
       { week: 'W1', desktop: 0 },
       { week: 'W2', desktop: 0 },
@@ -289,15 +296,15 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       { week: 'W4', desktop: 0 },
       { week: 'W5', desktop: 0 }
     ];
-    
+
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
-    
+
     const logsForMonth = logs.filter((l) => {
       if (!l.timestamp) return false;
       const logDate = new Date(l.timestamp);
       if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== currentMonth) return false;
-      
+
       if (selectedKebun && selectedKebun !== 'All') {
         const empIdStr = String(l.employee_id);
         const nikStr = String(l.nik);
@@ -305,7 +312,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       }
       return true;
     });
-    
+
     // Process unique attendances per day per employee
     const groups = {};
     logsForMonth.forEach(log => {
@@ -319,7 +326,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         groups[`${log.employee_id}_${dateStrKey}`] = new Date(log.timestamp).getDate(); // store the date number (1-31)
       }
     });
-    
+
     Object.values(groups).forEach(dateNum => {
       if (dateNum >= 1 && dateNum <= 7) weeklyData[0].desktop++;
       else if (dateNum >= 8 && dateNum <= 14) weeklyData[1].desktop++;
@@ -327,34 +334,34 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       else if (dateNum >= 22 && dateNum <= 28) weeklyData[3].desktop++;
       else if (dateNum >= 29 && dateNum <= 31) weeklyData[4].desktop++;
     });
-    
+
     // Optionally remove W5 if there are no days 29-31 in a non-leap February, but usually keeping it constant W1-W5 is better for UI consistency.
     // Let's filter out W5 if daysInMonth < 29
     if (daysInMonth < 29) {
       return weeklyData.slice(0, 4);
     }
-    
+
     return weeklyData;
-  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees]);
 
   // Grouping data by Month (All months this year)
   const monthlyChartData = useMemo(() => {
-    const endDate = new Date(selectedDate);
+    const endDate = new Date(dateRange.end || dateRange.start);
     if (isNaN(endDate.getTime())) return [];
-    
+
     const currentYear = endDate.getFullYear();
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    
+
     const monthlyData = [];
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
-    
+
     for (let m = 0; m < 12; m++) {
       const logsForMonth = logs.filter((l) => {
         if (!l.timestamp) return false;
         const logDate = new Date(l.timestamp);
         if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== m) return false;
-        
+
         if (selectedKebun && selectedKebun !== 'All') {
           const empIdStr = String(l.employee_id);
           const nikStr = String(l.nik);
@@ -362,7 +369,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         }
         return true;
       });
-      
+
       const groups = {};
       logsForMonth.forEach(log => {
         const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT'));
@@ -375,16 +382,16 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           groups[`${log.employee_id}_${dateStrKey}`] = true;
         }
       });
-      
+
       const hadirCount = Object.keys(groups).length;
-      
+
       monthlyData.push({
         month: months[m],
         desktop: hadirCount
       });
     }
     return monthlyData;
-  }, [logs, selectedDate, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees]);
 
   const filteredKebunSummary = useMemo(() => {
     return kebunSummary.filter(k => {
@@ -400,10 +407,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const verifiedCount = groupedLogs.filter(g => g.finalStatus === 'Hadir').length;
   const izinCount = groupedLogs.filter(g => g.finalStatus === 'Izin').length;
   const sakitCount = groupedLogs.filter(g => g.finalStatus === 'Sakit').length;
-  
+
   // Count Lupa Check-out (still tracked for display purposes, but already included in verifiedCount)
   const lupaCheckoutCount = groupedLogs.filter(g => g.keterangan === 'Lupa Check-out').length;
-  
+
   // Mangkir = Total Employees - (Hadir + Izin + Sakit)
   const mangkirCount = totalEmployees > 0 ? Math.max(totalEmployees - verifiedCount - izinCount - sakitCount, 0) : 0;
 
@@ -440,20 +447,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     { name: 'Mangkir', count: mangkirCount, percentage: mangkirPct, color: '#b91c1c', bgTag: 'rgba(185, 28, 28, 0.12)' }
   ];
 
-  // Quick Date Preset Handlers
-  const handleSetToday = () => setSelectedDate(todayStr);
-  const handleSetYesterday = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
-  };
-
-  // Adjust Date by Days (+1 or -1)
+  // Quick Date Preset Handlers (now delegated to DateRangePicker inside popover)
+  // Adjust Date Range by Days (+1 or -1) — kept for potential future use
   const adjustDate = (days) => {
-    const current = new Date(selectedDate);
+    const current = new Date(dateRange.start);
     if (isNaN(current.getTime())) return;
     current.setDate(current.getDate() + days);
-    setSelectedDate(current.toISOString().split('T')[0]);
+    const newStr = current.toISOString().split('T')[0];
+    setDateRange({ start: newStr, end: newStr });
   };
 
   return (
@@ -498,106 +499,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
         {/* Unified Tab Navigation Group */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={handleSetToday}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              background: selectedDate === todayStr ? 'var(--accent-primary)' : 'var(--bg-primary)',
-              color: selectedDate === todayStr ? '#ffffff' : 'var(--text-muted)',
-              border: selectedDate === todayStr ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: selectedDate === todayStr ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none'
-            }}
-          >
-            Hari Ini
-          </button>
-          <button
-            type="button"
-            onClick={handleSetYesterday}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              background: selectedDate === yesterdayStr ? 'var(--accent-primary)' : 'var(--bg-primary)',
-              color: selectedDate === yesterdayStr ? '#ffffff' : 'var(--text-muted)',
-              border: selectedDate === yesterdayStr ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: selectedDate === yesterdayStr ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none'
-            }}
-          >
-            Kemarin
-          </button>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px' }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>Custom:</span>
-            
-            {/* Previous Day Arrow Button */}
-            <button
-              type="button"
-              onClick={() => adjustDate(-1)}
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-muted)',
-                padding: '6px 10px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s ease'
-              }}
-              title="Hari Sebelumnya"
-            >
-              <i className="fa-solid fa-chevron-left" style={{ fontSize: '0.8rem' }}></i>
-            </button>
-
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                border: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                background: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-primary)',
-                color: (selectedDate !== todayStr && selectedDate !== yesterdayStr) ? 'var(--text-main)' : 'var(--text-muted)',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                outline: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-            />
-
-            {/* Next Day Arrow Button */}
-            <button
-              type="button"
-              onClick={() => adjustDate(1)}
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-muted)',
-                padding: '6px 10px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s ease'
-              }}
-              title="Hari Berikutnya"
-            >
-              <i className="fa-solid fa-chevron-right" style={{ fontSize: '0.8rem' }}></i>
-            </button>
-          </div>
+          <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
         </div>
       </div>
 
@@ -699,7 +601,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
             </h3>
           </div>
           <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-            Tanggal: {selectedDate} ({filteredLogs.length} Log Absensi)
+            Tanggal: {dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`} ({filteredLogs.length} Log Absensi)
           </div>
         </div>
 
@@ -709,7 +611,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', height: '220px' }}>
             <svg viewBox="0 0 100 100" style={{ width: '200px', height: '200px', transform: 'rotate(-90deg)' }}>
               <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-primary)" strokeWidth="15" />
-              
+
               {/* Segment 1: TK Hadir */}
               {hadirRatio > 0 && (
                 <circle
@@ -719,7 +621,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   onClick={() => setSelectedSegment(selectedSegment === 0 ? null : 0)}
                 />
               )}
-              
+
               {/* Segment 2: Izin */}
               {izinRatio > 0 && (
                 <circle
@@ -729,7 +631,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   onClick={() => setSelectedSegment(selectedSegment === 1 ? null : 1)}
                 />
               )}
-              
+
               {/* Segment 3: Sakit */}
               {sakitRatio > 0 && (
                 <circle
@@ -809,7 +711,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              Ringkasan HK (Hari Kerja) Per Kebun ({selectedDate})
+              Ringkasan HK (Hari Kerja) Per Kebun ({dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`})
             </h3>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--bg-primary)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
               {['Harian', 'Mingguan', 'Bulanan'].map(view => (
@@ -857,16 +759,16 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     </filter>
                   </defs>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis 
-                    dataKey="date" 
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} 
-                    tickLine={false} 
-                    axisLine={{ stroke: 'var(--border-color)' }} 
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--border-color)' }}
                   />
-                  <YAxis 
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} 
-                    tickLine={false} 
-                    axisLine={false} 
+                  <YAxis
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
+                    tickLine={false}
+                    axisLine={false}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
@@ -943,95 +845,95 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
           {filteredKebunSummary.length === 0 ? (
             <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              <p>Tidak ada data kebun yang cocok untuk tanggal <strong>{selectedDate}</strong>.</p>
+              <p>Tidak ada data kebun yang cocok untuk tanggal <strong>{dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} - ${dateRange.end}`}</strong>.</p>
             </div>
           ) : (
             <>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>NAMA KEBUN</th>
-                    <th style={{ padding: '10px 12px', fontWeight: 700 }}>REGIONAL</th>
-                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>TOTAL TK</th>
-                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>HK HADIR</th>
-                    <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>% KEHADIRAN</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredKebunSummary.slice((kebunPage - 1) * ITEMS_PER_PAGE, kebunPage * ITEMS_PER_PAGE).map((k, idx) => {
-                    const pctNum = parseFloat(k.percentage);
-                    const isGood = pctNum >= 85;
-                    const isWarn = pctNum < 85 && pctNum >= 50;
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '10px 12px', fontWeight: 700 }}>NAMA KEBUN</th>
+                      <th style={{ padding: '10px 12px', fontWeight: 700 }}>REGIONAL</th>
+                      <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>TOTAL TK</th>
+                      <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>HK HADIR</th>
+                      <th style={{ padding: '10px 12px', fontWeight: 700, textAlign: 'right' }}>% KEHADIRAN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredKebunSummary.slice((kebunPage - 1) * ITEMS_PER_PAGE, kebunPage * ITEMS_PER_PAGE).map((k, idx) => {
+                      const pctNum = parseFloat(k.percentage);
+                      const isGood = pctNum >= 85;
+                      const isWarn = pctNum < 85 && pctNum >= 50;
 
-                    return (
-                      <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '12px 12px', fontWeight: 800, color: 'var(--text-main)' }}>{k.nama_kebun}</td>
-                        <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.regional}</td>
-                        <td style={{ padding: '12px 12px', color: 'var(--text-main)', textAlign: 'right', fontWeight: 700 }}>{k.totalEmployees} Orang</td>
-                        <td style={{ padding: '12px 12px', color: '#15803d', textAlign: 'right', fontWeight: 800 }}>{k.hadirCount} HK</td>
-                        <td style={{ padding: '12px 12px', textAlign: 'right' }}>
-                          <span
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              fontSize: '0.75rem',
-                              fontWeight: 800,
-                              background: isGood ? 'rgba(21, 128, 61, 0.12)' : isWarn ? 'rgba(180, 83, 9, 0.12)' : 'rgba(185, 28, 28, 0.12)',
-                              color: isGood ? '#15803d' : isWarn ? '#b45309' : '#b91c1c',
-                              border: isGood ? '1px solid rgba(21, 128, 61, 0.25)' : isWarn ? '1px solid rgba(180, 83, 9, 0.25)' : '1px solid rgba(185, 28, 28, 0.25)'
-                            }}
-                          >
-                            {k.percentage}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {filteredKebunSummary.length > ITEMS_PER_PAGE && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <div>
-                  Halaman {kebunPage} dari {Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button
-                    onClick={() => setKebunPage(p => Math.max(p - 1, 1))}
-                    disabled={kebunPage === 1}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: kebunPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
-                      color: kebunPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
-                      cursor: kebunPage === 1 ? 'not-allowed' : 'pointer',
-                      fontWeight: 600,
-                      opacity: kebunPage === 1 ? 0.6 : 1
-                    }}
-                  >
-                    Prev
-                  </button>
-                  <button
-                    onClick={() => setKebunPage(p => Math.min(p + 1, Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)))}
-                    disabled={kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
-                      color: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
-                      cursor: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
-                      fontWeight: 600,
-                      opacity: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 0.6 : 1
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
+                      return (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '12px 12px', fontWeight: 800, color: 'var(--text-main)' }}>{k.nama_kebun}</td>
+                          <td style={{ padding: '12px 12px', color: 'var(--text-muted)' }}>{k.regional}</td>
+                          <td style={{ padding: '12px 12px', color: 'var(--text-main)', textAlign: 'right', fontWeight: 700 }}>{k.totalEmployees} Orang</td>
+                          <td style={{ padding: '12px 12px', color: '#15803d', textAlign: 'right', fontWeight: 800 }}>{k.hadirCount} HK</td>
+                          <td style={{ padding: '12px 12px', textAlign: 'right' }}>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                                background: isGood ? 'rgba(21, 128, 61, 0.12)' : isWarn ? 'rgba(180, 83, 9, 0.12)' : 'rgba(185, 28, 28, 0.12)',
+                                color: isGood ? '#15803d' : isWarn ? '#b45309' : '#b91c1c',
+                                border: isGood ? '1px solid rgba(21, 128, 61, 0.25)' : isWarn ? '1px solid rgba(180, 83, 9, 0.25)' : '1px solid rgba(185, 28, 28, 0.25)'
+                              }}
+                            >
+                              {k.percentage}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
+              {filteredKebunSummary.length > ITEMS_PER_PAGE && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <div>
+                    Halaman {kebunPage} dari {Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={() => setKebunPage(p => Math.max(p - 1, 1))}
+                      disabled={kebunPage === 1}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: kebunPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
+                        color: kebunPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
+                        cursor: kebunPage === 1 ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        opacity: kebunPage === 1 ? 0.6 : 1
+                      }}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      onClick={() => setKebunPage(p => Math.min(p + 1, Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)))}
+                      disabled={kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
+                        color: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
+                        cursor: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        opacity: kebunPage >= Math.ceil(filteredKebunSummary.length / ITEMS_PER_PAGE) ? 0.6 : 1
+                      }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1039,7 +941,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ padding: '1.25rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              Log Absensi ({selectedDate})
+              Log Absensi ({dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`})
             </h3>
             <Link to="/logs" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
               <i className="fa-solid fa-list-ul"></i> Lihat Semua Log
@@ -1049,118 +951,118 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           {filteredLogs.length === 0 ? (
             <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               <i className="fa-solid fa-calendar-xmark" style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}></i>
-              <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{selectedDate}</strong>.</p>
+              <p>Belum ada log absensi biometrik terverifikasi untuk tanggal <strong>{dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} - ${dateRange.end}`}</strong>.</p>
             </div>
           ) : (
             <>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>NIK</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>WAKTU ABSEN</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>STATUS</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>AFDELING / KEBUN</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLogs.slice((logsPage - 1) * ITEMS_PER_PAGE, logsPage * ITEMS_PER_PAGE).map((l, idx) => {
-                    const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
-                    const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
-                    const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA</th>
+                      <th style={{ padding: '8px 12px', fontWeight: 700 }}>NIK</th>
+                      <th style={{ padding: '8px 12px', fontWeight: 700 }}>WAKTU ABSEN</th>
+                      <th style={{ padding: '8px 12px', fontWeight: 700 }}>STATUS</th>
+                      <th style={{ padding: '8px 12px', fontWeight: 700 }}>AFDELING / KEBUN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLogs.slice((logsPage - 1) * ITEMS_PER_PAGE, logsPage * ITEMS_PER_PAGE).map((l, idx) => {
+                      const empMatch = employees.find((e) => String(e.id) === String(l.employee_id) || (l.nik && String(e.nik) === String(l.nik)));
+                      const displayName = l.name || l.employee_name || empMatch?.name || (l.employee_id ? `Karyawan #${l.employee_id}` : '-');
+                      const displayNik = l.nik || empMatch?.nik || (l.employee_id ? `ID-${l.employee_id}` : '-');
 
-                    const afdeling = l.afdeling || empMatch?.afdeling || '';
-                    const namaKebun = l.nama_kebun || l.kebun || empMatch?.nama_kebun || '';
-                    const displayAfdeling =
-                      afdeling && namaKebun
-                        ? `Afd. ${afdeling} – ${namaKebun}`
-                        : afdeling
-                        ? `Afd. ${afdeling}`
-                        : namaKebun
-                        ? namaKebun
-                        : l.department || empMatch?.department || 'Kebun / Operational';
+                      const afdeling = l.afdeling || empMatch?.afdeling || '';
+                      const namaKebun = l.nama_kebun || l.kebun || empMatch?.nama_kebun || '';
+                      const displayAfdeling =
+                        afdeling && namaKebun
+                          ? `Afd. ${afdeling} – ${namaKebun}`
+                          : afdeling
+                            ? `Afd. ${afdeling}`
+                            : namaKebun
+                              ? namaKebun
+                              : l.department || empMatch?.department || 'Kebun / Operational';
 
-                    const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
+                      const isFail = l.status?.includes('GAGAL') || l.status?.includes('REJECT');
 
-                    return (
-                      <tr key={l.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 700 }}>{displayName}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayNik}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                          {l.timestamp
-                            ? new Date(l.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
-                            : '-'}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              background: isFail ? 'rgba(239, 68, 68, 0.12)' : 'rgba(21, 128, 61, 0.12)',
-                              color: isFail ? '#ef4444' : '#15803d',
-                              border: isFail ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(21, 128, 61, 0.25)'
-                            }}
-                          >
-                            {l.status || 'Hadir'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayAfdeling}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Pagination Controls for Logs */}
-            {filteredLogs.length > ITEMS_PER_PAGE && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <div>
-                  Halaman {logsPage} dari {Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button
-                    onClick={() => setLogsPage(p => Math.max(p - 1, 1))}
-                    disabled={logsPage === 1}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: logsPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
-                      color: logsPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
-                      cursor: logsPage === 1 ? 'not-allowed' : 'pointer',
-                      fontWeight: 600,
-                      opacity: logsPage === 1 ? 0.6 : 1
-                    }}
-                  >
-                    Prev
-                  </button>
-                  <button
-                    onClick={() => setLogsPage(p => Math.min(p + 1, Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)))}
-                    disabled={logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
-                      color: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
-                      cursor: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
-                      fontWeight: 600,
-                      opacity: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 0.6 : 1
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
+                      return (
+                        <tr key={l.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 700 }}>{displayName}</td>
+                          <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayNik}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: 600 }}>
+                            {l.timestamp
+                              ? new Date(l.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                              : '-'}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                background: isFail ? 'rgba(239, 68, 68, 0.12)' : 'rgba(21, 128, 61, 0.12)',
+                                color: isFail ? '#ef4444' : '#15803d',
+                                border: isFail ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(21, 128, 61, 0.25)'
+                              }}
+                            >
+                              {l.status || 'Hadir'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{displayAfdeling}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
-            
-          </>
-        )}
-      </div>
+
+              {/* Pagination Controls for Logs */}
+              {filteredLogs.length > ITEMS_PER_PAGE && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <div>
+                    Halaman {logsPage} dari {Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={() => setLogsPage(p => Math.max(p - 1, 1))}
+                      disabled={logsPage === 1}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: logsPage === 1 ? 'var(--bg-primary)' : 'var(--bg-card)',
+                        color: logsPage === 1 ? 'var(--text-muted)' : 'var(--text-main)',
+                        cursor: logsPage === 1 ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        opacity: logsPage === 1 ? 0.6 : 1
+                      }}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      onClick={() => setLogsPage(p => Math.min(p + 1, Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)))}
+                      disabled={logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--bg-primary)' : 'var(--bg-card)',
+                        color: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'var(--text-muted)' : 'var(--text-main)',
+                        cursor: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        opacity: logsPage >= Math.ceil(filteredLogs.length / ITEMS_PER_PAGE) ? 0.6 : 1
+                      }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            </>
+          )}
+        </div>
       )}
     </div>
   );

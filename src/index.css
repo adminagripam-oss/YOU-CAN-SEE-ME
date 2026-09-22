@@ -625,22 +625,22 @@ canvas.overlay-canvas {
   margin-top: 1rem;
 }
 
-table {
+.table-container table {
   width: 100%;
   min-width: 650px;
   border-collapse: collapse;
   font-size: 0.88rem;
 }
 
-th,
-td {
+.table-container th,
+.table-container td {
   padding: 12px 14px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
-th {
+.table-container th {
   background: var(--bg-primary);
   color: var(--text-muted);
   font-weight: 700;
@@ -649,7 +649,7 @@ th {
   letter-spacing: 0.04em;
 }
 
-tr:hover {
+.table-container tr:hover {
   background: var(--bg-primary);
 }
 
@@ -2073,5 +2073,4 @@ footer {
 @keyframes splashPulse {
   0% { transform: scale(1); }
   50% { transform: scale(1.15); }
-  100% { transform: scale(1); }
 }
