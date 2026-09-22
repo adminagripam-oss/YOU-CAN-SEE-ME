@@ -140,14 +140,26 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
 
-  // Pre-group raw filtered logs by employee_id to avoid double counting (Rule: Dashboard KPI Consistency)
+  const isMultiDay = useMemo(() => {
+    if (!dateRange.start || !dateRange.end) return true;
+    return dateRange.start !== dateRange.end;
+  }, [dateRange]);
+
+  // Pre-group raw filtered logs by employee_id + date to avoid double counting per day but allow accumulating across days
   const groupedLogs = useMemo(() => {
     const groups = {};
     filteredLogs.forEach(log => {
+      if (!log.timestamp) return;
+      const logDate = new Date(log.timestamp);
+      const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
+      
       const empIdStr = String(log.employee_id);
-      if (!groups[empIdStr]) {
-        groups[empIdStr] = {
+      const key = `${empIdStr}_${logDateStr}`;
+
+      if (!groups[key]) {
+        groups[key] = {
           employee_id: empIdStr,
+          date: logDateStr,
           nik: log.nik,
           name: log.name,
           department: log.department,
@@ -170,11 +182,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       }
 
       if (!isCheckOut) {
-        groups[empIdStr].inLog = log;
-        if (ket !== 'Hadir') groups[empIdStr].keterangan = ket;
+        groups[key].inLog = log;
+        if (ket !== 'Hadir') groups[key].keterangan = ket;
       } else {
-        groups[empIdStr].outLog = log;
-        if (ket !== 'Hadir') groups[empIdStr].keterangan = ket;
+        groups[key].outLog = log;
+        if (ket !== 'Hadir') groups[key].keterangan = ket;
       }
     });
 
@@ -219,16 +231,22 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     }).sort((a, b) => b.hadirCount - a.hadirCount);
   }, [filteredEmployees, groupedLogs]);
 
-  // Grouping data by date (for 7-day trend chart)
+  // Grouping data by date for trend chart (dynamic based on dateRange)
   const trendChartData = useMemo(() => {
-    const endDate = new Date(dateRange.end || dateRange.start);
-    if (isNaN(endDate.getTime())) return [];
+    if (!dateRange.start || !dateRange.end) return [];
+    const endDate = new Date(dateRange.end);
+    const startDate = new Date(dateRange.start);
+    if (isNaN(endDate.getTime()) || isNaN(startDate.getTime())) return [];
+
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const loopDays = Math.min(diffDays, 90); // Cap at 90 days to prevent browser freeze if they pick a huge range
 
     const trendData = [];
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
 
-    for (let i = 6; i >= 0; i--) {
+    for (let i = loopDays; i >= 0; i--) {
       const d = new Date(endDate);
       d.setDate(d.getDate() - i);
 
@@ -403,6 +421,23 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     });
   }, [kebunSummary, kebunSearch]);
 
+  const totalManDays = useMemo(() => {
+    if (!dateRange.start || !dateRange.end) {
+      if (filteredLogs.length === 0) return totalEmployees;
+      const dates = filteredLogs.map(l => new Date(l.timestamp).getTime()).filter(t => !isNaN(t));
+      if (dates.length === 0) return totalEmployees;
+      const min = Math.min(...dates);
+      const max = Math.max(...dates);
+      const days = Math.ceil((max - min) / (1000 * 60 * 60 * 24)) + 1;
+      return totalEmployees * days;
+    }
+    const start = new Date(dateRange.start);
+    const end = new Date(dateRange.end);
+    const diffTime = Math.abs(end - start);
+    const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return totalEmployees * days;
+  }, [dateRange, totalEmployees, filteredLogs]);
+
   // Calculate 100% DYNAMIC real-time attendance counts from groupedLogs
   const verifiedCount = groupedLogs.filter(g => g.finalStatus === 'Hadir').length;
   const izinCount = groupedLogs.filter(g => g.finalStatus === 'Izin').length;
@@ -411,11 +446,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   // Count Lupa Check-out (still tracked for display purposes, but already included in verifiedCount)
   const lupaCheckoutCount = groupedLogs.filter(g => g.keterangan === 'Lupa Check-out').length;
 
-  // Mangkir = Total Employees - (Hadir + Izin + Sakit)
-  const mangkirCount = totalEmployees > 0 ? Math.max(totalEmployees - verifiedCount - izinCount - sakitCount, 0) : 0;
+  // Mangkir = Total Man Days - (Hadir + Izin + Sakit)
+  const mangkirCount = totalManDays > 0 ? Math.max(totalManDays - verifiedCount - izinCount - sakitCount, 0) : 0;
 
   // Ratios & Percentages
-  const totalCountForCalc = totalEmployees > 0 ? totalEmployees : 1;
+  const totalCountForCalc = totalManDays > 0 ? totalManDays : 1;
   const hadirRatio = verifiedCount / totalCountForCalc;
   const izinRatio = izinCount / totalCountForCalc;
   const sakitRatio = sakitCount / totalCountForCalc;
@@ -523,9 +558,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>TK Hadir</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#15803d', background: 'rgba(21, 128, 61, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(21, 128, 61, 0.25)' }}>
-              {hadirPct}%
-            </span>
+            {!isMultiDay && (
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#15803d', background: 'rgba(21, 128, 61, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(21, 128, 61, 0.25)' }}>
+                {hadirPct}%
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#15803d', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
             {verifiedCount.toLocaleString('id-ID')}
@@ -537,9 +574,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Izin</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8', background: 'rgba(29, 78, 216, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(29, 78, 216, 0.25)' }}>
-              {izinPct}%
-            </span>
+            {!isMultiDay && (
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8', background: 'rgba(29, 78, 216, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(29, 78, 216, 0.25)' }}>
+                {izinPct}%
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#1d4ed8', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
             {izinCount}
@@ -551,9 +590,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Sakit</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b45309', background: 'rgba(180, 83, 9, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(180, 83, 9, 0.25)' }}>
-              {sakitPct}%
-            </span>
+            {!isMultiDay && (
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b45309', background: 'rgba(180, 83, 9, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(180, 83, 9, 0.25)' }}>
+                {sakitPct}%
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b45309', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
             {sakitCount}
@@ -565,9 +606,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Mangkir</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185, 28, 28, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(185, 28, 28, 0.25)' }}>
-              {mangkirPct}%
-            </span>
+            {!isMultiDay && (
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185, 28, 28, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(185, 28, 28, 0.25)' }}>
+                {mangkirPct}%
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b91c1c', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
             {mangkirCount}
@@ -579,9 +622,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Lupa Check-out</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f97316', background: 'rgba(249, 115, 22, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(249, 115, 22, 0.25)' }}>
-              {lupaCheckoutPct}%
-            </span>
+            {!isMultiDay && (
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f97316', background: 'rgba(249, 115, 22, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(249, 115, 22, 0.25)' }}>
+                {lupaCheckoutPct}%
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#f97316', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
             {lupaCheckoutCount}
@@ -656,7 +701,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
             {/* Center Label inside Donut Hole */}
             <div style={{ position: 'absolute', textAlign: 'center' }}>
               <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-main)' }}>
-                {selectedSegment !== null ? `${workforceComposition[selectedSegment].percentage}%` : `${hadirPct}%`}
+                {isMultiDay
+                  ? (selectedSegment !== null ? workforceComposition[selectedSegment].count : verifiedCount)
+                  : (selectedSegment !== null ? `${workforceComposition[selectedSegment].percentage}%` : `${hadirPct}%`)
+                }
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
                 {selectedSegment !== null ? workforceComposition[selectedSegment].name : 'TK Hadir'}
@@ -694,11 +742,13 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                 {/* Right Side: Count + Percentage WITH CLEAR SPACING */}
                 <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <span style={{ fontSize: '0.92rem', fontWeight: 900, color: item.color }}>
-                    {item.count} Orang
+                    {item.count} {isMultiDay ? 'Hari' : 'Orang'}
                   </span>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>
-                    ({item.percentage}%)
-                  </span>
+                  {!isMultiDay && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                      ({item.percentage}%)
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
