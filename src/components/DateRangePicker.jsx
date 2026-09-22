@@ -32,22 +32,23 @@ export function DateRangePicker({ dateRange, setDateRange }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Convert string state → Date objects
+  // Convert string state → Date objects (guard for null values)
   const selectedRange = {
-    from: dateRange.start ? new Date(dateRange.start + 'T00:00:00') : undefined,
-    to:   dateRange.end   ? new Date(dateRange.end   + 'T00:00:00') : undefined,
+    from: dateRange?.start ? new Date(dateRange.start + 'T00:00:00') : undefined,
+    to:   dateRange?.end   ? new Date(dateRange.end   + 'T00:00:00') : undefined,
   };
 
   const handleSelect = (range) => {
     if (!range) {
-      setDateRange({ start: dateRange.start, end: dateRange.end });
+      // When deselecting, clear completely → show all dates
+      setDateRange({ start: null, end: null });
       return;
     }
     setDateRange({
-      start: range.from ? format(range.from, 'yyyy-MM-dd') : dateRange.start,
+      start: range.from ? format(range.from, 'yyyy-MM-dd') : (dateRange?.start ?? null),
       end:   range.to   ? format(range.to,   'yyyy-MM-dd')
            : range.from ? format(range.from, 'yyyy-MM-dd')
-           : dateRange.end,
+           : (dateRange?.end ?? null),
     });
   };
 
@@ -55,14 +56,14 @@ export function DateRangePicker({ dateRange, setDateRange }) {
   const displayString = () => {
     if (selectedRange.from && selectedRange.to) {
       if (selectedRange.from.getTime() === selectedRange.to.getTime()) {
-        return format(selectedRange.from, 'LLL dd, y');
+        return format(selectedRange.from, 'dd LLL yyyy');
       }
-      return `${format(selectedRange.from, 'LLL dd, y')} - ${format(selectedRange.to, 'LLL dd, y')}`;
+      return `${format(selectedRange.from, 'dd LLL yyyy')} - ${format(selectedRange.to, 'dd LLL yyyy')}`;
     }
     if (selectedRange.from) {
-      return format(selectedRange.from, 'LLL dd, y');
+      return format(selectedRange.from, 'dd LLL yyyy');
     }
-    return 'Pick a date range';
+    return 'Semua Tanggal';
   };
 
   const hasDate = !!(selectedRange.from || selectedRange.to);
@@ -165,6 +166,25 @@ export function DateRangePicker({ dateRange, setDateRange }) {
             >
               Kemarin
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDateRange({ start: null, end: null });
+                setIsOpen(false);
+              }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                background: 'var(--bg-card)',
+                color: 'var(--text-muted)',
+                border: '1px solid var(--border-color)',
+                cursor: 'pointer'
+              }}
+            >
+              Semua Tanggal
+            </button>
           </div>
 
           {/* ── Custom Nav Header (Arrows + Month Labels) ── */}
@@ -215,8 +235,13 @@ export function DateRangePicker({ dateRange, setDateRange }) {
                 onSelect={handleSelect}
                 numberOfMonths={1}
                 showOutsideDays
-                components={{ Caption: () => null }}
-                classNames={{ nav: 'drp-hidden-nav' }}
+                components={{ Caption: () => null, MonthCaption: () => null, Nav: () => null }}
+                classNames={{ 
+                  nav: 'drp-hidden-nav',
+                  caption: 'drp-hidden-nav',
+                  month_caption: 'drp-hidden-nav',
+                  caption_label: 'drp-hidden-nav'
+                }}
               />
             ) : (
               /* Desktop: show 2 months side by side */
@@ -229,8 +254,13 @@ export function DateRangePicker({ dateRange, setDateRange }) {
                   onSelect={handleSelect}
                   numberOfMonths={1}
                   showOutsideDays
-                  components={{ Caption: () => null }}
-                  classNames={{ nav: 'drp-hidden-nav' }}
+                  components={{ Caption: () => null, MonthCaption: () => null, Nav: () => null }}
+                  classNames={{ 
+                    nav: 'drp-hidden-nav',
+                    caption: 'drp-hidden-nav',
+                    month_caption: 'drp-hidden-nav',
+                    caption_label: 'drp-hidden-nav'
+                  }}
                 />
                 <DayPicker
                   mode="range"
@@ -240,8 +270,13 @@ export function DateRangePicker({ dateRange, setDateRange }) {
                   onSelect={handleSelect}
                   numberOfMonths={1}
                   showOutsideDays
-                  components={{ Caption: () => null }}
-                  classNames={{ nav: 'drp-hidden-nav' }}
+                  components={{ Caption: () => null, MonthCaption: () => null, Nav: () => null }}
+                  classNames={{ 
+                    nav: 'drp-hidden-nav',
+                    caption: 'drp-hidden-nav',
+                    month_caption: 'drp-hidden-nav',
+                    caption_label: 'drp-hidden-nav'
+                  }}
                 />
               </div>
             )}

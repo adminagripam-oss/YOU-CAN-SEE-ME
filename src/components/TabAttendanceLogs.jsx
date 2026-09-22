@@ -13,6 +13,7 @@ import {
 import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { DateRangePicker } from './DateRangePicker';
 
 function formatDurasi(durasi) {
   if (!durasi) return '-';
@@ -70,6 +71,8 @@ export default function TabAttendanceLogs({
   showToast,
   openConfirmModal,
   refreshLogs,
+  dateRange,
+  setDateRange,
 }) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('logs'); // 'logs' | 'requests'
@@ -307,7 +310,8 @@ export default function TabAttendanceLogs({
 
     activeLogs.forEach(log => {
       const tsDate = new Date(log.timestamp);
-      const dateKey = tsDate.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-'); // YYYY-MM-DD format for internal grouping
+      // Use explicit year/month/day to ensure reliable YYYY-MM-DD format regardless of locale
+      const dateKey = `${tsDate.getFullYear()}-${String(tsDate.getMonth() + 1).padStart(2, '0')}-${String(tsDate.getDate()).padStart(2, '0')}`;
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
       const key = `${log.employee_id}_${dateKey}`;
 
@@ -382,6 +386,15 @@ export default function TabAttendanceLogs({
   // FILTER
   const filteredLogs = useMemo(() => {
     return groupedLogs.filter(log => {
+      // Date Filter
+      if (dateRange && dateRange.start) {
+        if (dateRange.end) {
+          if (log.date < dateRange.start || log.date > dateRange.end) return false;
+        } else {
+          if (log.date !== dateRange.start) return false;
+        }
+      }
+
       const q = searchQuery.toLowerCase();
       const matchSearch = (
         log.name.toLowerCase().includes(q) ||
@@ -393,7 +406,7 @@ export default function TabAttendanceLogs({
       const matchAfdeling = filterAfdeling ? (log.afdeling === filterAfdeling) : true;
       return matchSearch && matchKebun && matchAfdeling;
     });
-  }, [groupedLogs, searchQuery, filterKebun, filterAfdeling]);
+  }, [groupedLogs, searchQuery, filterKebun, filterAfdeling, dateRange]);
 
   const totalPages = Math.ceil(filteredLogs.length / itemsPerPage);
   const paginatedLogs = filteredLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -1115,6 +1128,7 @@ export default function TabAttendanceLogs({
             />
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
             <select
               value={filterKebun}
               onChange={(e) => setFilterKebun(e.target.value)}
