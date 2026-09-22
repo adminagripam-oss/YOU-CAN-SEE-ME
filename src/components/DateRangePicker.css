@@ -41,6 +41,7 @@
 .drp-trigger__label {
   flex: 1;
   text-align: left;
+  font-weight: 700;
 }
 
 .drp-trigger__label--placeholder {
@@ -59,15 +60,23 @@
   z-index: 50;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 20px;
+  min-width: 600px;
   animation: drp-fade-in 0.1s ease;
 }
 
 @keyframes drp-fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── CUSTOM NAV HEADER ── */
@@ -116,12 +125,20 @@
   text-align: center;
 }
 
-/* ── HIDE BUILT-IN LIBRARY NAV ── */
+/* ── HIDE BUILT-IN LIBRARY NAV & CAPTIONS (Fix double month title) ── */
 .drp-hidden-nav,
 .drp-popover .rdp-nav,
-.drp-popover .rdp-caption_button {
+.drp-popover .rdp-caption,
+.drp-popover .rdp-month_caption,
+.drp-popover .rdp-caption_label,
+.drp-popover .rdp-caption_button,
+.drp-popover caption {
   display: none !important;
   pointer-events: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  visibility: hidden !important;
 }
 
 /* ── DESKTOP: side-by-side two months ── */
@@ -132,15 +149,38 @@
   align-items: flex-start;
 }
 
-/* ── RDP ROOT overrides ── */
+/* ── RDP ROOT OVERRIDES (Black theme, no blue) ── */
+.drp-popover .rdp-root,
 .drp-popover .rdp {
-  --rdp-cell-size: 36px;
+  --rdp-cell-size: 40px;
+  --rdp-day-width: 40px;
+  --rdp-day-height: 40px;
+  --rdp-day_button-width: 38px;
+  --rdp-day_button-height: 38px;
+  --rdp-accent-color: #000000;
+  --rdp-accent-background-color: rgba(0, 0, 0, 0.08);
+  --rdp-range_middle-background-color: rgba(0, 0, 0, 0.08);
+  --rdp-range_middle-color: var(--text-main);
+  --rdp-range_start-date-background-color: rgba(0, 0, 0, 0.20);
+  --rdp-range_end-date-background-color: rgba(0, 0, 0, 0.20);
+  --rdp-range_start-color: var(--text-main);
+  --rdp-range_end-color: var(--text-main);
+  --rdp-today-color: var(--text-main);
+  --rdp-day_button-border-radius: 6px;
   margin: 0;
 }
 
-/* Hide the default caption row entirely since we have custom header */
-.drp-popover .rdp-caption {
-  display: none !important;
+[data-theme="dark"] .drp-popover .rdp-root,
+[data-theme="dark"] .drp-popover .rdp {
+  --rdp-accent-color: #ffffff;
+  --rdp-accent-background-color: rgba(255, 255, 255, 0.10);
+  --rdp-range_middle-background-color: rgba(255, 255, 255, 0.10);
+  --rdp-range_middle-color: var(--text-main);
+  --rdp-range_start-date-background-color: rgba(255, 255, 255, 0.20);
+  --rdp-range_end-date-background-color: rgba(255, 255, 255, 0.20);
+  --rdp-range_start-color: var(--text-main);
+  --rdp-range_end-color: var(--text-main);
+  --rdp-today-color: var(--text-main);
 }
 
 .drp-popover .rdp-months {
@@ -152,33 +192,37 @@
 }
 
 /* ── TABLE ── */
-.drp-popover .rdp-table {
+.drp-popover .rdp-table,
+.drp-popover .rdp-month_grid {
   border-collapse: collapse;
   margin: 0;
 }
 
 /* ── HEAD CELLS (Su Mo Tu etc.) ── */
-.drp-popover .rdp-head_cell {
+.drp-popover .rdp-head_cell,
+.drp-popover .rdp-weekday {
   font-size: 0.75rem;
   font-weight: bold !important;
   font-family: inherit;
   color: var(--text-muted);
-  width: var(--rdp-cell-size);
-  height: var(--rdp-cell-size);
+  width: 40px;
+  height: 40px;
   vertical-align: middle;
   text-align: center;
 }
 
 /* ── DAY CELLS ── */
-.drp-popover .rdp-cell {
-  width: var(--rdp-cell-size);
-  height: var(--rdp-cell-size);
+.drp-popover .rdp-cell,
+.drp-popover .rdp-day {
+  width: 40px;
+  height: 40px;
   padding: 0;
   text-align: center;
 }
 
 /* ── DAY BUTTON ── */
-.drp-popover .rdp-day {
+.drp-popover .rdp-day_button,
+.drp-popover .rdp-day button {
   width: 100%;
   height: 100%;
   font-size: 0.875rem;
@@ -186,34 +230,70 @@
   font-family: inherit !important;
   color: var(--text-main);
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
 }
 
+.drp-popover .rdp-day_button:hover:not(:disabled),
 .drp-popover .rdp-day:hover:not(.rdp-day_selected):not(.rdp-day_outside) {
-  background: var(--bg-card);
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="dark"] .drp-popover .rdp-day_button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* Outside days (days from prev/next month) */
 .drp-popover .rdp-day_outside,
 .drp-popover .rdp-outside {
-  color: var(--text-muted);
+  color: var(--text-muted) !important;
   opacity: 0.4;
   font-weight: normal !important;
 }
 
-/* ── SELECTED RANGE ── */
-/* 
-  1 unified style: filled rounded box
-  Light mode: black bg + white text
-  Dark mode: white bg + black text  (via var(--text-main) / var(--bg-primary))
-*/
+/* ── SELECTED RANGE (20% Black Opacity, Black Theme) ── */
 .drp-popover .rdp-day_selected,
-.drp-popover .rdp-selected {
-  background: var(--text-main) !important;
-  color: var(--bg-primary) !important;
+.drp-popover .rdp-selected,
+.drp-popover .rdp-selected .rdp-day_button,
+.drp-popover .rdp-day_selected .rdp-day_button,
+.drp-popover .rdp-range_start .rdp-day_button,
+.drp-popover .rdp-range_end .rdp-day_button {
+  background-color: rgba(0, 0, 0, 0.20) !important;
+  color: var(--text-main) !important;
   border-radius: 6px !important;
+  font-weight: bold !important;
+}
+
+[data-theme="dark"] .drp-popover .rdp-day_selected,
+[data-theme="dark"] .drp-popover .rdp-selected,
+[data-theme="dark"] .drp-popover .rdp-selected .rdp-day_button,
+[data-theme="dark"] .drp-popover .rdp-day_selected .rdp-day_button,
+[data-theme="dark"] .drp-popover .rdp-range_start .rdp-day_button,
+[data-theme="dark"] .drp-popover .rdp-range_end .rdp-day_button {
+  background-color: rgba(255, 255, 255, 0.20) !important;
+  color: var(--text-main) !important;
+  border-radius: 6px !important;
+  font-weight: bold !important;
+}
+
+/* Middle days of range selection */
+.drp-popover .rdp-range_middle,
+.drp-popover .rdp-range_middle .rdp-day_button {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: var(--text-main) !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="dark"] .drp-popover .rdp-range_middle,
+[data-theme="dark"] .drp-popover .rdp-range_middle .rdp-day_button {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+  color: var(--text-main) !important;
+  border-radius: 0 !important;
 }
 
 /* ── MOBILE ── */
@@ -226,9 +306,33 @@
     transform: translate(-50%, -50%);
     max-width: 95vw;
     width: max-content;
+    min-width: unset;
+    padding: 14px;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
     max-height: 90vh;
     overflow-y: auto;
+  }
+
+  /* Revert calendar cell sizes to compact on mobile */
+  .drp-popover .rdp-root,
+  .drp-popover .rdp {
+    --rdp-cell-size: 36px;
+    --rdp-day-width: 36px;
+    --rdp-day-height: 36px;
+    --rdp-day_button-width: 34px;
+    --rdp-day_button-height: 34px;
+  }
+
+  .drp-popover .rdp-head_cell,
+  .drp-popover .rdp-weekday {
+    width: 36px;
+    height: 36px;
+  }
+
+  .drp-popover .rdp-cell,
+  .drp-popover .rdp-day {
+    width: 36px;
+    height: 36px;
   }
 
   /* On mobile, stack the nav month label to single centered label */
