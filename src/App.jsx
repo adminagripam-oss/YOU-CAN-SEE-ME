@@ -1435,38 +1435,6 @@ function AppErrorBoundary() {
             path: "order-form",
             element: <OfflineOrderForm />
           },
-          // PUBLIC ROUTES DENGAN DASHBOARD LAYOUT (Tanpa Login)
-          {
-            element: (
-              <DashboardLayout
-                isOnline={isOnline}
-                unsyncedCount={unsyncedCount}
-                isSyncing={isSyncing}
-                onManualSync={handleManualSync}
-                theme={theme}
-                toggleTheme={toggleTheme}
-                pendingCheckOutsCount={pendingCheckOutsCount}
-                isPastShiftEnd={isPastShiftEnd}
-                onCheckUpdate={checkForUpdates}
-                hasOTAUpdate={hasOTAUpdate}
-              />
-            ),
-            children: [
-              {
-                path: "absensi",
-                element: (
-                  <AbsensiPage
-                    employees={employees}
-                    modelsLoaded={modelsLoaded}
-                    modelStatusText={modelStatusText}
-                    showToast={showToast}
-                    refreshLogs={fetchLogs}
-                    refreshEmployees={fetchEmployees}
-                  />
-                )
-              }
-            ]
-          },
           // PROTECTED ROUTES (Hanya Admin)
           {
             element: <ProtectedRoute />,
@@ -1494,6 +1462,19 @@ function AppErrorBoundary() {
                         employees={employees}
                         logs={logs}
                         modelsLoaded={modelsLoaded}
+                      />
+                    )
+                  },
+                  {
+                    path: "absensi",
+                    element: (
+                      <AbsensiPage
+                        employees={employees}
+                        modelsLoaded={modelsLoaded}
+                        modelStatusText={modelStatusText}
+                        showToast={showToast}
+                        refreshLogs={fetchLogs}
+                        refreshEmployees={fetchEmployees}
                       />
                     )
                   },
