@@ -1,6 +1,17 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Link } from 'react-router-dom';
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import DynamicBreadcrumb from './DynamicBreadcrumb';
+import {
+  Sun,
+  Moon,
+  Wifi,
+  WifiOff,
+  CloudUpload,
+  CloudDownload,
+  Loader2,
+  TriangleAlert,
+} from 'lucide-react';
 
 export default function Topbar({
   theme,
@@ -9,8 +20,6 @@ export default function Topbar({
   unsyncedCount,
   isSyncing,
   onManualSync,
-  sidebarOpen,
-  onToggleSidebar,
   pendingCheckOutsCount = 0,
   isPastShiftEnd = false,
   onCheckUpdate,
@@ -19,28 +28,37 @@ export default function Topbar({
   const { user } = useAuth();
 
   return (
-    <header className="app-topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', padding: '10px 16px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)' }}>
-      <div className="topbar-left" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        {/* Sidebar Hamburger Toggle Button */}
-        <button
-          className="sidebar-toggle-btn"
-          onClick={onToggleSidebar}
-          title={sidebarOpen ? 'Tutup Sidebar' : 'Buka Sidebar'}
-          aria-label="Toggle Sidebar"
-        >
-          <i className={`fa-solid ${sidebarOpen ? 'fa-xmark' : 'fa-bars'}`}></i>
-        </button>
- 
-        {/* AgriFace Brand Title in Header */}
-        <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>AgriFace</span>
-        </div>
+    <header
+      className="app-topbar"
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '8px',
+        padding: '10px 1.5rem',
+        minHeight: '52px',
+      }}
+    >
+      {/* ── LEFT: SidebarTrigger + Separator + Breadcrumb + Badges ── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          flexWrap: 'nowrap',
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        {/* Shadcn SidebarTrigger — self-contained toggle */}
+        <SidebarTrigger />
 
-        {/* Live Status Indicator */}
-        <div className={`topbar-live-badge ${isOnline ? 'online' : 'offline'}`}>
-          <span className="live-pulse-dot"></span>
-          <span className="live-label">{isOnline ? 'LIVE' : 'OFFLINE'}</span>
-        </div>
+        {/* Thin vertical separator */}
+        <span className="topbar-sep" aria-hidden="true" />
+
+        {/* Dynamic Breadcrumb (always visible, reads React Router location) */}
+        <DynamicBreadcrumb />
 
         {/* Pending Sync Badge */}
         {unsyncedCount > 0 && (
@@ -51,110 +69,90 @@ export default function Topbar({
             disabled={isSyncing}
             title={`${unsyncedCount} log pending sync ke server`}
           >
-            <i className={`fa-solid ${isSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}`}></i>
+            {isSyncing ? <Loader2 size={13} className="spin" /> : <CloudUpload size={13} />}
             <span>{isSyncing ? 'Syncing...' : `${unsyncedCount} Pending`}</span>
           </button>
         )}
 
-        {/* OTA Update Button */}
+        {/* OTA Update Button (Theme-Adaptive for Light & Dark Mode) */}
         {isOnline && onCheckUpdate && (
           <button
             type="button"
             className="topbar-sync-btn"
             onClick={onCheckUpdate}
-            title={hasOTAUpdate ? "Pembaruan Tersedia!" : "Cek Pembaruan Aplikasi (OTA)"}
-            style={{ background: 'var(--accent-primary)', color: 'white', border: 'none', position: 'relative' }}
+            title={hasOTAUpdate ? 'Pembaruan Tersedia!' : 'Cek Pembaruan Aplikasi (OTA)'}
+            style={{
+              background: 'var(--bg-card)',
+              color: 'var(--text-main)',
+              border: '1px solid var(--border-color)',
+              position: 'relative',
+              borderRadius: '8px',
+              padding: '4px 10px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+            }}
           >
-            <i className="fa-solid fa-cloud-arrow-down"></i>
-            <span style={{ marginLeft: '6px' }}>{hasOTAUpdate ? 'Update Baru!' : 'Cek Pembaruan'}</span>
-            
-            {/* Notification Badge */}
+            <CloudDownload size={13} style={{ color: 'var(--accent-primary)' }} />
+            <span style={{ marginLeft: '4px' }}>{hasOTAUpdate ? 'Update Baru!' : 'Cek Update'}</span>
             {hasOTAUpdate && (
               <span style={{ position: 'absolute', top: '-4px', right: '-4px', display: 'flex', height: '12px', width: '12px' }}>
-                <span style={{ animation: 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: '#f87171', opacity: 0.75 }}></span>
-                <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '12px', width: '12px', backgroundColor: '#ef4444' }}></span>
+                <span style={{ animation: 'ping 1s cubic-bezier(0,0,0.2,1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: '#f87171', opacity: 0.75 }} />
+                <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '12px', width: '12px', backgroundColor: '#ef4444' }} />
               </span>
             )}
           </button>
         )}
 
-        {/* Pending Check-Out Warning Badge */}
+        {/* Pending Check-Out Warning */}
         {pendingCheckOutsCount > 0 && isPastShiftEnd && (
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
+              gap: '5px',
+              padding: '5px 10px',
               borderRadius: '8px',
               background: 'rgba(249, 115, 22, 0.12)',
               border: '1px solid rgba(249, 115, 22, 0.3)',
               color: '#f97316',
-              fontSize: '0.8rem',
-              fontWeight: 700
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              flexShrink: 0,
             }}
             title={`${pendingCheckOutsCount} karyawan belum check-out setelah jam pulang kerja (17:00)`}
           >
-            <i className="fa-solid fa-triangle-exclamation"></i>
+            <TriangleAlert size={13} />
             <span>{pendingCheckOutsCount} Lupa Out</span>
           </div>
         )}
       </div>
 
-      <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      {/* ── RIGHT: User Info + Theme Toggle ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
 
-        {/* User Account Info - RESPONSIVE FOR MOBILE */}
-        {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ 
-              width: '38px', 
-              height: '38px', 
-              borderRadius: '50%', 
-              overflow: 'hidden', 
-              border: '1.5px solid var(--border-color)',
-              flexShrink: 0,
-              background: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
-            }}>
-              <img src="/icon-foreground.png" alt="AgriFace" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            </div>
+        {/* User Account Info removed - moved to Sidebar footer */}
 
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-main)', maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {user.name}
-                </span>
-                <span style={{ 
-                  background: 'var(--text-main)', 
-                  color: 'var(--bg-card)', 
-                  fontSize: '0.65rem', 
-                  fontWeight: 800, 
-                  padding: '2px 6px', 
-                  borderRadius: '4px',
-                  lineHeight: 1
-                }}>
-                  APN
-                </span>
-              </div>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '2px' }}>
-                {user.kebun || 'Head Office'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Dark / Light Mode Toggle Button (Far Right) */}
+        {/* Dark / Light Mode Toggle (Icon-only to prevent mobile view overlap) */}
         <button
-          className="theme-toggle-btn"
+          className="theme-toggle-btn icon-only"
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Ganti ke Light Mode' : 'Ganti ke Dark Mode'}
-          style={{ flexShrink: 0 }}
+          aria-label={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          style={{
+            flexShrink: 0,
+            width: '32px',
+            height: '32px',
+            padding: 0,
+            borderRadius: '50%',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
-          <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
-          <span className="theme-toggle-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </button>
       </div>
     </header>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { human, loadHumanWithFallback } from './humanSingleton';
-import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, Outlet, useRouteError } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
@@ -1349,10 +1349,35 @@ function AppContent() {
 
 
 
+function AppErrorBoundary() {
+  const error = useRouteError();
+  console.error("AppErrorBoundary caught error:", error);
+  return (
+    <div style={{ padding: '3rem 1.5rem', textAlign: 'center', fontFamily: 'inherit', color: 'var(--text-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚠️</div>
+      <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Terjadi Kesalahan Aplikasi</h2>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', maxWidth: '450px', marginBottom: '1.5rem', lineHeight: 1.5 }}>
+        {error?.message || "Aplikasi mengalami kendala teknis tak terduga. Silakan muat ulang halaman."}
+      </p>
+      <button 
+        onClick={() => window.location.reload()}
+        style={{
+          padding: '10px 20px', borderRadius: '8px', background: 'var(--accent-primary)',
+          color: '#ffffff', border: 'none', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}
+      >
+        Muat Ulang Halaman
+      </button>
+    </div>
+  );
+}
+
   const router = useMemo(() => {
     return createBrowserRouter([
       {
         path: "/",
+        errorElement: <AppErrorBoundary />,
         element: (
           <>
             <div className={`app-container ${theme}-theme`} style={{ display: 'none' }}></div>

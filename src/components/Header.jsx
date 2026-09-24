@@ -32,12 +32,12 @@ export default function Header({ activeTab, setActiveTab, currentUser, onLogout,
 
         {/* Dark / Light Mode Toggle Button */}
         <button
-          className="theme-toggle-btn"
+          className="theme-toggle-btn icon-only"
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Ganti ke Mode Terang (Light)' : 'Ganti ke Mode Gelap (Dark)'}
+          style={{ width: '32px', height: '32px', padding: 0, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
-          <span className="theme-toggle-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
         </button>
 
         <div className="nav-tabs">
