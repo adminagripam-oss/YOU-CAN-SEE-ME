@@ -498,7 +498,7 @@ export default function TabEmployeeManagement({
                 <button
                   type="submit"
                   className="btn"
-                  style={{ flex: 1, background: 'rgba(255,255,255,0.1)' }}
+                  style={{ flex: 1, background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
                 >
                   Simpan Tanpa Biometrik
                 </button>

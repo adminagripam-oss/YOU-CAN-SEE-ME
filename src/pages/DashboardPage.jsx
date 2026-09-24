@@ -575,14 +575,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Total TK
           </span>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0 0.2rem', lineHeight: 1 }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.5rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0 0.2rem', lineHeight: 1 }}>
             {totalEmployees.toLocaleString('id-ID')}
           </div>
           <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
@@ -602,14 +602,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             TK Hadir
           </span>
-          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {verifiedCount.toLocaleString('id-ID')}
           </div>
           <div style={{ display: 'flex' }}>
@@ -635,14 +635,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Izin
           </span>
-          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {izinCount}
           </div>
           <div style={{ display: 'flex' }}>
@@ -668,14 +668,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Sakit
           </span>
-          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {sakitCount}
           </div>
           <div style={{ display: 'flex' }}>
@@ -701,14 +701,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Mangkir
           </span>
-          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {mangkirCount}
           </div>
           <div style={{ display: 'flex' }}>
@@ -734,14 +734,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           background: 'var(--bg-card)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           minHeight: '124px'
         }}>
           <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Lupa Checkout
           </span>
-          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {lupaCheckoutCount}
           </div>
           <div style={{ display: 'flex' }}>
@@ -843,12 +843,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     axisLine={false}
                   />
                   <Tooltip
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    wrapperStyle={{ zIndex: 100 }}
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '4px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}
                     itemStyle={{ color: '#15803d', fontWeight: 'bold' }}
                     cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   />
                   <Area
-                    type="natural"
+                    type="monotone"
                     dataKey="signups"
                     name="TK Hadir"
                     fill="url(#chart-glow-fill)"
@@ -892,7 +894,9 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   />
                   <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    wrapperStyle={{ zIndex: 100 }}
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '4px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}
                     itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
                     cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   />
@@ -901,7 +905,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                       dataKey="desktop"
                       position="top"
                       formatter={(val) => `${val}`}
-                      style={{ fill: '#111827', fontSize: 11, fontWeight: 900 }}
+                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
                     />
                   </Bar>
                 </BarChart>
@@ -922,7 +926,9 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   />
                   <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    wrapperStyle={{ zIndex: 100 }}
+                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '4px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}
                     itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
                     cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   />
@@ -931,7 +937,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                       dataKey="desktop"
                       position="top"
                       formatter={(val) => `${val}`}
-                      style={{ fill: '#111827', fontSize: 11, fontWeight: 900 }}
+                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
                     />
                   </Bar>
                 </BarChart>

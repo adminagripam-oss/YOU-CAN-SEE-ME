@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList } from 'recharts';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, Tooltip } from 'recharts';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import {
@@ -9,11 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@/components/ui/chart';
+import { ChartContainer } from '@/components/ui/chart';
 
 const CustomXAxisTick = (props) => {
   const { x, y, payload } = props;
@@ -149,24 +145,25 @@ export function KebunAttendanceBarChart({ kebunSummary = [], dateStr }) {
                 axisLine={false}
                 tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
               />
-              <ChartTooltip
-                cursor={{ fill: 'var(--bg-primary)', opacity: 0.6 }}
-                content={
-                  <ChartTooltipContent
-                    formatter={(value, name, props) => {
-                      return (
-                        <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                          <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.8rem' }}>
-                            Total TK
-                          </span>
-                          <span style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: '0.85rem' }}>
-                            {Number(value).toLocaleString()} orang (Hadir: {props.payload.hadirCount})
-                          </span>
-                        </div>
-                      );
-                    }}
-                  />
-                }
+              <Tooltip
+                cursor={{ fill: 'var(--bg-primary)', opacity: 0.5 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 1000 }}
+                contentStyle={{
+                  backgroundColor: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                }}
+                labelStyle={{ color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.78rem', marginBottom: '4px' }}
+                itemStyle={{ color: 'var(--text-main)', fontWeight: 700, fontSize: '0.82rem' }}
+                formatter={(value, name, props) => [
+                  `${value} org (Hadir: ${props.payload.hadirCount})`,
+                  'Total TK'
+                ]}
               />
               <Bar dataKey="totalEmployees" name="Total TK" fill="#15803d" radius={[4, 4, 0, 0]} barSize={38}>
                 <LabelList

@@ -1691,16 +1691,16 @@ export default function TabFaceVerification({
                   style={{
                     padding: '6px 14px',
                     borderRadius: '20px',
-                    border: 'none',
-                    background: 'var(--accent-primary)',
-                    color: '#fff',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-main)',
                     fontSize: '0.8rem',
                     fontWeight: 'bold',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    boxShadow: '0 2px 6px rgba(99,102,241,0.4)'
+                    border: '1px solid var(--border-color)',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
                   }}
                 >
                   <i className="fa-solid fa-camera-rotate"></i> Ganti Kamera

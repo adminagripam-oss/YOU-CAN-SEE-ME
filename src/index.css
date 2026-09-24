@@ -104,8 +104,8 @@
   --border-color: rgba(255, 255, 255, 0.15);
   --border-hover: rgba(255, 255, 255, 0.3);
   --border-focus: #cbd5e1;
-  --accent-primary: #cbd5e1;
-  --accent-primary-hover: #ffffff;
+  --accent-primary: #6366f1;
+  --accent-primary-hover: #4f46e5;
   --accent-cyan: #38bdf8;
   --accent-success: #10b981;
   --accent-error: #ef4444;
@@ -1276,7 +1276,8 @@ footer {
 .app-sidebar {
   width: 240px;
   background: var(--bg-card);
-  border-right: 1px solid var(--border-color);
+  border-right: none;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   padding: 1.25rem 1rem;
@@ -1583,6 +1584,21 @@ footer {
   background: rgba(120, 53, 15, 0.4);
   color: #fbbf24;
   border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+/* Dark mode: stronger sidebar shadow */
+[data-theme="dark"] .app-sidebar {
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.4);
+}
+
+/* Override Shadcn sidebar.tsx border-r Tailwind class */
+[data-slot="sidebar-container"] {
+  border-right: none !important;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] [data-slot="sidebar-container"] {
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.4);
 }
 
 /* Animated pulse dot inside LIVE badge */
@@ -2222,7 +2238,8 @@ footer {
 /* Sidebar background mapped to our design tokens */
 [data-slot="sidebar"] {
   background: var(--bg-card) !important;
-  border-right: 1px solid var(--border-color) !important;
+  border-right: none !important;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05) !important;
   color: var(--text-main) !important;
 }
 

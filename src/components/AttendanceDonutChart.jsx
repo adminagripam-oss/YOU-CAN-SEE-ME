@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Label, Pie, PieChart, Sector } from 'recharts';
+import { Label, Pie, PieChart, Sector, Tooltip } from 'recharts';
 
 import {
   Card,
@@ -8,11 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@/components/ui/chart';
+import { ChartContainer } from '@/components/ui/chart';
 
 const LEGEND_ITEMS = [
   { key: 'hadir',   label: 'Hadir',   color: '#15803d' },
@@ -65,30 +61,34 @@ export function AttendanceDonutChart({ verifiedCount = 0, izinCount = 0, sakitCo
               className="mx-auto aspect-square w-full max-w-[240px]"
             >
               <PieChart accessibilityLayer>
-                <ChartTooltip
+                <Tooltip
                   cursor={false}
-                  content={
-                    <ChartTooltipContent
-                      className="min-w-32 gap-2.5"
-                      formatter={(value, name, props) => {
-                        const cfg = chartConfig[name];
-                        const color = cfg?.color || 'var(--text-main)';
-                        return (
-                          <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <div style={{ width: '10px', height: '10px', borderRadius: '4px', background: color }} />
-                              <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.8rem' }}>
-                                {cfg?.label || name}
-                              </span>
-                            </div>
-                            <span style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: '0.85rem' }}>
-                              {Number(value).toLocaleString()}
-                            </span>
-                          </div>
-                        );
-                      }}
-                    />
-                  }
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  wrapperStyle={{ zIndex: 1000 }}
+                  contentStyle={{
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                  }}
+                  formatter={(value, name) => {
+                    const cfg = chartConfig[name];
+                    const color = cfg?.color || 'var(--text-main)';
+                    return [
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', background: color, flexShrink: 0 }} />
+                        <span style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: '0.85rem' }}>
+                          {Number(value).toLocaleString()} orang
+                        </span>
+                      </span>,
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.8rem' }}>
+                        {cfg?.label ?? name}
+                      </span>
+                    ];
+                  }}
                 />
                 <Pie
                   data={chartData}
