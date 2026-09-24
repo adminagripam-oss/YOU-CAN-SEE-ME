@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ChevronLeft, ChevronRight, Users, UserCheck, FileText, Stethoscope, UserX, Clock, Calendar, Building2, ChevronDown, ListFilter } from 'lucide-react';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { DateRangePicker } from '../components/DateRangePicker';
+import { AttendanceDonutChart } from '../components/AttendanceDonutChart';
+import { KebunAttendanceBarChart } from '../components/KebunAttendanceBarChart';
 
 const KEBUN_TO_REGION = {
   'Bukit Harapan I': 'Sumut 2',
@@ -152,7 +154,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       if (!log.timestamp) return;
       const logDate = new Date(log.timestamp);
       const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
-      
+
       const empIdStr = String(log.employee_id);
       const key = `${empIdStr}_${logDateStr}`;
 
@@ -205,31 +207,29 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   // Grouping data by kebun (for Regional & Head Office dashboards)
   const kebunSummary = useMemo(() => {
-    const uniqueKebuns = [...new Set(filteredEmployees.map(e => e.nama_kebun).filter(Boolean))];
+    const listToUse = availableKebuns.length > 0 ? availableKebuns : allKebunsFromCSV;
 
-    return uniqueKebuns.map(kebunName => {
-      const kebunEmployees = filteredEmployees.filter(e => e.nama_kebun === kebunName);
+    return listToUse.map(kebunName => {
+      const kebunEmployees = employees.filter(e => e.nama_kebun === kebunName);
       const kebunEmpIds = new Set(kebunEmployees.map(e => String(e.id)));
-      const kebunEmpNiks = new Set(kebunEmployees.map(e => String(e.nik))); // NIK Fallback untuk sinkronisasi offline
+      const kebunEmpNiks = new Set(kebunEmployees.map(e => String(e.nik)));
 
-      // Hitung HK Hadir (TK Hadir) hari ini dari groupedLogs yang finalStatus-nya 'Hadir'
-      const kebunGroupedLogs = groupedLogs.filter(g => kebunEmpIds.has(String(g.employee_id)) || kebunEmpNiks.has(String(g.nik)));
+      const kebunGroupedLogs = groupedLogs.filter(g =>
+        g.nama_kebun === kebunName || kebunEmpIds.has(String(g.employee_id)) || kebunEmpNiks.has(String(g.nik))
+      );
       const hadirCount = kebunGroupedLogs.filter(g => g.finalStatus === 'Hadir').length;
-
-      const totalCount = kebunEmployees.length || 1;
-      const percent = ((hadirCount / totalCount) * 100).toFixed(1);
-
-      const firstEmp = kebunEmployees[0];
+      const totalEmpCount = kebunEmployees.length;
+      const percent = totalEmpCount > 0 ? ((hadirCount / totalEmpCount) * 100).toFixed(1) : '0,0';
 
       return {
         nama_kebun: kebunName,
         regional: KEBUN_TO_REGION[kebunName] || '-',
-        totalEmployees: kebunEmployees.length,
+        totalEmployees: totalEmpCount,
         hadirCount,
         percentage: percent
       };
-    }).sort((a, b) => b.hadirCount - a.hadirCount);
-  }, [filteredEmployees, groupedLogs]);
+    }).sort((a, b) => b.hadirCount - a.hadirCount || b.totalEmployees - a.totalEmployees);
+  }, [availableKebuns, allKebunsFromCSV, employees, groupedLogs]);
 
   // Grouping data by date for trend chart (dynamic based on dateRange)
   const trendChartData = useMemo(() => {
@@ -240,7 +240,8 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
     const diffTime = Math.abs(endDate - startDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const loopDays = Math.min(diffDays, 90); // Cap at 90 days to prevent browser freeze if they pick a huge range
+    // If single day, show 7-day trend curve leading up to date (loopDays = 6)
+    const loopDays = diffDays === 0 ? 6 : Math.min(diffDays, 90);
 
     const trendData = [];
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
@@ -477,7 +478,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   // Dark Muted Color Palette
   const workforceComposition = [
     { name: 'TK Hadir', count: verifiedCount, percentage: hadirPct, color: '#15803d', bgTag: 'rgba(21, 128, 61, 0.12)' },
-    { name: 'Izin', count: izinCount, percentage: izinPct, color: '#1d4ed8', bgTag: 'rgba(29, 78, 216, 0.12)' },
+    { name: 'Izin', count: izinCount, percentage: izinPct, color: '#4b5563', bgTag: 'rgba(75, 85, 99, 0.12)' },
     { name: 'Sakit', count: sakitCount, percentage: sakitPct, color: '#b45309', bgTag: 'rgba(180, 83, 9, 0.12)' },
     { name: 'Mangkir', count: mangkirCount, percentage: mangkirPct, color: '#b91c1c', bgTag: 'rgba(185, 28, 28, 0.12)' }
   ];
@@ -494,33 +495,58 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   return (
     <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
-      {/* DATE FILTER HEADER BAR - DYNAMIC REAL-TIME BINDING */}
-      <div className="glass-card" style={{ padding: '0.9rem 1.25rem', marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <i className="fa-solid fa-calendar-days" style={{ color: 'var(--accent-primary)', fontSize: '1.1rem' }}></i>
-            <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-              Navigasi Tanggal Absensi:
+      {/* ENTERPRISE DASHBOARD HEADER */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '16px',
+        width: '100%',
+        marginBottom: '0.5rem'
+      }}>
+        {/* Left Side: Title & Status */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
+            Dashboard AgriFace
+          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#15803d', background: 'rgba(34, 197, 94, 0.15)', padding: '2px 8px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '4px', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#15803d' }} />
+              LIVE SYSTEM
+            </span>
+            <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              Terakhir diperbarui: {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
+        </div>
 
-          {/* DYNAMIC KEBUN FILTER SELECTOR */}
+        {/* Right Side: Filters */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Date Picker */}
+          <div style={{ background: 'var(--bg-card)', borderRadius: '8px' }}>
+            <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
+          </div>
+
+          {/* Kebun Select */}
           {user?.role !== 'estate_admin' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-muted)' }}>Kebun:</span>
+            <div className="custom-select-wrapper" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <select
                 value={selectedKebun}
                 onChange={(e) => setSelectedKebun(e.target.value)}
                 style={{
-                  padding: '6px 12px',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  padding: '8px 36px 8px 12px',
                   borderRadius: '8px',
                   border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
+                  background: 'var(--bg-card)',
                   color: 'var(--text-main)',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
                   outline: 'none',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  minWidth: '160px'
                 }}
               >
                 <option value="All">Semua Kebun</option>
@@ -528,231 +554,227 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   <option key={k} value={k}>{k}</option>
                 ))}
               </select>
+              <ChevronDown size={14} style={{ position: 'absolute', right: 10, pointerEvents: 'none', color: 'var(--text-muted)' }} />
             </div>
           )}
         </div>
-
-        {/* Unified Tab Navigation Group */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
-        </div>
       </div>
 
-      {/* 1. TOP SECTION: 5 DYNAMIC WORKFORCE KPI CARDS */}
-      <div className="grid-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.85rem' }}>
+      {/* 1. TOP SECTION: 6 SYMMETRICAL WORKFORCE KPI CARDS */}
+      <div className="dashboard-kpi-grid">
+
         {/* KPI 1: Total Tenaga Kerja */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Total TK</span>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-              TK
-            </span>
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #3b82f6',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total TK
+          </span>
+          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0 0.2rem', lineHeight: 1 }}>
             {totalEmployees.toLocaleString('id-ID')}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>100% Pemanen</div>
+          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+            Seluruh Tenaga Kerja
+          </span>
         </div>
 
         {/* KPI 2: TK Hadir */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>TK Hadir</span>
-            {!isMultiDay && (
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#15803d', background: 'rgba(21, 128, 61, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(21, 128, 61, 0.25)' }}>
-                {hadirPct}%
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#15803d', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #15803d',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            TK Hadir
+          </span>
+          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {verifiedCount.toLocaleString('id-ID')}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Verified Scan</div>
+          <div style={{ display: 'flex' }}>
+            {!isMultiDay ? (
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#15803d', background: 'rgba(21,128,61,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
+                {hadirPct}% Aktual
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Verified Scan</span>
+            )}
+          </div>
         </div>
 
         {/* KPI 3: Izin */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Izin</span>
-            {!isMultiDay && (
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8', background: 'rgba(29, 78, 216, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(29, 78, 216, 0.25)' }}>
-                {izinPct}%
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#1d4ed8', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #4b5563',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Izin
+          </span>
+          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {izinCount}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Izin Resmi</div>
+          <div style={{ display: 'flex' }}>
+            {!isMultiDay ? (
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4b5563', background: 'rgba(75,85,99,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
+                {izinPct}% Resmi
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Izin Resmi</span>
+            )}
+          </div>
         </div>
 
         {/* KPI 4: Sakit */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Sakit</span>
-            {!isMultiDay && (
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b45309', background: 'rgba(180, 83, 9, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(180, 83, 9, 0.25)' }}>
-                {sakitPct}%
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b45309', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #b45309',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Sakit
+          </span>
+          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {sakitCount}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Keterangan Dokter</div>
+          <div style={{ display: 'flex' }}>
+            {!isMultiDay ? (
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#b45309', background: 'rgba(180,83,9,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
+                {sakitPct}% Aktual
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Ket. Dokter</span>
+            )}
+          </div>
         </div>
 
         {/* KPI 5: Mangkir */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Mangkir</span>
-            {!isMultiDay && (
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185, 28, 28, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(185, 28, 28, 0.25)' }}>
-                {mangkirPct}%
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#b91c1c', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #b91c1c',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Mangkir
+          </span>
+          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {mangkirCount}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Tanpa Keterangan</div>
+          <div style={{ display: 'flex' }}>
+            {!isMultiDay ? (
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185,28,28,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
+                {mangkirPct}% Aktual
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Tanpa Keterangan</span>
+            )}
+          </div>
         </div>
 
         {/* KPI 6: Lupa Check-out */}
-        <div className="glass-card" style={{ marginBottom: 0, padding: '1rem 1.15rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-muted)' }}>Lupa Check-out</span>
-            {!isMultiDay && (
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f97316', background: 'rgba(249, 115, 22, 0.12)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(249, 115, 22, 0.25)' }}>
-                {lupaCheckoutPct}%
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 900, color: '#f97316', marginTop: '0.5rem', letterSpacing: '-0.02em' }}>
+        <div className="glass-card" style={{
+          position: 'relative',
+          overflow: 'hidden',
+          marginBottom: 0,
+          padding: '1.25rem',
+          border: '1px solid var(--border-color)',
+          borderTop: '4px solid #f97316',
+          borderRadius: '8px',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '124px'
+        }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Lupa Checkout
+          </span>
+          <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
             {lupaCheckoutCount}
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px', fontWeight: 600 }}>Butuh Koreksi</div>
+          <div style={{ display: 'flex' }}>
+            {!isMultiDay ? (
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#f97316', background: 'rgba(249,115,22,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
+                {lupaCheckoutPct}% Aktual
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Butuh Koreksi</span>
+            )}
+          </div>
         </div>
+
       </div>
 
-      {/* 2. MINIMALIST PIE CHART CARD - DYNAMIC SVG RING ANGLES BINDING */}
-      <div className="glass-card" style={{ padding: '1.5rem 1.5rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)' }}>
-        {/* Minimalist Card Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.85rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <i className="fa-solid fa-chart-pie" style={{ color: 'var(--text-main)', fontSize: '1.1rem' }}></i>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              Komposisi Kehadiran TK
-            </h3>
-          </div>
-          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-            Tanggal: {dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`} ({filteredLogs.length} Log Absensi)
-          </div>
+      {/* 2. CHARTS SECTION — RESPONSIVE 40:60 GRID */}
+      <div className="dashboard-charts-grid">
+        <div className="glass-card" style={{ padding: '1.25rem 1.25rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <AttendanceDonutChart
+            verifiedCount={verifiedCount}
+            izinCount={izinCount}
+            sakitCount={sakitCount}
+            mangkirCount={mangkirCount}
+            totalEmployees={totalEmployees}
+            dateStr={dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`}
+          />
         </div>
 
-        {/* Chart & Minimalist Legend Responsive Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
-          {/* SVG Pie/Donut Chart Center */}
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', height: '220px' }}>
-            <svg viewBox="0 0 100 100" style={{ width: '200px', height: '200px', transform: 'rotate(-90deg)' }}>
-              <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-primary)" strokeWidth="15" />
-
-              {/* Segment 1: TK Hadir */}
-              {hadirRatio > 0 && (
-                <circle
-                  cx="50" cy="50" r="35" fill="none" stroke="#15803d" strokeWidth="15"
-                  strokeDasharray={`${dashHadir} ${C}`} strokeDashoffset="0"
-                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
-                  onClick={() => setSelectedSegment(selectedSegment === 0 ? null : 0)}
-                />
-              )}
-
-              {/* Segment 2: Izin */}
-              {izinRatio > 0 && (
-                <circle
-                  cx="50" cy="50" r="35" fill="none" stroke="#1d4ed8" strokeWidth="15"
-                  strokeDasharray={`${dashIzin} ${C}`} strokeDashoffset={`${offsetIzin}`}
-                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
-                  onClick={() => setSelectedSegment(selectedSegment === 1 ? null : 1)}
-                />
-              )}
-
-              {/* Segment 3: Sakit */}
-              {sakitRatio > 0 && (
-                <circle
-                  cx="50" cy="50" r="35" fill="none" stroke="#b45309" strokeWidth="15"
-                  strokeDasharray={`${dashSakit} ${C}`} strokeDashoffset={`${offsetSakit}`}
-                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
-                  onClick={() => setSelectedSegment(selectedSegment === 2 ? null : 2)}
-                />
-              )}
-
-              {/* Segment 4: Mangkir */}
-              {mangkirRatio > 0 && (
-                <circle
-                  cx="50" cy="50" r="35" fill="none" stroke="#b91c1c" strokeWidth="15"
-                  strokeDasharray={`${dashMangkir} ${C}`} strokeDashoffset={`${offsetMangkir}`}
-                  style={{ cursor: 'pointer', transition: 'all 0.4s ease' }}
-                  onClick={() => setSelectedSegment(selectedSegment === 3 ? null : 3)}
-                />
-              )}
-            </svg>
-
-            {/* Center Label inside Donut Hole */}
-            <div style={{ position: 'absolute', textAlign: 'center' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-main)' }}>
-                {isMultiDay
-                  ? (selectedSegment !== null ? workforceComposition[selectedSegment].count : verifiedCount)
-                  : (selectedSegment !== null ? `${workforceComposition[selectedSegment].percentage}%` : `${hadirPct}%`)
-                }
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-                {selectedSegment !== null ? workforceComposition[selectedSegment].name : 'TK Hadir'}
-              </div>
-            </div>
-          </div>
-
-          {/* Minimalist Legend List with Clear Spacing */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
-            {workforceComposition.map((item, index) => (
-              <div
-                key={item.name}
-                onClick={() => setSelectedSegment(selectedSegment === index ? null : index)}
-                style={{
-                  display: 'flex',
-                  justify: 'space-between',
-                  alignItems: 'center',
-                  padding: '11px 16px',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  background: selectedSegment === index ? item.bgTag : 'var(--bg-primary)',
-                  border: selectedSegment === index ? `1.5px solid ${item.color}` : '1px solid var(--border-color)',
-                  transition: 'all 0.2s ease',
-                  gap: '16px'
-                }}
-              >
-                {/* Left Side: Dot Indicator + Category Name */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: item.color, display: 'inline-block', flexShrink: 0 }}></span>
-                  <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                    {item.name}
-                  </span>
-                </div>
-
-                {/* Right Side: Count + Percentage WITH CLEAR SPACING */}
-                <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  <span style={{ fontSize: '0.92rem', fontWeight: 900, color: item.color }}>
-                    {item.count} {isMultiDay ? 'Hari' : 'Orang'}
-                  </span>
-                  {!isMultiDay && (
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>
-                      ({item.percentage}%)
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="glass-card" style={{ padding: '1.25rem 1.25rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <KebunAttendanceBarChart
+            kebunSummary={kebunSummary}
+            dateStr={dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`}
+          />
         </div>
       </div>
 
@@ -763,20 +785,20 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
             <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
               Ringkasan HK (Hari Kerja) Per Kebun ({dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`})
             </h3>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--bg-primary)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingBottom: '4px', borderBottom: '1px solid var(--border-color)' }}>
               {['Harian', 'Mingguan', 'Bulanan'].map(view => (
                 <button
                   key={view}
                   onClick={() => setChartView(view)}
                   style={{
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    fontSize: '0.75rem',
+                    padding: '4px 4px',
+                    fontSize: '0.8rem',
                     fontWeight: 700,
                     border: 'none',
+                    borderBottom: chartView === view ? '2px solid var(--accent-primary)' : '2px solid transparent',
                     cursor: 'pointer',
-                    background: chartView === view ? '#1e40af' : 'transparent',
-                    color: chartView === view ? '#fff' : 'var(--text-muted)',
+                    background: 'transparent',
+                    color: chartView === view ? 'var(--text-main)' : 'var(--text-muted)',
                     transition: 'all 0.2s ease'
                   }}
                 >
@@ -788,23 +810,23 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
           {/* DYNAMIC CHARTS BASED ON SELECTED BADGE */}
           {chartView === 'Harian' && trendChartData.length > 0 && (
-            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
+            <div style={{ width: '100%', height: '230px', marginBottom: '2rem', marginTop: '0.5rem' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={trendChartData}
-                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                  margin={{ top: 25, right: 15, left: -20, bottom: 0 }}
                 >
                   <defs>
                     <linearGradient id="chart-glow-fill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#15803d" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#15803d" stopOpacity={0} />
                     </linearGradient>
                     <filter id="chart-dot-glow" x="-50%" y="-50%" width="200%" height="200%">
                       <feGaussianBlur stdDeviation="3" result="blur" />
                       <feComposite in="SourceGraphic" in2="blur" operator="over" />
                     </filter>
                     <filter id="chart-line-glow" x="-10%" y="-20%" width="120%" height="140%">
-                      <feGaussianBlur stdDeviation="6" result="blur" />
+                      <feGaussianBlur stdDeviation="5" result="blur" />
                       <feComposite in="SourceGraphic" in2="blur" operator="over" />
                     </filter>
                   </defs>
@@ -822,7 +844,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                    itemStyle={{ color: '#15803d', fontWeight: 'bold' }}
                     cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   />
                   <Area
@@ -830,18 +852,28 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     dataKey="signups"
                     name="TK Hadir"
                     fill="url(#chart-glow-fill)"
-                    stroke="#10b981"
+                    stroke="#15803d"
                     strokeWidth={3}
+                    isAnimationActive={true}
+                    animationDuration={1200}
+                    animationEasing="ease-out"
                     filter="url(#chart-line-glow)"
                     dot={{
                       r: 4,
-                      fill: "#10b981",
+                      fill: "#15803d",
                       strokeWidth: 2,
                       stroke: "var(--bg-card)",
                       filter: "url(#chart-dot-glow)",
                     }}
                     activeDot={{ r: 6, strokeWidth: 3, stroke: "var(--bg-card)" }}
-                  />
+                  >
+                    <LabelList
+                      dataKey="signups"
+                      position="top"
+                      formatter={(val) => `${val}`}
+                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
+                    />
+                  </Area>
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -864,7 +896,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
                     cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   />
-                  <Bar dataKey="desktop" name="TK Hadir" fill="#10b981" radius={4} />
+                  <Bar dataKey="desktop" name="TK Hadir" fill="#15803d" radius={4}>
+                    <LabelList
+                      dataKey="desktop"
+                      position="top"
+                      formatter={(val) => `${val}`}
+                      style={{ fill: '#111827', fontSize: 11, fontWeight: 900 }}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -887,7 +926,14 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
                     cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   />
-                  <Bar dataKey="desktop" name="TK Hadir" fill="#10b981" radius={4} />
+                  <Bar dataKey="desktop" name="TK Hadir" fill="#15803d" radius={4}>
+                    <LabelList
+                      dataKey="desktop"
+                      position="top"
+                      formatter={(val) => `${val}`}
+                      style={{ fill: '#111827', fontSize: 11, fontWeight: 900 }}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>

@@ -112,79 +112,90 @@ export function DateRangePicker({ dateRange, setDateRange }) {
           {/* Preset Buttons Header */}
           <div style={{ 
             display: 'flex', 
-            gap: '8px', 
-            paddingBottom: '12px', 
-            marginBottom: '4px', 
-            borderBottom: '1px solid var(--border-color)' 
+            gap: '16px', 
+            paddingBottom: '8px', 
+            marginBottom: '8px', 
+            borderBottom: '1px solid var(--border-color)',
+            paddingLeft: '8px',
+            paddingRight: '8px'
           }}>
-            <button
-              type="button"
-              onClick={() => {
-                const today = new Date();
-                const yyyy = today.getFullYear();
-                const mm = String(today.getMonth() + 1).padStart(2, '0');
-                const dd = String(today.getDate()).padStart(2, '0');
-                const str = `${yyyy}-${mm}-${dd}`;
-                setDateRange({ start: str, end: str });
-                setIsOpen(false);
-              }}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                background: 'var(--bg-card)',
-                color: 'var(--text-main)',
-                border: '1px solid var(--border-color)',
-                cursor: 'pointer'
-              }}
-            >
-              Hari Ini
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const yesterday = new Date();
-                yesterday.setDate(yesterday.getDate() - 1);
-                const yyyy = yesterday.getFullYear();
-                const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
-                const dd = String(yesterday.getDate()).padStart(2, '0');
-                const str = `${yyyy}-${mm}-${dd}`;
-                setDateRange({ start: str, end: str });
-                setIsOpen(false);
-              }}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                background: 'var(--bg-card)',
-                color: 'var(--text-main)',
-                border: '1px solid var(--border-color)',
-                cursor: 'pointer'
-              }}
-            >
-              Kemarin
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDateRange({ start: null, end: null });
-                setIsOpen(false);
-              }}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                background: 'var(--bg-card)',
-                color: 'var(--text-muted)',
-                border: '1px solid var(--border-color)',
-                cursor: 'pointer'
-              }}
-            >
-              Semua Tanggal
-            </button>
+            {(() => {
+              const today = new Date();
+              const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+              
+              const yesterday = new Date();
+              yesterday.setDate(yesterday.getDate() - 1);
+              const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+              const isToday = dateRange?.start === todayStr && dateRange?.end === todayStr;
+              const isYesterday = dateRange?.start === yesterdayStr && dateRange?.end === yesterdayStr;
+              const isAll = !dateRange?.start && !dateRange?.end;
+
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateRange({ start: todayStr, end: todayStr });
+                      setIsOpen(false);
+                    }}
+                    style={{
+                      padding: '4px 4px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      background: 'transparent',
+                      color: isToday ? 'var(--text-main)' : 'var(--text-muted)',
+                      border: 'none',
+                      borderBottom: isToday ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    Hari Ini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateRange({ start: yesterdayStr, end: yesterdayStr });
+                      setIsOpen(false);
+                    }}
+                    style={{
+                      padding: '4px 4px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      background: 'transparent',
+                      color: isYesterday ? 'var(--text-main)' : 'var(--text-muted)',
+                      border: 'none',
+                      borderBottom: isYesterday ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    Kemarin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateRange({ start: null, end: null });
+                      setIsOpen(false);
+                    }}
+                    style={{
+                      padding: '4px 4px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      background: 'transparent',
+                      color: isAll ? 'var(--text-main)' : 'var(--text-muted)',
+                      border: 'none',
+                      borderBottom: isAll ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    Semua Tanggal
+                  </button>
+                </>
+              );
+            })()}
           </div>
 
           {/* ── Custom Nav Header (Arrows + Month Labels) ── */}
