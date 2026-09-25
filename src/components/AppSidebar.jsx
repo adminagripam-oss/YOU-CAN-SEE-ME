@@ -15,6 +15,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   LayoutDashboard,
   Camera,
@@ -22,6 +23,7 @@ import {
   Users,
   History,
   LogOut,
+  FileText,
 } from 'lucide-react';
 
 const navItems = [
@@ -29,7 +31,9 @@ const navItems = [
   { label: 'Scanner Absensi', to: '/absensi',          icon: Camera,          roles: ['estate_admin'] },
   { label: 'Input Karyawan',  to: '/karyawan',         icon: UserPlus,        roles: ['estate_admin'] },
   { label: 'Daftar Karyawan', to: '/daftar-karyawan',  icon: Users,           roles: ['all'] },
+  { label: 'Mutasi Karyawan', to: '/daftar-karyawan/mutasi', icon: FileText, roles: ['all'] },
   { label: 'Log Absensi',     to: '/logs',             icon: History,         roles: ['all'] },
+  { label: 'Monitoring Absensi', to: '/logs/monitoring', icon: FileText,      roles: ['all'] },
 ];
 
 export function AppSidebar() {
@@ -66,7 +70,8 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="app-sidebar-reui">
+    <TooltipProvider>
+      <Sidebar collapsible="icon" className="app-sidebar-reui">
       {/* ── Header: Logo & Brand ── */}
       <SidebarHeader className="sidebar-header-reui">
         <div className={`sidebar-brand-row ${isCollapsed ? 'sidebar-brand-row--collapsed' : ''}`}>
@@ -161,6 +166,7 @@ export function AppSidebar() {
       </SidebarFooter>
 
       <SidebarRail />
-    </Sidebar>
+      </Sidebar>
+    </TooltipProvider>
   );
 }

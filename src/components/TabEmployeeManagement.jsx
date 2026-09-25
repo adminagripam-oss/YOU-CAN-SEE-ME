@@ -57,12 +57,8 @@ export default function TabEmployeeManagement({
   const regCanvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Injected detection callback untuk human.js di register mode
   const detectRegFacesCallback = useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
-    if (human.config?.face?.description) {
-      human.config.face.description.enabled = true;
-    }
     const result = await human.detect(croppedCanvas);
     return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
@@ -194,9 +190,6 @@ export default function TabEmployeeManagement({
         }
 
         try {
-          if (human.config?.face?.description) {
-            human.config.face.description.enabled = true;
-          }
           const result = await human.detect(img);
 
           if (result.face && result.face.length > 0 && result.face[0].embedding) {

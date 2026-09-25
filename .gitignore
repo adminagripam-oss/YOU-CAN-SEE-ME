@@ -6,3 +6,4 @@ dist/
 !AgriFaceV2.apk
 .env
 .env.*
+*.zip
