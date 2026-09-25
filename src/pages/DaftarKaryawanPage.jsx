@@ -1153,293 +1153,219 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
   return (
     <div style={{ width: '100%', padding: 0, boxSizing: 'border-box' }} className="print-container">
-      {/* Table & Print Styles */}
       <style>{`
-        .freeze-table-header th, 
-        .freeze-table-header td,
-        .freeze-table-header th *,
-        .freeze-table-header td * {
-          font-family: Arial, Helvetica, sans-serif !important;
-          font-size: 14px !important;
-          text-align: center !important;
-          vertical-align: middle !important;
-        }
-
-        .freeze-table-header th {
-          position: sticky !important;
-          top: 0 !important;
-          background-color: #46bdc6 !important;
-          color: #ffffff !important;
-          font-weight: bold !important;
-          z-index: 5 !important;
-          text-transform: uppercase !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        
         @media print {
-          body * {
-            visibility: hidden;
-          }
-          .print-area, .print-area * {
-            visibility: visible;
-          }
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
           .print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: none !important;
-            box-shadow: none !important;
+            position: absolute; left: 0; top: 0;
+            width: 100% !important; max-width: 100% !important;
+            margin: 0 !important; padding: 0 !important;
+            border: none !important; box-shadow: none !important;
           }
-          .no-print {
-            display: none !important;
-          }
-          .table-container {
-            max-height: none !important;
-            overflow: visible !important;
-            height: auto !important;
-          }
-          .freeze-table-header th {
-            background-color: #46bdc6 !important;
-            color: #ffffff !important;
+          .no-print { display: none !important; }
+          .table-container { max-height: none !important; overflow: visible !important; height: auto !important; }
+          .enterprise-table thead th {
+            background-color: #e2e8f0 !important;
+            color: #475569 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .freeze-table-header th, 
-          .freeze-table-header td,
-          .freeze-table-header th *,
-          .freeze-table-header td * {
-            font-family: 'Consolas', Courier, monospace !important;
-            font-size: 14px !important;
-            text-align: center !important;
-            vertical-align: middle !important;
-            white-space: normal !important;
-            word-break: break-word !important;
-          }
-          table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-          }
-          tr {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          thead {
-            display: table-header-group !important;
-          }
-          @page {
-            size: landscape;
-            margin: 10mm;
-          }
+          table { width: 100% !important; border-collapse: collapse !important; }
+          tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+          thead { display: table-header-group !important; }
+          @page { size: landscape; margin: 10mm; }
         }
       `}</style>
-      
-      <div className="glass-card print-area" style={{ width: '100%', maxWidth: '100%' }}>
-        
-        {/* Header Title */}
-        <div className="card-title" style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-          Data Master Karyawan
-        </div>
-        
-        {/* Toolbar & Filters (Hidden when printing) */}
-        <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', marginBottom: '1.5rem', alignItems: 'flex-end' }}>
-          
-          {/* Export & Action Buttons */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-outline" onClick={() => refreshEmployees(true)} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }} title="Tarik ulang data dari server">
-              <RefreshCw size={16} /> Sync Data
-            </button>
-            <button type="button" className="btn btn-outline" onClick={exportToCSV} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <FileSpreadsheet size={16} color="#107C41" /> Export Excel
-            </button>
-            <button type="button" className="btn" onClick={exportToPDF} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
-              <FileDown size={16} color="#E81123" /> Export PDF
-            </button>
-            <button type="button" className="btn" onClick={() => setImportModalOpen(true)} style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
-              <Upload size={16} color="#4f46e5" /> Import CSV + Foto
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => navigate('/karyawan')} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto' }}>
-              <Plus size={16} /> Tambah Karyawan
+
+      <div className="print-area page-layout">
+
+        {/* Card 1: Toolbar */}
+        <div className="toolbar-card no-print">
+          {/* Row 1: Title + Riwayat Mutasi */}
+          <div className="toolbar-card-row">
+            <h1 className="page-layout-h1">Data Master Karyawan</h1>
+            <button
+              onClick={() => navigate('/daftar-karyawan/mutasi')}
+              className="btn-outline-action"
+            >
+              Riwayat Mutasi <ChevronRightIcon size={15} />
             </button>
           </div>
 
-          {/* Filters */}
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <input 
-              type="text" 
-              placeholder="Cari NIK / Nama..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            />
-            
-            {user?.role !== 'estate_admin' && (
-              <select 
-                value={filterKebun} 
-                onChange={(e) => setFilterKebun(e.target.value)}
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-              >
-                <option value="" style={{ color: '#000' }}>Filter Kebun (Semua)</option>
-                {availableKebuns.map(k => (
-                  <option key={k} value={k} style={{ color: '#000' }}>{k}</option>
-                ))}
-              </select>
-            )}
-
-            <select 
-              value={filterAfdeling} 
-              onChange={(e) => setFilterAfdeling(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            >
-              <option value="" style={{ color: '#000' }}>Filter Afdeling (Semua)</option>
-              {uniqueAfdelings.map(a => (
-                <option key={a} value={a} style={{ color: '#000' }}>{a}</option>
-              ))}
-            </select>
-
-            <select 
-              value={filterStatusTk} 
-              onChange={(e) => setFilterStatusTk(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            >
-              <option value="" style={{ color: '#000' }}>Filter Status TK (Semua)</option>
-              <option value="BHL" style={{ color: '#000' }}>BHL</option>
-              <option value="Karyawan Tetap (PKWTT)" style={{ color: '#000' }}>PKWTT</option>
-              <option value="Karyawan Kontrak (PKWT)" style={{ color: '#000' }}>PKWT</option>
-            </select>
-
-            <select 
-              value={filterStatusPerkawinan} 
-              onChange={(e) => setFilterStatusPerkawinan(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            >
-              <option value="" style={{ color: '#000' }}>Filter Perkawinan (Semua)</option>
-              <option value="Lajang" style={{ color: '#000' }}>Lajang</option>
-              <option value="Menikah" style={{ color: '#000' }}>Menikah</option>
-              <option value="Duda/Janda" style={{ color: '#000' }}>Duda/Janda</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
-          <Table className="freeze-table-header compact-mobile-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead style={{ width: '50px', textAlign: 'center' }}>No.</TableHead>
-                <TableHead>NIK</TableHead>
-                <TableHead>Nama</TableHead>
-                <TableHead>Afdeling</TableHead>
-                <TableHead>Nama Kebun</TableHead>
-                <TableHead>Jabatan</TableHead>
-                <TableHead>Status TK</TableHead>
-                <TableHead>Status Pernikahan</TableHead>
-                <TableHead className="no-print">Biometrik</TableHead>
-                <TableHead className="no-print">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredEmployees.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} style={{ textAlign: 'center' }}>Tidak ada data yang cocok.</TableCell>
-                </TableRow>
-              ) : (
-                paginatedEmployees.map((emp, index) => (
-                  <TableRow key={emp.id}>
-                    <TableCell data-label="No." style={{ textAlign: 'center' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
-                    <TableCell data-label="NIK" className="font-medium">{emp.nik}</TableCell>
-                    <TableCell data-label="Nama">{emp.name}</TableCell>
-                    <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
-                    <TableCell data-label="Nama Kebun">{emp.nama_kebun || '-'}</TableCell>
-                    <TableCell data-label="Jabatan">{emp.jabatan || emp.department || '-'}</TableCell>
-                    <TableCell data-label="Status TK">{emp.status_tk || '-'}</TableCell>
-                    <TableCell data-label="Status Pernikahan">{emp.status_perkawinan || '-'}</TableCell>
-                    <TableCell data-label="Biometrik" className="no-print">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-                        {(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') ? (
-                          <span className="status-badge success">Siap</span>
-                        ) : (
-                          <span className="status-badge fail">Belum</span>
-                        )}
-                        {(emp.is_synced === false || String(emp.id).startsWith('off_')) && (
-                          <span className="status-badge warning" style={{ background: '#f59e0b', color: '#000', fontSize: '0.7rem', padding: '2px 6px', fontWeight: 'bold' }} title="Tersimpan di perangkat lokal, akan diunggah otomatis saat terhubung ke internet">
-                            ⌛ Pending Sync
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell data-label="Aksi" className="no-print">
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        {!(emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true') && (
-                          <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Scan Wajah">
-                            <Camera size={18} color="var(--accent-primary)" />
-                          </button>
-                        )}
-                        <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit">
-                          <Edit2 size={18} color="var(--accent-cyan)" />
-                        </button>
-                        <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} title="Hapus">
-                          <Trash2 size={18} color="var(--accent-error)" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {filteredEmployees.length > 0 && (
-          <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === 1 ? 0.5 : 1 }}
-                title="Previous"
-              >
-                <ChevronLeftIcon size={16} />
+          {/* Row 2: Action buttons */}
+          <div className="toolbar-card-row">
+            <div className="toolbar-action-group">
+              <button type="button" className="btn-primary-green" onClick={() => navigate('/karyawan')}>
+                <Plus size={16} /> Tambah Karyawan
               </button>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
-                if (totalPages > 7) {
-                  if (page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
-                    if (page === currentPage - 2 || page === currentPage + 2) return <span key={`ellipsis-${page}`} style={{ color: 'var(--text-muted)', margin: '0 4px' }}>...</span>;
-                    return null;
-                  }
-                }
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    style={{
-                      minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                      background: page === currentPage ? 'var(--accent-primary)' : 'transparent',
-                      color: page === currentPage ? '#fff' : 'var(--text-main)',
-                      fontWeight: page === currentPage ? 700 : 500,
-                      fontSize: '0.85rem'
-                    }}
-                  >
-                    {page}
-                  </button>
-                );
-              })}
-
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-main)', opacity: currentPage === totalPages ? 0.5 : 1 }}
-                title="Next"
-              >
-                <ChevronRightIcon size={16} />
+            </div>
+            <div className="toolbar-action-group">
+              <button type="button" className="btn-outline-action" onClick={() => refreshEmployees(true)} title="Tarik ulang data dari server">
+                <RefreshCw size={15} /> Sync
+              </button>
+              <button type="button" className="btn-outline-action" onClick={exportToCSV}>
+                <FileSpreadsheet size={15} color="#107C41" /> Excel
+              </button>
+              <button type="button" className="btn-outline-action" onClick={exportToPDF}>
+                <FileDown size={15} color="#E81123" /> PDF
+              </button>
+              <button type="button" className="btn-outline-action" onClick={() => setImportModalOpen(true)}>
+                <Upload size={15} /> Import CSV + Foto
               </button>
             </div>
           </div>
-        )}
+
+          {/* Row 3: Filter bar */}
+          <div className="filter-bar">
+            <div className="filter-bar-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input
+                type="text"
+                placeholder="Cari NIK / Nama..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {user?.role !== 'estate_admin' && (
+              <select value={filterKebun} onChange={(e) => setFilterKebun(e.target.value)}>
+                <option value="">Afdeling (Semua)</option>
+                {availableKebuns.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            )}
+            <select value={filterAfdeling} onChange={(e) => setFilterAfdeling(e.target.value)}>
+              <option value="">Afdeling (Semua)</option>
+              {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <select value={filterStatusTk} onChange={(e) => setFilterStatusTk(e.target.value)}>
+              <option value="">Status TK (Semua)</option>
+              <option value="BHL">BHL</option>
+              <option value="Karyawan Tetap (PKWTT)">PKWTT</option>
+              <option value="Karyawan Kontrak (PKWT)">PKWT</option>
+            </select>
+            <select value={filterStatusPerkawinan} onChange={(e) => setFilterStatusPerkawinan(e.target.value)}>
+              <option value="">Perkawinan (Semua)</option>
+              <option value="Lajang">Lajang</option>
+              <option value="Menikah">Menikah</option>
+              <option value="Duda/Janda">Duda/Janda</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Card 2: Table */}
+        <div className="table-card">
+          <div className="table-container" style={{ maxHeight: '60vh', overflowY: 'auto', position: 'relative' }}>
+            <Table className="enterprise-table compact-mobile-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead style={{ width: '48px', textAlign: 'center' }}>No.</TableHead>
+                  <TableHead>NIK</TableHead>
+                  <TableHead>Nama</TableHead>
+                  <TableHead>Afdeling</TableHead>
+                  <TableHead>Nama Kebun</TableHead>
+                  <TableHead>Status TK</TableHead>
+                  <TableHead>Perkawinan</TableHead>
+                  <TableHead className="no-print">Biometrik</TableHead>
+                  <TableHead className="no-print">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredEmployees.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                      Tidak ada data yang cocok.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedEmployees.map((emp, index) => {
+                    const isBiometrikReady = emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true';
+                    const isAktif = emp.status_tk && emp.status_tk !== 'Non-Aktif' && emp.status_tk !== 'OFFBOARDING';
+                    return (
+                      <TableRow key={emp.id}>
+                        <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                        <TableCell data-label="NIK" style={{ fontWeight: 600 }}>{emp.nik}</TableCell>
+                        <TableCell data-label="Nama" style={{ fontWeight: 600 }}>{emp.name}</TableCell>
+                        <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
+                        <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{emp.nama_kebun || '-'}</TableCell>
+                        <TableCell data-label="Status TK">
+                          {emp.status_tk ? (
+                            <span className={isAktif ? 'badge-aktif' : 'badge-nonaktif'}>
+                              {emp.status_tk}
+                            </span>
+                          ) : '-'}
+                        </TableCell>
+                        <TableCell data-label="Perkawinan">{emp.status_perkawinan || '-'}</TableCell>
+                        <TableCell data-label="Biometrik" className="no-print">
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                            {isBiometrikReady ? (
+                              <span className="status-badge success">Siap</span>
+                            ) : (
+                              <span className="status-badge fail">Belum</span>
+                            )}
+                            {(emp.is_synced === false || String(emp.id).startsWith('off_')) && (
+                              <span className="status-badge warning" style={{ background: '#f59e0b', color: '#000', fontSize: '0.7rem', padding: '2px 6px', fontWeight: 'bold' }} title="Tersimpan lokal, akan diunggah saat online">
+                                Pending Sync
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell data-label="Aksi" className="no-print">
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            {!isBiometrikReady && (
+                              <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Scan Wajah">
+                                <Camera size={17} color="var(--accent-primary)" />
+                              </button>
+                            )}
+                            <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Edit">
+                              <Edit2 size={17} color="var(--accent-cyan)" />
+                            </button>
+                            <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Hapus">
+                              <Trash2 size={17} color="var(--accent-error)" />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {filteredEmployees.length > 0 && (
+            <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === 1 ? 0.4 : 1 }}
+                >
+                  <ChevronLeftIcon size={16} />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                  if (totalPages > 7 && page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
+                    if (page === currentPage - 2 || page === currentPage + 2) return <span key={`e-${page}`} style={{ color: 'var(--text-muted)' }}>...</span>;
+                    return null;
+                  }
+                  return (
+                    <button key={page} onClick={() => setCurrentPage(page)}
+                      style={{ minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: page === currentPage ? 'var(--accent-primary)' : 'transparent', color: page === currentPage ? '#fff' : 'var(--text-main)', fontWeight: page === currentPage ? 700 : 500, fontSize: '0.85rem' }}>
+                      {page}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === totalPages ? 0.4 : 1 }}
+                >
+                  <ChevronRightIcon size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Modal Scan Wajah */}

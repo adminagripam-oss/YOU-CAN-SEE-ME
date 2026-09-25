@@ -20,6 +20,7 @@ import DashboardPage from './pages/DashboardPage';
 import AbsensiPage from './pages/AbsensiPage';
 import KaryawanPage from './pages/KaryawanPage';
 import DaftarKaryawanPage from './pages/DaftarKaryawanPage';
+import MutasiKaryawanPage from './pages/MutasiKaryawanPage';
 import LogsPage from './pages/LogsPage';
 import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
@@ -27,7 +28,7 @@ import ConfirmModal from './components/ConfirmModal';
 import OfflineOrderForm from './components/OfflineOrderForm';
 import OTAUpdateDialog from './components/OTAUpdateDialog';
 import AnimatedSplash from './components/AnimatedSplash';
-
+import MonitoringAbsensiPage from './pages/MonitoringAbsensiPage';
 
 function AppContent() {
   const { user } = useAuth();
@@ -1505,6 +1506,15 @@ function AppErrorBoundary() {
                     )
                   },
                   {
+                    path: "daftar-karyawan/mutasi",
+                    element: (
+                      <MutasiKaryawanPage
+                        employees={employees}
+                        showToast={showToast}
+                      />
+                    )
+                  },
+                  {
                     path: "logs",
                     element: (
                       <LogsPage
@@ -1512,6 +1522,15 @@ function AppErrorBoundary() {
                         refreshLogs={fetchLogs}
                         showToast={showToast}
                         openConfirmModal={openConfirmModal}
+                      />
+                    )
+                  },
+                  {
+                    path: "logs/monitoring",
+                    element: (
+                      <MonitoringAbsensiPage
+                        employees={employees}
+                        logs={logs}
                       />
                     )
                   }

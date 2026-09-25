@@ -91,6 +91,7 @@ export default function TabAttendanceLogs({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editData, setEditData] = useState(null);
   const [deletedLogIds, setDeletedLogIds] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Fetch pending approval requests
   const fetchApprovalRequests = async () => {
@@ -549,112 +550,16 @@ export default function TabAttendanceLogs({
   };
 
   const saveEdit = async () => {
+    if (!navigator.onLine) {
+      showToast('Tidak Dapat Edit', 'Fitur edit log hanya tersedia saat online. Silakan sambungkan ke internet terlebih dahulu.', 'error');
+      return;
+    }
+
+    setIsSaving(true);
     try {
       let success = true;
-      const { db } = await import('../db');
       const inLogId = editData.inLog?.id || null;
       const outLogId = editData.outLog?.id || null;
-
-      // Helper for offline request queuing
-      const queueOfflineEdit = async () => {
-        const reqPayload = {
-          id: crypto.randomUUID ? crypto.randomUUID() : 'req_auto_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
-          request_type: 'EDIT',
-          log_id: inLogId || outLogId || 'group_' + editData.id,
-          nik: editData.nik,
-          name: editData.name,
-          nama_kebun: editData.nama_kebun || user?.kebun || '-',
-          requested_by: user?.username || 'admin',
-          requested_at: new Date().toISOString(),
-          status: 'APPROVED', // Pre-approved
-          old_value: { 
-            checkIn: editData.checkIn, 
-            checkOut: editData.checkOut, 
-            keterangan: editData.keterangan,
-            inLogId,
-            outLogId
-          },
-          new_value: { 
-            checkIn: editData.editCheckIn, 
-            checkOut: editData.editCheckOut, 
-            keterangan: editData.editKeterangan,
-            inLogId,
-            outLogId
-          }
-        };
-        await db.attendance_requests.put({ ...reqPayload, is_synced: false });
-      };
-
-      if (!navigator.onLine) {
-        // Mode Offline
-        let needsQueueEdit = false;
-
-        if (editData.inLog && editData.editCheckIn) {
-          const oldDate = new Date(editData.inLog.timestamp);
-          const [hours, minutes, seconds] = editData.editCheckIn.split(':');
-          oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
-          let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
-          newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
-
-          const localLogs = await db.attendance_logs.toArray();
-          const found = localLogs.find(l => String(l.id) === String(editData.inLog.id));
-          if (found) {
-            found.timestamp = oldDate.toISOString();
-            found.status = newStatus;
-            await db.attendance_logs.put(found);
-            
-            // Perbaikan Offline Edit: Jika ini log offline, ubah juga payload di antrean
-            if (String(found.id).startsWith('offline_')) {
-              const rawQueueId = String(found.id).replace('offline_', '');
-              const queuedLog = await db.attendance_sync_queue.get(rawQueueId);
-              if (queuedLog) {
-                queuedLog.timestamp = oldDate.toISOString();
-                queuedLog.status = newStatus;
-                await db.attendance_sync_queue.put(queuedLog);
-              }
-            } else {
-              needsQueueEdit = true;
-            }
-          }
-        }
-
-        if (editData.outLog && editData.editCheckOut) {
-          const oldDate = new Date(editData.outLog.timestamp);
-          const [hours, minutes, seconds] = editData.editCheckOut.split(':');
-          oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
-          let newStatus = editData.editKeterangan === 'Hadir' ? 'Hadir (Verified)' : editData.editKeterangan;
-          newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
-
-          const localLogs = await db.attendance_logs.toArray();
-          const found = localLogs.find(l => String(l.id) === String(editData.outLog.id));
-          if (found) {
-            found.timestamp = oldDate.toISOString();
-            found.status = newStatus;
-            await db.attendance_logs.put(found);
-            
-            // Perbaikan Offline Edit: Jika ini log offline, ubah juga payload di antrean
-            if (String(found.id).startsWith('offline_')) {
-              const rawQueueId = String(found.id).replace('offline_', '');
-              const queuedLog = await db.attendance_sync_queue.get(rawQueueId);
-              if (queuedLog) {
-                queuedLog.timestamp = oldDate.toISOString();
-                queuedLog.status = newStatus;
-                await db.attendance_sync_queue.put(queuedLog);
-              }
-            } else {
-              needsQueueEdit = true;
-            }
-          }
-        }
-
-        if (needsQueueEdit) {
-          await queueOfflineEdit();
-        }
-        showToast('Offline Mode', 'Perubahan absensi disimpan ke antrean lokal.', 'warning');
-        setIsEditModalOpen(false);
-        refreshLogs();
-        return;
-      }
 
       // Mode Online: Langsung ke Supabase
       if (editData.inLog && editData.editCheckIn) {
@@ -670,20 +575,22 @@ export default function TabAttendanceLogs({
           status: newStatus
         }).eq('id', editData.inLog.id);
 
-        if (!error) {
-          try {
-            const localLogs = await db.attendance_logs.toArray();
-            const found = localLogs.find(l => String(l.id) === String(editData.inLog.id));
-            if (found) {
-              found.timestamp = oldDate.toISOString();
-              found.status = newStatus;
-              await db.attendance_logs.put(found);
-            }
-          } catch (dbErr) {
-            console.warn('[Local Database] Failed to update edited inLog locally:', dbErr);
+        if (error) {
+          showToast('Gagal Update', `Server error: ${error.message}`, 'error');
+          return;
+        }
+
+        try {
+          const { db } = await import('../db');
+          const localLogs = await db.attendance_logs.toArray();
+          const found = localLogs.find(l => String(l.id) === String(editData.inLog.id));
+          if (found) {
+            found.timestamp = oldDate.toISOString();
+            found.status = newStatus;
+            await db.attendance_logs.put(found);
           }
-        } else {
-          success = false;
+        } catch (dbErr) {
+          console.warn('[Local Database] Failed to update edited inLog locally:', dbErr);
         }
       }
 
@@ -726,6 +633,8 @@ export default function TabAttendanceLogs({
       }
     } catch (err) {
       showToast('Error', err.message, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -962,149 +871,71 @@ export default function TabAttendanceLogs({
   };
 
   return (
-    <div className="glass-card print-area" style={{ padding: 0, overflow: 'hidden' }}>
-      {/* Table & Print Styles */}
+    <>
+    <div className="print-area" style={{ overflow: 'hidden' }}>
       <style>{`
-        .freeze-table-header th, 
-        .freeze-table-header td,
-        .freeze-table-header th *,
-        .freeze-table-header td * {
-          font-family: Arial, Helvetica, sans-serif !important;
-          font-size: 14px !important;
-          text-align: center !important;
+        .enterprise-table thead th,
+        .enterprise-table thead th * {
+          font-family: inherit !important;
+          font-size: 0.72rem !important;
+          text-align: left !important;
           vertical-align: middle !important;
         }
 
-        .freeze-table-header th {
-          position: sticky !important;
-          top: 0 !important;
-          background-color: #46bdc6 !important;
-          color: #ffffff !important;
-          font-weight: bold !important;
-          z-index: 5 !important;
-          text-transform: uppercase !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        
         @media print {
-          body * {
-            visibility: hidden;
-          }
-          .print-area, .print-area * {
-            visibility: visible;
-          }
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
           .print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: none !important;
-            box-shadow: none !important;
+            position: absolute; left: 0; top: 0;
+            width: 100% !important; max-width: 100% !important;
+            margin: 0 !important; padding: 0 !important;
+            border: none !important; box-shadow: none !important;
           }
-          .no-print {
-            display: none !important;
-          }
-          .table-container {
-            max-height: none !important;
-            overflow: visible !important;
-            height: auto !important;
-          }
-          .freeze-table-header th {
-            background-color: #46bdc6 !important;
-            color: #ffffff !important;
+          .no-print { display: none !important; }
+          .table-container { max-height: none !important; overflow: visible !important; height: auto !important; }
+          .enterprise-table thead th {
+            background-color: #e2e8f0 !important;
+            color: #475569 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .freeze-table-header th, 
-          .freeze-table-header td,
-          .freeze-table-header th *,
-          .freeze-table-header td * {
-            font-family: 'Consolas', Courier, monospace !important;
-            font-size: 14px !important;
-            text-align: center !important;
-            vertical-align: middle !important;
-            white-space: normal !important;
-            word-break: break-word !important;
-          }
-          table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-          }
-          tr {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          thead {
-            display: table-header-group !important;
-          }
-          @page {
-            size: landscape;
-            margin: 10mm;
-          }
+          table { width: 100% !important; border-collapse: collapse !important; }
+          tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+          thead { display: table-header-group !important; }
+          @page { size: landscape; margin: 10mm; }
         }
       `}</style>
 
-      {/* Header & Toolbar */}
-      <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              Riwayat Log Absensi Biometrik
-            </h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Pencatatan data gabungan absensi harian karyawan.
-            </p>
+      <div className="page-layout">
+
+        {/* Page Header */}
+        <div className="page-layout-header no-print">
+          <div className="page-layout-title-block">
+            <span className="page-layout-eyebrow">Kehadiran</span>
+            <h1 className="page-layout-h1">Riwayat Log Absensi Biometrik</h1>
+            <p className="page-layout-subtitle">Pencatatan data gabungan absensi harian karyawan.</p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }} className="no-print">
-            <button className="btn-action edit" onClick={exportToCSV} style={{ padding: '8px 14px' }}>
-              <FileSpreadsheet size={16} /> Export Excel
+          <div className="toolbar-action-group">
+            <button className="btn-outline-action" onClick={exportToCSV}>
+              <FileSpreadsheet size={15} color="#107C41" /> Export Excel
             </button>
-            <button className="btn-action delete" onClick={exportToPDF} style={{ padding: '8px 14px', background: 'var(--accent-primary)', color: '#fff', border: 'none' }}>
-              <FileDown size={16} /> Export PDF
+            <button className="btn-outline-action" onClick={exportToPDF}>
+              <FileDown size={15} color="#E81123" /> Export PDF
             </button>
           </div>
         </div>
 
-        {/* HQ ADMIN TABS */}
+        {/* HQ Admin Tab switcher */}
         {user?.role === 'headoffice_admin' && (
-          <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }} className="no-print">
+          <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }} className="no-print">
             <button
               onClick={() => setActiveTab('logs')}
-              style={{
-                background: activeTab === 'logs' ? 'var(--accent-primary)' : 'transparent',
-                color: activeTab === 'logs' ? '#fff' : 'var(--text-muted)',
-                border: activeTab === 'logs' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                padding: '6px 16px',
-                borderRadius: '6px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-            >
+              style={{ background: activeTab === 'logs' ? 'var(--accent-primary)' : 'transparent', color: activeTab === 'logs' ? '#fff' : 'var(--text-muted)', border: activeTab === 'logs' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)', padding: '6px 16px', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s ease' }}>
               Riwayat Log Absensi
             </button>
             <button
               onClick={() => setActiveTab('requests')}
-              style={{
-                background: activeTab === 'requests' ? 'var(--accent-primary)' : 'transparent',
-                color: activeTab === 'requests' ? '#fff' : 'var(--text-muted)',
-                border: activeTab === 'requests' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                padding: '6px 16px',
-                borderRadius: '6px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
+              style={{ background: activeTab === 'requests' ? 'var(--accent-primary)' : 'transparent', color: activeTab === 'requests' ? '#fff' : 'var(--text-muted)', border: activeTab === 'requests' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)', padding: '6px 16px', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s ease', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               Persetujuan Edit/Hapus
               {approvalRequests.filter(r => r.status === 'PENDING').length > 0 && (
                 <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.7rem', padding: '1px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
@@ -1115,58 +946,47 @@ export default function TabAttendanceLogs({
           </div>
         )}
 
-        {/* Search & Filters */}
-        <div className="no-print" style={{ display: 'flex', gap: '12px', alignItems: 'center', background: 'var(--bg-input)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 200px', minWidth: '200px' }}>
-            <Search size={18} color="var(--text-muted)" />
-            <input
-              type="text"
-              placeholder="Cari berdasarkan Nama atau NIK..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ border: 'none', background: 'transparent', color: 'var(--text-main)', width: '100%', outline: 'none', fontSize: '0.9rem' }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {/* Card 1: Filter */}
+        <div className="toolbar-card no-print">
+          <div className="filter-bar">
+            <div className="filter-bar-search">
+              <Search size={16} color="var(--text-muted)" />
+              <input
+                type="text"
+                placeholder="Cari berdasarkan Nama atau NIK..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
             <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
-            <select
-              value={filterKebun}
-              onChange={(e) => setFilterKebun(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            >
-              <option value="" style={{ color: '#000' }}>Filter Kebun (Semua)</option>
-              {uniqueKebuns.map(k => (
-                <option key={k} value={k} style={{ color: '#000' }}>{k}</option>
-              ))}
+            <select value={filterKebun} onChange={(e) => setFilterKebun(e.target.value)}>
+              <option value="">Filter Kebun (Semua)</option>
+              {uniqueKebuns.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
-            <select
-              value={filterAfdeling}
-              onChange={(e) => setFilterAfdeling(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'inherit' }}
-            >
-              <option value="" style={{ color: '#000' }}>Filter Afdeling (Semua)</option>
-              {uniqueAfdelings.map(a => (
-                <option key={a} value={a} style={{ color: '#000' }}>{a}</option>
-              ))}
+            <select value={filterAfdeling} onChange={(e) => setFilterAfdeling(e.target.value)}>
+              <option value="">Filter Afdeling (Semua)</option>
+              {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
         </div>
-      </div>
 
-      {/* Table & Requests Tabs conditional rendering */}
+        {/* Card 2: Table */}
+        <div className="table-card">
+
+
       {activeTab === 'logs' ? (
         <>
           <div className="table-container" style={{ marginTop: 0, maxHeight: '550px', overflowY: 'auto', position: 'relative' }}>
-          <Table className="freeze-table-header compact-mobile-table">
+          <Table className="enterprise-table compact-mobile-table">
             <TableHeader>
               <TableRow>
                 <TableHead style={{ width: '50px', textAlign: 'center' }}>No.</TableHead>
                 <TableHead>Tanggal</TableHead>
-                <TableHead>Check In</TableHead>
                 <TableHead>NIK</TableHead>
                 <TableHead>Nama Karyawan</TableHead>
                 <TableHead>Nama Kebun</TableHead>
                 <TableHead>Afdeling</TableHead>
+                <TableHead>Check In</TableHead>
                 <TableHead>Check Out</TableHead>
                 <TableHead>Durasi</TableHead>
                 <TableHead>Keterangan</TableHead>
@@ -1186,7 +1006,6 @@ export default function TabAttendanceLogs({
                   <TableRow key={log.id}>
                     <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
                     <TableCell data-label="Tanggal" style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
-                    <TableCell data-label="Check In" style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                     <TableCell data-label="NIK" className="nik-cell">{log.nik}</TableCell>
                     <TableCell data-label="Nama Karyawan">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1231,6 +1050,7 @@ export default function TabAttendanceLogs({
                     </TableCell>
                     <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
                     <TableCell data-label="Afdeling" style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
+                    <TableCell data-label="Check In" style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit' }}>{log.checkIn}</TableCell>
                     <TableCell data-label="Check Out" style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit' }}>{log.checkOut}</TableCell>
                     <TableCell data-label="Durasi">
                       {log.durasi ? (
@@ -1359,7 +1179,7 @@ export default function TabAttendanceLogs({
               Memuat data request persetujuan...
             </div>
           ) : (
-            <Table className="freeze-table-header compact-mobile-table">
+            <Table className="enterprise-table compact-mobile-table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Tipe Request</TableHead>
@@ -1475,6 +1295,9 @@ export default function TabAttendanceLogs({
         </div>
       )}
 
+        </div>
+      </div>
+
       {/* EDIT MODAL */}
       {isEditModalOpen && editData && (() => {
         const isExpired = (() => {
@@ -1564,12 +1387,15 @@ export default function TabAttendanceLogs({
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
                 <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>Batal</button>
-                <button type="button" className="btn btn-primary" onClick={saveEdit} disabled={isExpired}>Simpan Perubahan</button>
+                <button type="button" className="btn btn-primary" onClick={saveEdit} disabled={isExpired || isSaving}>
+                  {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
               </div>
             </div>
           </div>
         );
       })()}
     </div>
+    </>
   );
 }

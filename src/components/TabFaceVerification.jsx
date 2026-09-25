@@ -969,10 +969,7 @@ export default function TabFaceVerification({
     // ketika wajah sudah stabil dan liveness sudah terverifikasi.
     // CATATAN: isDescLoaded check dihapus — human.models tidak mengekspos properti .description/.faceres
     // secara langsung di Human.js v3. modelsLoaded (dari App.jsx) adalah satu-satunya sumber kebenaran.
-    const shouldExtractEmbedding = livenessVerifiedRef.current && isStableRef.current;
-    if (human.config?.face?.description) {
-      human.config.face.description.enabled = shouldExtractEmbedding && modelsLoaded;
-    }
+    // Dihapus mutasi dinamis human.config karena menyebabkan error WebGL inputNodes.
 
     try {
       // Gunakan croppedCanvas untuk kompatibilitas stabil di WebView Android (menghindari WebGL context loss)
