@@ -157,15 +157,12 @@
   --sidebar-ring: #cbd5e1;
 }
 
-/* Base Reset */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  font-family: 'Inter', Roboto, sans-serif;
-  -webkit-tap-highlight-color: transparent;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-hover) transparent;
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-hover) transparent;
+  }
 }
 
 /* ==========================================================
@@ -208,16 +205,19 @@
   background: var(--text-muted);
 }
 
-body {
-  background-color: var(--bg-primary);
-  color: var(--text-main);
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  transition: background-color 0.3s ease, color 0.3s ease;
-  -webkit-font-smoothing: antialiased;
-  max-width: 100vw;
-  overflow-x: hidden;
+@layer base {
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    -webkit-font-smoothing: antialiased;
+    max-width: 100vw;
+    overflow-x: hidden;
+    font-family: 'Inter', Roboto, sans-serif;
+  }
 }
 
 /* ============================================
@@ -505,33 +505,38 @@ main {
   margin-bottom: 1.25rem;
 }
 
-label {
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  margin-bottom: 6px;
+@layer base {
+  label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  input[type="text"],
+  select {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  input[type="text"]:focus,
+  select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  }
+}
+
+.label-caps {
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-input[type="text"],
-select {
-  width: 100%;
-  padding: 12px 14px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--text-main);
-  font-size: 0.95rem;
-  outline: none;
-  transition: all 0.2s ease;
-}
-
-input[type="text"]:focus,
-select:focus {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
 }
 
 /* Camera Stream Container */
