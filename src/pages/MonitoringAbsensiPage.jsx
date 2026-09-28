@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, ArrowRight } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown, ArrowRight } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -8,21 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import {
-  DateSelector,
-  formatDateValue,
-  INDONESIAN_DATE_SELECTOR_I18N,
-} from "../components/reui/date-selector";
-import { Button } from "../components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../components/ui/dialog";
+import { PeriodePicker } from "../components/PeriodePicker";
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -45,57 +31,22 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
   
-  // Default to current month
-  const today = new Date();
-  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
 
-  // ReUI DateSelector Dialog States
-  const [isDateDialogOpen, setIsDateDialogOpen] = useState(false);
-  const [dateSelectorValue, setDateSelectorValue] = useState({
-    period: 'month',
-    operator: 'is',
-    year: today.getFullYear(),
-    month: today.getMonth() // 0-indexed for DateSelector
-  });
-  const [internalDateValue, setInternalDateValue] = useState(dateSelectorValue);
+  // Periode state — single source of truth: { month: 0-11, year: number }
+  const today = new Date();
+  const [periode, setPeriode] = useState({ month: today.getMonth(), year: today.getFullYear() });
+
+  // Derive selectedMonth string (YYYY-MM) from periode for table logic
+  const selectedMonth = `${periode.year}-${String(periode.month + 1).padStart(2, '0')}`;
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
 
-  // Sync internalValue when dialog opens
-  useEffect(() => {
-    if (isDateDialogOpen) {
-      setInternalDateValue(dateSelectorValue);
-    }
-  }, [isDateDialogOpen, dateSelectorValue]);
-
-  // Handle Apply button click in ReUI DateSelector Dialog
-  const handleApplyDateSelector = () => {
-    if (internalDateValue) {
-      setDateSelectorValue(internalDateValue);
-
-      // Extract Year and Month from internalDateValue
-      let targetYear = today.getFullYear();
-      let targetMonth = today.getMonth() + 1;
-
-      if (internalDateValue.period === 'month') {
-        if (internalDateValue.year !== undefined) targetYear = internalDateValue.year;
-        if (internalDateValue.month !== undefined) targetMonth = internalDateValue.month + 1; // Convert 0-indexed to 1-indexed
-      } else if (internalDateValue.startDate) {
-        targetYear = internalDateValue.startDate.getFullYear();
-        targetMonth = internalDateValue.startDate.getMonth() + 1;
-      } else if (internalDateValue.year !== undefined) {
-        targetYear = internalDateValue.year;
-        targetMonth = (internalDateValue.month !== undefined) ? internalDateValue.month + 1 : 1;
-      }
-
-      const formattedMonthStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
-      setSelectedMonth(formattedMonthStr);
-      setCurrentPage(1);
-    }
-    setIsDateDialogOpen(false);
+  const handleApplyPeriode = (p) => {
+    setPeriode(p);
+    setCurrentPage(1);
   };
+
 
   // Safely extract unique Kebuns (Sorted A-Z)
   const uniqueKebuns = useMemo(() => {
@@ -202,19 +153,6 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
     setCurrentPage(1);
   };
 
-  const getSelectedMonthLabel = () => {
-    const formatted = formatDateValue(dateSelectorValue, INDONESIAN_DATE_SELECTOR_I18N);
-    if (formatted) return formatted;
-
-    if (!selectedMonth) return 'Pilih Bulan';
-    const [yStr, mStr] = selectedMonth.split('-');
-    const mIdx = parseInt(mStr, 10) - 1;
-    if (mIdx >= 0 && mIdx < 12) {
-      return `${MONTH_NAMES[mIdx]} ${yStr}`;
-    }
-    return selectedMonth;
-  };
-
   return (
     <div className="w-full h-full p-0 flex flex-col page-container--logs">
       {/* Scoped Styles for Mobile Reflow & Sticky Column Optimization */}
@@ -316,54 +254,21 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
         }
       `}</style>
 
-      {/* CARD 1: NAVBAR & FILTERS */}
-      <div className="bg-[var(--bg-card)] border-b sm:border border-[var(--border-color)] sm:rounded-md shadow-sm no-print mb-4 p-4 sm:p-6" style={{ margin: '0 0 16px 0' }}>
-        <div className="flex flex-col gap-1 mb-4">
-          <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase">KEHADIRAN</span>
-          <h2 className="text-xl font-black text-[var(--text-main)] m-0">
-            Monitoring Perhari Absensi
-          </h2>
-          <p className="text-sm text-[var(--text-muted)] opacity-80 m-0">
-            Pantau kehadiran karyawan setiap hari berdasarkan bulan yang dipilih.
-          </p>
-        </div>
-        
-        {/* Filter Toolbar Container */}
-        <div className="flex flex-wrap items-center gap-3">
+      {/* PAGE HEADER: OUTSIDE CARD, NO BORDER */}
+      <div className="no-print mb-4 sm:mb-5 px-1">
+        <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase block mb-1">KEHADIRAN</span>
+        <h2 className="text-xl sm:text-2xl font-black text-[var(--text-main)] m-0 leading-tight">
+          Monitoring Perhari Absensi
+        </h2>
+      </div>
+
+      {/* UNIFIED MAIN CARD: TOOLBAR + TABLE MATRIX + LEGEND */}
+      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] sm:rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col" style={{ padding: 0 }}>
+        {/* Top Filter Toolbar Header inside Unified Card */}
+        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-card-solid)] flex flex-wrap items-center gap-3 no-print">
           
-          {/* 1. ReUI DateSelector Dialog Pattern (c-date-selector-3) */}
-          <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-none">
-            <Dialog open={isDateDialogOpen} onOpenChange={setIsDateDialogOpen}>
-              <DialogTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    className="w-full md:w-auto justify-start font-semibold border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--bg-hover)] shadow-xs text-sm py-2 px-3 flex items-center gap-2"
-                  >
-                    <CalendarIcon className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
-                    <span className="whitespace-nowrap">{getSelectedMonthLabel()}</span>
-                  </Button>
-                }
-              />
-              <DialogContent className="sm:max-w-lg bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-main)]" showCloseButton={false}>
-                <DialogHeader>
-                  <DialogTitle className="text-lg font-bold text-[var(--text-main)]">Pilih Periode Absensi</DialogTitle>
-                </DialogHeader>
-
-                <DateSelector
-                  value={internalDateValue}
-                  onChange={setInternalDateValue}
-                  showInput={true}
-                  i18n={INDONESIAN_DATE_SELECTOR_I18N}
-                />
-
-                <DialogFooter className="mt-4 gap-2 flex justify-end">
-                  <DialogClose render={<Button variant="outline" className="border-[var(--border-color)] text-[var(--text-main)]">Batal</Button>} />
-                  <Button onClick={handleApplyDateSelector} className="bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-primary-hover)]">Terapkan</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
+          {/* 1. PeriodePicker — Dialog + native select Bulan & Tahun */}
+          <PeriodePicker value={periode} onApply={handleApplyPeriode} />
 
           {/* 2. Search Input */}
           <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-1 min-w-[200px]">
@@ -373,7 +278,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
               placeholder="Cari NIK, Nama..."
               value={searchQuery}
               onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
-              className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
+              className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
             />
           </div>
 
@@ -383,7 +288,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
             <select
               value={filterKebun}
               onChange={(e) => handleFilterChange(setFilterKebun, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
             >
               <option value="">Semua Kebun</option>
               {uniqueKebuns.map(k => (
@@ -399,7 +304,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
             <select
               value={filterAfdeling}
               onChange={(e) => handleFilterChange(setFilterAfdeling, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
             >
               <option value="">Semua Afdeling</option>
               {uniqueAfdelings.map(a => (
@@ -410,11 +315,8 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           </div>
 
         </div>
-      </div>
 
-      {/* CARD 2: MAIN TABLE GRID */}
-      <div className="bg-[var(--bg-card)] sm:border border-[var(--border-color)] sm:rounded-md shadow-sm overflow-hidden flex-1" style={{ padding: 0 }}>
-        <div className="w-full overflow-x-auto relative" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="w-full overflow-x-auto relative flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
           <Table className="monitoring-table-grid compact-mobile-table">
             <TableHeader>
               <TableRow className="border-b border-[var(--border-color)] bg-[var(--bg-card-solid)]">
