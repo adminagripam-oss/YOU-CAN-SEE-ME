@@ -29,4 +29,9 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1600,
   },
+  test: {
+    environment: 'node',
+    globals: true,
+    include: ['src/**/*.test.{js,jsx,ts,tsx}'],
+  },
 });

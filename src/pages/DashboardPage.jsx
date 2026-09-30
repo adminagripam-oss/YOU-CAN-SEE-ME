@@ -100,21 +100,27 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       const merged = [...new Set([...dynamicKebuns, ...allowed])];
       merged.sort();
       return merged;
+    } else if (user?.role === 'estate_admin' && user?.kebun) {
+      return [user.kebun];
     }
     dynamicKebuns.sort();
     return dynamicKebuns;
   }, [employees, user, allKebunsFromCSV]);
 
-  // Filter employees based on selected kebun
+  // Filter employees based on selected kebun & user authorization
   const filteredEmployees = useMemo(() => {
+    if (user?.role === 'estate_admin' && user?.kebun) {
+      return employees.filter(e => e.nama_kebun === user.kebun);
+    }
     if (!selectedKebun || selectedKebun === 'All') return employees;
     return employees.filter(e => e.nama_kebun === selectedKebun);
-  }, [employees, selectedKebun]);
+  }, [employees, selectedKebun, user]);
 
   const totalEmployees = filteredEmployees.length || 0;
 
-  // Filter logs dynamically based on dateRange and selectedKebun
+  // Filter logs dynamically based on dateRange, role, and selectedKebun
   const filteredLogs = useMemo(() => {
+    const targetKebun = user?.role === 'estate_admin' ? user?.kebun : selectedKebun;
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
 
@@ -130,15 +136,15 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         if (logDateStr !== dateRange.start) return false;
       }
 
-      // Filter by selected kebun
-      if (selectedKebun && selectedKebun !== 'All') {
+      // Filter by selected kebun / target kebun
+      if (targetKebun && targetKebun !== 'All') {
         const empIdStr = String(l.employee_id);
         const nikStr = String(l.nik);
         return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
       }
       return true;
     });
-  }, [logs, dateRange, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, user, filteredEmployees]);
 
   const isReadOnlyMonitor = user?.role === 'regional_admin' || user?.role === 'headoffice_admin';
 
@@ -207,7 +213,10 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
   // Grouping data by kebun (for Regional & Head Office dashboards)
   const kebunSummary = useMemo(() => {
-    const listToUse = availableKebuns.length > 0 ? availableKebuns : allKebunsFromCSV;
+    let listToUse = availableKebuns.length > 0 ? availableKebuns : allKebunsFromCSV;
+    if (user?.role === 'estate_admin' && user?.kebun) {
+      listToUse = [user.kebun];
+    }
 
     return listToUse.map(kebunName => {
       const kebunEmployees = employees.filter(e => e.nama_kebun === kebunName);
@@ -229,7 +238,17 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
         percentage: percent
       };
     }).sort((a, b) => b.hadirCount - a.hadirCount || b.totalEmployees - a.totalEmployees);
-  }, [availableKebuns, allKebunsFromCSV, employees, groupedLogs]);
+  }, [availableKebuns, allKebunsFromCSV, employees, groupedLogs, user]);
+
+  const barChartTitle = useMemo(() => {
+    if (user?.role === 'estate_admin' && user?.kebun) {
+      return `TK ${user.kebun}`;
+    }
+    if (selectedKebun && selectedKebun !== 'All') {
+      return `TK ${selectedKebun}`;
+    }
+    return 'TK All Kebun';
+  }, [user, selectedKebun]);
 
   // Grouping data by date for trend chart (dynamic based on dateRange)
   const trendChartData = useMemo(() => {
@@ -774,6 +793,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           <KebunAttendanceBarChart
             kebunSummary={kebunSummary}
             dateStr={dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} s/d ${dateRange.end}`}
+            title={barChartTitle}
           />
         </div>
       </div>

@@ -1,17 +1,18 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import DynamicBreadcrumb from './DynamicBreadcrumb';
 import {
   Sun,
   Moon,
-  Wifi,
   WifiOff,
   CloudUpload,
   CloudDownload,
   Loader2,
   TriangleAlert,
 } from 'lucide-react';
+
 
 export default function Topbar({
   theme,
@@ -26,6 +27,7 @@ export default function Topbar({
   hasOTAUpdate,
 }) {
   const { user } = useAuth();
+  const isOnlineLocal = useOnlineStatus();
 
   return (
     <header
@@ -57,8 +59,16 @@ export default function Topbar({
         {/* Thin vertical separator */}
         <span className="topbar-sep" aria-hidden="true" />
 
-        {/* Dynamic Breadcrumb (always visible, reads React Router location) */}
+        {/* Dynamic Breadcrumb */}
         <DynamicBreadcrumb />
+
+        {/* Offline indicator — only visible when offline */}
+        {!isOnlineLocal && (
+          <span className="topbar-offline-badge" role="status" aria-live="polite">
+            <WifiOff size={12} aria-hidden="true" />
+            Offline
+          </span>
+        )}
 
         {/* Pending Sync Badge */}
         {unsyncedCount > 0 && (

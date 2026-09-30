@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown, ArrowRight } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { PeriodePicker } from "../components/PeriodePicker";
+import { STATUS, STATUS_ORDER, getStatus, resolveLogStatus, mergeStatus } from '../utils/attendanceStatus';
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -26,11 +27,75 @@ const getLogDateInfo = (ts) => {
   return { year: y, month: m, day, yearMonthStr: `${y}-${m}` };
 };
 
+function StatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)]">
+      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Keterangan</span>
+      {STATUS_ORDER.map((k) => {
+        const s = STATUS[k];
+        return (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            <span
+              style={{
+                display: 'inline-flex',
+                width: '22px',
+                height: '22px',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px',
+                fontSize: '9px',
+                fontWeight: 700,
+                backgroundColor: s.bg,
+                color: s.fg,
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              {s.short}
+            </span>
+            <span className="text-xs text-[var(--text-main)] font-medium">
+              {s.label}
+            </span>
+          </span>
+        );
+      })}
+      <span className="ml-auto text-[11px] text-[var(--text-muted)] font-medium whitespace-nowrap">
+        Geser ke kanan untuk tanggal lainnya →
+      </span>
+    </div>
+  );
+}
+
+function AttendanceCell({ code, dateLabel, nama }) {
+  const s = getStatus(code);
+  return (
+    <span
+      title={`${nama} \u00B7 ${dateLabel} \u00B7 ${s.label}`}
+      style={{
+        display: 'inline-flex',
+        width: '28px',
+        height: '28px',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: '5px',
+        fontSize: '10px',
+        fontWeight: 700,
+        backgroundColor: s.bg,
+        color: s.fg,
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      {s.short}
+    </span>
+  );
+}
+
 export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
-  
+
 
   // Periode state — single source of truth: { month: 0-11, year: number }
   const today = new Date();
@@ -79,33 +144,35 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
     if (!selectedMonth) return [];
 
     const attendanceMap = {};
-    
+
     safeLogs.forEach(log => {
       if (!log) return;
       const dateInfo = getLogDateInfo(log.timestamp);
       if (!dateInfo || dateInfo.yearMonthStr !== selectedMonth) return;
 
+      const incoming = resolveLogStatus(log.status);
       const keys = [log.employee_id, log.nik].filter(Boolean);
       keys.forEach(k => {
-        if (!attendanceMap[k]) {
-          attendanceMap[k] = new Set();
-        }
-        attendanceMap[k].add(dateInfo.day);
+        if (!attendanceMap[k]) attendanceMap[k] = {};
+        const { day } = dateInfo;
+        attendanceMap[k][day] = attendanceMap[k][day]
+          ? mergeStatus(attendanceMap[k][day], incoming)
+          : incoming;
       });
     });
 
     return safeEmployees.map(emp => {
       if (!emp) return null;
-      
-      const empSet = (
+
+      const empDays = (
         (emp.id && attendanceMap[emp.id]) ||
         (emp.nik && attendanceMap[emp.nik]) ||
-        new Set()
+        {}
       );
 
       const attendanceRecord = {};
       daysInMonth.forEach(day => {
-        attendanceRecord[day] = empSet.has(day) ? 'Hadir' : '';
+        attendanceRecord[day] = empDays[day] || 'NONE';
       });
 
       return {
@@ -266,7 +333,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
       <div className="bg-[var(--bg-card)] border border-[var(--border-color)] sm:rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col" style={{ padding: 0 }}>
         {/* Top Filter Toolbar Header inside Unified Card */}
         <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-card-solid)] flex flex-wrap items-center gap-3 no-print">
-          
+
           {/* 1. PeriodePicker — Dialog + native select Bulan & Tahun */}
           <PeriodePicker value={periode} onApply={handleApplyPeriode} />
 
@@ -340,15 +407,17 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                   AFDELING
                 </TableHead>
 
-                {/* Dynamic Month Days Columns (1 to 28..31) */}
-                {daysInMonth.map(day => (
-                  <TableHead
-                    key={day}
-                    className="w-[36px] min-w-[36px] text-center px-1 py-3 text-[11px] font-bold text-[var(--text-muted)] border-r border-[var(--border-color)]"
-                  >
-                    {day}
-                  </TableHead>
-                ))}
+                {daysInMonth.map(day => {
+                  const isSun = new Date(periode.year, periode.month, day).getDay() === 0;
+                  return (
+                    <TableHead
+                      key={day}
+                      className={`w-[36px] min-w-[36px] text-center px-[2px] py-3 text-[11px] font-bold ${isSun ? 'text-[var(--text-muted)] opacity-40' : 'text-[var(--text-muted)]'}`}
+                    >
+                      {day}
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
 
@@ -388,17 +457,17 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                       {row.afdeling}
                     </TableCell>
 
-                    {/* Dynamic Attendance Cells */}
                     {daysInMonth.map(day => (
                       <TableCell
                         key={day}
-                        className="text-center px-1 py-3 text-xs border-r border-[var(--border-color)]"
+                        className="p-[2px]"
+                        style={{ width: '36px', minWidth: '36px', textAlign: 'center' }}
                       >
-                        {row[day] === 'Hadir' ? (
-                          <span className="text-[var(--accent-success)] font-extrabold">H</span>
-                        ) : (
-                          <span className="text-[var(--text-muted)] opacity-35 font-normal">-</span>
-                        )}
+                        <AttendanceCell
+                          code={row[day]}
+                          dateLabel={`${day} ${MONTH_NAMES[periode.month]} ${periode.year}`}
+                          nama={row.name}
+                        />
                       </TableCell>
                     ))}
                   </TableRow>
@@ -408,25 +477,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           </Table>
         </div>
 
-        {/* Card 2 Bottom Bar: Shadcn-Style Legend Badges & Helper Indicator */}
-        <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)] gap-3">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--accent-success)]/10 text-[var(--accent-success)] border border-[var(--accent-success)]/25 text-xs font-bold shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-[var(--accent-success)]"></span>
-              <span className="font-extrabold">H</span>
-              <span className="text-[var(--text-main)] font-semibold ml-0.5">Hadir</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--bg-input)] text-[var(--text-muted)] border border-[var(--border-color)] text-xs font-medium shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] opacity-50"></span>
-              <span className="font-bold opacity-60">-</span>
-              <span className="text-[var(--text-muted)] font-normal ml-0.5">Tidak Ada Data</span>
-            </span>
-          </div>
-          <div className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] font-medium opacity-85 bg-[var(--bg-input)] px-3 py-1 rounded-full border border-[var(--border-color)] shadow-2xs">
-            <span>Geser ke kanan untuk melihat tanggal lainnya</span>
-            <ArrowRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-          </div>
-        </div>
+        <StatusLegend />
 
         {/* Standard UI Data Pagination */}
         {totalPages > 1 && (
@@ -447,11 +498,10 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                 <button
                   key={idx}
                   type="button"
-                  className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === idx + 1
+                  className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${currentPage === idx + 1
                       ? 'bg-[var(--accent-primary)] text-white shadow-xs'
                       : 'border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)]'
-                  }`}
+                    }`}
                   onClick={() => setCurrentPage(idx + 1)}
                 >
                   {idx + 1}
