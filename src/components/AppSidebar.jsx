@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { MENU, filterMenuByRole, findTrail } from '../config/menu';
@@ -56,20 +56,12 @@ function NavBadge({ count }) {
   );
 }
 
-function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNavClick }) {
+function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNavClick, open, onOpenChange }) {
   const Icon = getIcon(item.icon);
   const badgeCount = item.badgeKey ? (badges[item.badgeKey] ?? 0) : 0;
   const isChildActive = item.children.some(
     (c) => pathname === c.path || pathname.startsWith(c.path + '/')
   );
-
-  const [open, setOpen] = useState(isChildActive);
-
-  useEffect(() => {
-    if (isChildActive) {
-      setOpen(true);
-    }
-  }, [isChildActive]);
 
   // Collapsed desktop mode: flyout DropdownMenu
   if (isCollapsed && !isMobile) {
@@ -86,9 +78,12 @@ function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNav
                 <Icon className="size-4 shrink-0" />
                 {badgeCount > 0 && (
                   <span
-                    className="absolute top-1 right-1 size-2 rounded-full bg-red-500"
-                    aria-hidden="true"
-                  />
+                    className="absolute right-1 top-1 flex size-2"
+                    aria-label={`${badgeCount} menunggu`}
+                  >
+                    <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                  </span>
                 )}
               </SidebarMenuButton>
             )}
@@ -113,26 +108,31 @@ function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNav
 
   // Expanded / mobile: inline collapsible
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
+    <Collapsible open={open} onOpenChange={onOpenChange} className="group/collapsible">
       <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
         <CollapsibleTrigger asChild>
           <SidebarMenuButton tooltip={item.title} isActive={isChildActive}>
             <Icon className="size-4 shrink-0" />
             <span>{item.title}</span>
             {badgeCount > 0 && <NavBadge count={badgeCount} />}
-            <ChevronDown className="ml-auto size-4 shrink-0 text-sidebar-foreground/50 transition-transform duration-150 group-data-[state=open]/collapsible:rotate-180" />
+            <ChevronDown className="ml-auto size-4 shrink-0 text-sidebar-foreground/50 motion-safe:transition-transform motion-safe:duration-200 group-data-[state=open]/collapsible:rotate-180" />
           </SidebarMenuButton>
         </CollapsibleTrigger>
-        <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
+        <CollapsibleContent className="group-data-[collapsible=icon]:hidden overflow-hidden motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up">
           <SidebarMenuSub>
-            {item.children.map((child) => {
+            {item.children.map((child, i) => {
               const childBadge = child.badgeKey ? (badges[child.badgeKey] ?? 0) : 0;
               const isChildActiveSub = pathname === child.path;
               return (
-                <SidebarMenuSubItem key={child.path}>
+                <SidebarMenuSubItem
+                  key={child.path}
+                  className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:duration-200 motion-safe:fill-mode-both"
+                  style={{ animationDelay: `${i * 30}ms` }}
+                >
                   <SidebarMenuSubButton
                     render={<NavLink to={child.path} onClick={handleNavClick} />}
                     isActive={isChildActiveSub}
+                    className="relative before:absolute before:-left-[13px] before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-green-700 before:origin-center before:scale-y-0 data-[active=true]:before:scale-y-100 motion-safe:before:transition-transform motion-safe:before:duration-200"
                     style={isChildActiveSub ? {
                       backgroundColor: 'var(--sidebar-active-sub-bg)',
                       color: 'var(--sidebar-active-sub-fg)',
@@ -154,7 +154,7 @@ function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNav
 
 export function AppSidebar() {
   const { user, logout } = useAuth();
-  const { isMobile, setOpenMobile, state } = useSidebar();
+  const { isMobile, setOpenMobile, state, openMobile } = useSidebar();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const badges = useBadges(user?.role);
@@ -165,6 +165,27 @@ export function AppSidebar() {
     () => (user ? filterMenuByRole(MENU, user.role) : []),
     [user]
   );
+
+  const [openGroups, setOpenGroups] = useState({});
+  const isGroupOpen = (title) => openGroups[title] ?? true;
+  const setGroupOpen = (title, value) => {
+    setOpenGroups((prev) => ({ ...prev, [title]: value }));
+  };
+
+  const expanded = isMobile ? openMobile : state === 'expanded';
+  const wasExpanded = useRef(expanded);
+  useEffect(() => {
+    if (expanded && !wasExpanded.current) setOpenGroups({});
+    wasExpanded.current = expanded;
+  }, [expanded]);
+
+  useEffect(() => {
+    filteredMenu.forEach((item) => {
+      if (item.children?.some((c) => pathname === c.path || pathname.startsWith(c.path + '/'))) {
+        setGroupOpen(item.title, true);
+      }
+    });
+  }, [pathname]);
 
   const [forceLogoutOpen, setForceLogoutOpen] = useState(false);
   const [logoutBlockedMsg, setLogoutBlockedMsg] = useState('');
@@ -208,6 +229,8 @@ export function AppSidebar() {
           isMobile={isMobile}
           badges={badges}
           handleNavClick={handleNavClick}
+          open={isGroupOpen(item.title)}
+          onOpenChange={(v) => setGroupOpen(item.title, v)}
         />
       );
     }
@@ -226,9 +249,12 @@ export function AppSidebar() {
           {badgeCount > 0 && !isCollapsed && <NavBadge count={badgeCount} />}
           {badgeCount > 0 && isCollapsed && (
             <span
-              className="absolute top-1 right-1 size-2 rounded-full bg-red-500"
-              aria-hidden="true"
-            />
+              className="absolute right-1 top-1 flex size-2"
+              aria-label={`${badgeCount} menunggu`}
+            >
+              <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+              <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+            </span>
           )}
         </SidebarMenuButton>
       </SidebarMenuItem>
