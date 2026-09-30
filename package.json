@@ -1,12 +1,13 @@
 {
   "name": "agriface-biometric-attendance",
-  "version": "2.1.1",
+  "version": "2.1.4",
   "description": "AgriFace - Sistem Absensi Biometrik Wajah Perkebunan berbasis Metode 1-to-1 Verification & Offline-First PWA",
   "main": "server.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:prod": "vite build",
+    "test": "vitest run",
     "start": "node server.js",
     "server": "node server.js"
   },
@@ -54,6 +55,7 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.3",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "vitest": "^5.0.2"
   }
 }

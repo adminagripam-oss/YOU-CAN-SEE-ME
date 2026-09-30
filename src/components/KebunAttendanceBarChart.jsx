@@ -43,7 +43,8 @@ const CustomXAxisTick = (props) => {
   );
 };
 
-export function KebunAttendanceBarChart({ kebunSummary = [], dateStr }) {
+export function KebunAttendanceBarChart({ kebunSummary = [], dateStr, title }) {
+  const displayTitle = title || 'TK All Kebun';
   const [currentPage, setCurrentPage] = useState(0);
   const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
 
@@ -82,7 +83,7 @@ export function KebunAttendanceBarChart({ kebunSummary = [], dateStr }) {
     <Card className="flex flex-col w-full h-full border-none shadow-none bg-transparent" style={{ padding: 0, margin: 0 }}>
       <CardHeader className="items-center pb-0" style={{ padding: '0.75rem 1.25rem 0.25rem', marginBottom: '0.5rem', display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <CardTitle style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>TK All Kebun</CardTitle>
+          <CardTitle style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>{displayTitle}</CardTitle>
           <CardDescription style={{ fontSize: '0.8rem', fontWeight: 600, marginTop: '2px', textDecoration: 'underline' }}>
             {dateStr}
           </CardDescription>

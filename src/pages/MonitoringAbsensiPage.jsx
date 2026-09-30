@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -8,15 +8,12 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { PeriodePicker } from "../components/PeriodePicker";
+import { STATUS, STATUS_ORDER, getStatus, resolveLogStatus, mergeStatus } from '../utils/attendanceStatus';
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-];
-
-const MONTH_SHORT = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
-  'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
 ];
 
 // Helper parsing tanggal defensif dari null/undefined/string tidak teratur
@@ -30,48 +27,91 @@ const getLogDateInfo = (ts) => {
   return { year: y, month: m, day, yearMonthStr: `${y}-${m}` };
 };
 
+function StatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)]">
+      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Keterangan</span>
+      {STATUS_ORDER.map((k) => {
+        const s = STATUS[k];
+        return (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            <span
+              style={{
+                display: 'inline-flex',
+                width: '22px',
+                height: '22px',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px',
+                fontSize: '9px',
+                fontWeight: 700,
+                backgroundColor: s.bg,
+                color: s.fg,
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              {s.short}
+            </span>
+            <span className="text-xs text-[var(--text-main)] font-medium">
+              {s.label}
+            </span>
+          </span>
+        );
+      })}
+      <span className="ml-auto text-[11px] text-[var(--text-muted)] font-medium whitespace-nowrap">
+        Geser ke kanan untuk tanggal lainnya →
+      </span>
+    </div>
+  );
+}
+
+function AttendanceCell({ code, dateLabel, nama }) {
+  const s = getStatus(code);
+  return (
+    <span
+      title={`${nama} \u00B7 ${dateLabel} \u00B7 ${s.label}`}
+      style={{
+        display: 'inline-flex',
+        width: '28px',
+        height: '28px',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: '5px',
+        fontSize: '10px',
+        fontWeight: 700,
+        backgroundColor: s.bg,
+        color: s.fg,
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      {s.short}
+    </span>
+  );
+}
+
 export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
-  
-  // Default to current month
-  const today = new Date();
-  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
 
-  // Month Picker Popover State
-  const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
-  const [pickerYear, setPickerYear] = useState(() => {
-    const parts = defaultMonth.split('-');
-    return parseInt(parts[0], 10) || today.getFullYear();
-  });
-  const monthPickerRef = useRef(null);
+
+  // Periode state — single source of truth: { month: 0-11, year: number }
+  const today = new Date();
+  const [periode, setPeriode] = useState({ month: today.getMonth(), year: today.getFullYear() });
+
+  // Derive selectedMonth string (YYYY-MM) from periode for table logic
+  const selectedMonth = `${periode.year}-${String(periode.month + 1).padStart(2, '0')}`;
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
 
-  // Sync pickerYear when selectedMonth changes
-  useEffect(() => {
-    if (selectedMonth) {
-      const parts = selectedMonth.split('-');
-      const y = parseInt(parts[0], 10);
-      if (!isNaN(y)) setPickerYear(y);
-    }
-  }, [selectedMonth]);
+  const handleApplyPeriode = (p) => {
+    setPeriode(p);
+    setCurrentPage(1);
+  };
 
-  // Close Month Picker Popover when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (monthPickerRef.current && !monthPickerRef.current.contains(event.target)) {
-        setIsMonthPickerOpen(false);
-      }
-    };
-    if (isMonthPickerOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isMonthPickerOpen]);
 
   // Safely extract unique Kebuns (Sorted A-Z)
   const uniqueKebuns = useMemo(() => {
@@ -104,33 +144,35 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
     if (!selectedMonth) return [];
 
     const attendanceMap = {};
-    
+
     safeLogs.forEach(log => {
       if (!log) return;
       const dateInfo = getLogDateInfo(log.timestamp);
       if (!dateInfo || dateInfo.yearMonthStr !== selectedMonth) return;
 
+      const incoming = resolveLogStatus(log.status);
       const keys = [log.employee_id, log.nik].filter(Boolean);
       keys.forEach(k => {
-        if (!attendanceMap[k]) {
-          attendanceMap[k] = new Set();
-        }
-        attendanceMap[k].add(dateInfo.day);
+        if (!attendanceMap[k]) attendanceMap[k] = {};
+        const { day } = dateInfo;
+        attendanceMap[k][day] = attendanceMap[k][day]
+          ? mergeStatus(attendanceMap[k][day], incoming)
+          : incoming;
       });
     });
 
     return safeEmployees.map(emp => {
       if (!emp) return null;
-      
-      const empSet = (
+
+      const empDays = (
         (emp.id && attendanceMap[emp.id]) ||
         (emp.nik && attendanceMap[emp.nik]) ||
-        new Set()
+        {}
       );
 
       const attendanceRecord = {};
       daysInMonth.forEach(day => {
-        attendanceRecord[day] = empSet.has(day) ? 'Hadir' : '';
+        attendanceRecord[day] = empDays[day] || 'NONE';
       });
 
       return {
@@ -178,23 +220,8 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
     setCurrentPage(1);
   };
 
-  const getSelectedMonthLabel = () => {
-    if (!selectedMonth) return 'Pilih Bulan';
-    const [yStr, mStr] = selectedMonth.split('-');
-    const mIdx = parseInt(mStr, 10) - 1;
-    if (mIdx >= 0 && mIdx < 12) {
-      return `${MONTH_NAMES[mIdx]} ${yStr}`;
-    }
-    return selectedMonth;
-  };
-
-  const selectedMonthObj = useMemo(() => {
-    const [yStr, mStr] = selectedMonth.split('-');
-    return { year: parseInt(yStr, 10) || today.getFullYear(), month: parseInt(mStr, 10) || (today.getMonth() + 1) };
-  }, [selectedMonth]);
-
   return (
-    <div className="page-container page-container--logs">
+    <div className="w-full h-full p-0 flex flex-col page-container--logs">
       {/* Scoped Styles for Mobile Reflow & Sticky Column Optimization */}
       <style>{`
         :root, [data-theme="light"] {
@@ -294,89 +321,21 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
         }
       `}</style>
 
-      {/* CARD 1: NAVBAR & FILTERS */}
-      <div className="card-ui no-print" style={{ padding: '20px 24px' }}>
-        <div className="flex flex-col gap-1 mb-4">
-          <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase">KEHADIRAN</span>
-          <h2 className="card-ui__title text-xl font-black text-[var(--text-main)]" style={{ margin: 0 }}>
-            Monitoring Perhari Absensi
-          </h2>
-          <p className="card-ui__subtitle text-sm text-[var(--text-muted)] opacity-80" style={{ margin: 0 }}>
-            Pantau kehadiran karyawan setiap hari berdasarkan bulan yang dipilih.
-          </p>
-        </div>
-        
-        {/* Filter Toolbar Container */}
-        <div className="flex flex-wrap items-center gap-3">
-          
-          {/* 1. Month Picker Trigger & Popover */}
-          <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-none relative" ref={monthPickerRef}>
-            <button
-              type="button"
-              onClick={() => setIsMonthPickerOpen(!isMonthPickerOpen)}
-              className="w-full md:w-auto px-4 py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm font-semibold flex items-center justify-between md:justify-start gap-2 hover:border-[var(--accent-primary)] transition-all cursor-pointer shadow-xs whitespace-nowrap"
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              <div className="flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
-                <span className="font-semibold text-sm whitespace-nowrap">{getSelectedMonthLabel()}</span>
-              </div>
-              <ChevronDown className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0 ml-1" />
-            </button>
+      {/* PAGE HEADER: OUTSIDE CARD, NO BORDER */}
+      <div className="no-print mb-4 sm:mb-5 px-1">
+        <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase block mb-1">KEHADIRAN</span>
+        <h2 className="text-xl sm:text-2xl font-black text-[var(--text-main)] m-0 leading-tight">
+          Monitoring Perhari Absensi
+        </h2>
+      </div>
 
-            {/* Shadcn-Style Month Picker Popover */}
-            {isMonthPickerOpen && (
-              <div
-                className="absolute left-0 top-full mt-2 z-50 bg-[var(--bg-card-solid)] border border-[var(--border-color)] rounded-xl p-4 shadow-xl min-w-[280px]"
-                style={{ backdropFilter: 'blur(10px)' }}
-              >
-                {/* Year Navigation Header */}
-                <div className="flex items-center justify-between pb-3 mb-3 border-b border-[var(--border-color)]">
-                  <button
-                    type="button"
-                    onClick={() => setPickerYear(y => y - 1)}
-                    className="p-1 rounded-md border border-[var(--border-color)] hover:bg-[var(--bg-input)] text-[var(--text-main)] transition-colors cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="font-extrabold text-sm text-[var(--text-main)]">{pickerYear}</span>
-                  <button
-                    type="button"
-                    onClick={() => setPickerYear(y => y + 1)}
-                    className="p-1 rounded-md border border-[var(--border-color)] hover:bg-[var(--bg-input)] text-[var(--text-main)] transition-colors cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+      {/* UNIFIED MAIN CARD: TOOLBAR + TABLE MATRIX + LEGEND */}
+      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] sm:rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col" style={{ padding: 0 }}>
+        {/* Top Filter Toolbar Header inside Unified Card */}
+        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-card-solid)] flex flex-wrap items-center gap-3 no-print">
 
-                {/* 12 Months Selector Grid */}
-                <div className="grid grid-cols-3 gap-2">
-                  {MONTH_SHORT.map((mName, mIdx) => {
-                    const mVal = String(mIdx + 1).padStart(2, '0');
-                    const isSelected = selectedMonthObj.year === pickerYear && selectedMonthObj.month === (mIdx + 1);
-                    return (
-                      <button
-                        key={mName}
-                        type="button"
-                        onClick={() => {
-                          setSelectedMonth(`${pickerYear}-${mVal}`);
-                          setCurrentPage(1);
-                          setIsMonthPickerOpen(false);
-                        }}
-                        className={`py-2 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                          isSelected
-                            ? 'bg-[var(--accent-primary)] text-white shadow-md'
-                            : 'bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)]'
-                        }`}
-                      >
-                        {mName}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* 1. PeriodePicker — Dialog + native select Bulan & Tahun */}
+          <PeriodePicker value={periode} onApply={handleApplyPeriode} />
 
           {/* 2. Search Input */}
           <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-1 min-w-[200px]">
@@ -386,7 +345,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
               placeholder="Cari NIK, Nama..."
               value={searchQuery}
               onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
-              className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
+              className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
             />
           </div>
 
@@ -396,7 +355,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
             <select
               value={filterKebun}
               onChange={(e) => handleFilterChange(setFilterKebun, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
             >
               <option value="">Semua Kebun</option>
               {uniqueKebuns.map(k => (
@@ -412,7 +371,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
             <select
               value={filterAfdeling}
               onChange={(e) => handleFilterChange(setFilterAfdeling, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-md text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
             >
               <option value="">Semua Afdeling</option>
               {uniqueAfdelings.map(a => (
@@ -423,11 +382,8 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           </div>
 
         </div>
-      </div>
 
-      {/* CARD 2: MAIN TABLE GRID */}
-      <div className="card-ui overflow-hidden" style={{ padding: 0 }}>
-        <div className="w-full overflow-x-auto relative" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="w-full overflow-x-auto relative flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
           <Table className="monitoring-table-grid compact-mobile-table">
             <TableHeader>
               <TableRow className="border-b border-[var(--border-color)] bg-[var(--bg-card-solid)]">
@@ -451,15 +407,17 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                   AFDELING
                 </TableHead>
 
-                {/* Dynamic Month Days Columns (1 to 28..31) */}
-                {daysInMonth.map(day => (
-                  <TableHead
-                    key={day}
-                    className="w-[36px] min-w-[36px] text-center px-1 py-3 text-[11px] font-bold text-[var(--text-muted)] border-r border-[var(--border-color)]"
-                  >
-                    {day}
-                  </TableHead>
-                ))}
+                {daysInMonth.map(day => {
+                  const isSun = new Date(periode.year, periode.month, day).getDay() === 0;
+                  return (
+                    <TableHead
+                      key={day}
+                      className={`w-[36px] min-w-[36px] text-center px-[2px] py-3 text-[11px] font-bold ${isSun ? 'text-[var(--text-muted)] opacity-40' : 'text-[var(--text-muted)]'}`}
+                    >
+                      {day}
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
 
@@ -499,17 +457,17 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                       {row.afdeling}
                     </TableCell>
 
-                    {/* Dynamic Attendance Cells */}
                     {daysInMonth.map(day => (
                       <TableCell
                         key={day}
-                        className="text-center px-1 py-3 text-xs border-r border-[var(--border-color)]"
+                        className="p-[2px]"
+                        style={{ width: '36px', minWidth: '36px', textAlign: 'center' }}
                       >
-                        {row[day] === 'Hadir' ? (
-                          <span className="text-[var(--accent-success)] font-extrabold">H</span>
-                        ) : (
-                          <span className="text-[var(--text-muted)] opacity-35 font-normal">-</span>
-                        )}
+                        <AttendanceCell
+                          code={row[day]}
+                          dateLabel={`${day} ${MONTH_NAMES[periode.month]} ${periode.year}`}
+                          nama={row.name}
+                        />
                       </TableCell>
                     ))}
                   </TableRow>
@@ -519,18 +477,7 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           </Table>
         </div>
 
-        {/* Card 2 Bottom Bar: Legend & Helper Indicator */}
-        <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)] gap-2">
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <span className="text-[var(--accent-success)] font-extrabold text-sm">H</span>
-            <span className="text-[var(--text-main)]">Hadir</span>
-            <span className="text-[var(--text-muted)] opacity-40 mx-1">•</span>
-            <span className="text-[var(--text-muted)] font-normal">- Tidak ada data</span>
-          </div>
-          <div className="text-xs text-[var(--text-muted)] font-medium opacity-80">
-            Geser ke kanan untuk melihat tanggal lainnya →
-          </div>
-        </div>
+        <StatusLegend />
 
         {/* Standard UI Data Pagination */}
         {totalPages > 1 && (
@@ -551,11 +498,10 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
                 <button
                   key={idx}
                   type="button"
-                  className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === idx + 1
+                  className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${currentPage === idx + 1
                       ? 'bg-[var(--accent-primary)] text-white shadow-xs'
                       : 'border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)]'
-                  }`}
+                    }`}
                   onClick={() => setCurrentPage(idx + 1)}
                 >
                   {idx + 1}

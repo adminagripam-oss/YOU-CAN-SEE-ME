@@ -1,25 +1,20 @@
 import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { SidebarProvider } from '@/components/ui/sidebar';
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from '../components/AppSidebar';
 import Topbar from '../components/Topbar';
+import { useAppData } from '../context/AppDataContext';
 
-export default function DashboardLayout({
-  isOnline,
-  unsyncedCount,
-  isSyncing,
-  onManualSync,
-  onCheckUpdate,
-  theme,
-  toggleTheme,
-  pendingCheckOutsCount = 0,
-  isPastShiftEnd = false,
-  hasOTAUpdate = false,
-}) {
+export default function DashboardLayout() {
   const location = useLocation();
+  const {
+    theme, toggleTheme,
+    isOnline, unsyncedCount, isSyncing, handleManualSync,
+    pendingCheckOutsCount, isPastShiftEnd,
+    checkForUpdates, hasOTAUpdate,
+  } = useAppData();
 
-  // Read initial sidebar state from cookie (set by Shadcn SidebarProvider)
   const getDefaultOpen = () => {
     const match = document.cookie.match(/sidebar_state=([^;]+)/);
     if (match) return match[1] === 'true';
@@ -28,27 +23,24 @@ export default function DashboardLayout({
 
   return (
     <SidebarProvider defaultOpen={getDefaultOpen()}>
-      {/* Sidebar */}
       <AppSidebar />
 
-      {/* Main area: Topbar + Page Content — fills remaining horizontal space */}
-      <div className="main-content-wrapper">
-        {/* Sticky Topbar */}
+      {/* SidebarInset auto-adjusts margin-left in sync with SidebarProvider state */}
+      <SidebarInset>
         <Topbar
           theme={theme}
           toggleTheme={toggleTheme}
           isOnline={isOnline}
           unsyncedCount={unsyncedCount}
           isSyncing={isSyncing}
-          onManualSync={onManualSync}
-          onCheckUpdate={onCheckUpdate}
+          onManualSync={handleManualSync}
+          onCheckUpdate={checkForUpdates}
           pendingCheckOutsCount={pendingCheckOutsCount}
           isPastShiftEnd={isPastShiftEnd}
           hasOTAUpdate={hasOTAUpdate}
         />
 
-        {/* Page Content with animated transitions */}
-        <main className="dashboard-content-outlet">
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -62,7 +54,7 @@ export default function DashboardLayout({
             </motion.div>
           </AnimatePresence>
         </main>
-      </div>
+      </SidebarInset>
     </SidebarProvider>
   );
 }

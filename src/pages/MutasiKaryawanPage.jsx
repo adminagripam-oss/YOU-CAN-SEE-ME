@@ -10,6 +10,10 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '../components/ui/dialog';
+import { Button } from '../components/ui/button';
 
 const MUTATION_LABELS = {
   ONBOARDING: 'Onboarding',
@@ -57,6 +61,8 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [mutationToDelete, setMutationToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [form, setForm] = useState({
     employee_id: '',
     mutation_type: 'ONBOARDING',
@@ -181,13 +187,25 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
     }
   };
 
-  const handleDelete = async (mutation) => {
+  const handleDeleteClick = (mutation) => {
     if (!navigator.onLine) { showToast('Offline', 'Hapus mutasi hanya tersedia saat online.', 'error'); return; }
-    if (!window.confirm(`Hapus record mutasi ${MUTATION_LABELS[mutation.mutation_type]} untuk ${mutation.name}?`)) return;
-    const { error } = await supabase.from('employee_mutations').delete().eq('id', mutation.id);
-    if (error) { showToast('Gagal hapus', error.message, 'error'); return; }
-    showToast('Terhapus', 'Record mutasi berhasil dihapus.', 'success');
-    fetchMutations();
+    setMutationToDelete(mutation);
+  };
+
+  const confirmDelete = async () => {
+    if (!mutationToDelete) return;
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase.from('employee_mutations').delete().eq('id', mutationToDelete.id);
+      if (error) { showToast('Gagal hapus', error.message, 'error'); return; }
+      showToast('Terhapus', 'Record mutasi berhasil dihapus.', 'success');
+      setMutationToDelete(null);
+      fetchMutations();
+    } catch (err) {
+      showToast('Gagal hapus', err.message, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const buildExcelRows = () => filtered.map(m => [
@@ -359,7 +377,7 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
                         <TableCell style={{ fontSize: '0.82rem' }}>{ke}</TableCell>
                         {user?.role === 'headoffice_admin' && (
                           <TableCell className="no-print">
-                            <button className="btn-action delete" style={{ padding: '5px', minWidth: 'auto' }} onClick={() => handleDelete(m)} title="Hapus">
+                            <button className="btn-action delete" style={{ padding: '5px', minWidth: 'auto' }} onClick={() => handleDeleteClick(m)} title="Hapus">
                               <Trash2 size={14} />
                             </button>
                           </TableCell>
@@ -502,6 +520,36 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Dialog */}
+      <Dialog open={!!mutationToDelete} onOpenChange={(open) => { if (!open && !isDeleting) setMutationToDelete(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Konfirmasi Hapus</DialogTitle>
+            <DialogDescription>
+              Apakah Anda yakin ingin menghapus record mutasi ini? Tindakan ini tidak dapat dibatalkan.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setMutationToDelete(null)}
+              disabled={isDeleting}
+              className="min-h-[44px] w-full sm:w-auto"
+            >
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="min-h-[44px] w-full sm:w-auto"
+            >
+              {isDeleting ? 'Menghapus...' : 'Hapus'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
