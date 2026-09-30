@@ -24,7 +24,7 @@ import { Calendar, CalendarDayButton } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CornerUpLeftIcon, CornerUpRightIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react"
+import { CornerUpLeftIcon, CornerUpRightIcon, ChevronLeftIcon, ChevronRightIcon, XIcon, CalendarIcon } from "lucide-react"
 
 export interface DateSelectorI18nConfig {
   // Labels
@@ -983,6 +983,7 @@ function DateSelectorPeriodGrid({
                       : "outline"
                   }
                   className={cn(
+                    "rounded-xl font-semibold border-[var(--border-color)]",
                     inRange &&
                       !isSelected &&
                       !isRangeStart &&
@@ -1277,8 +1278,11 @@ export function DateSelector({
         </div>
         {showInput && (
           <div className="relative">
+            <CalendarIcon className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-[var(--accent-success)] font-bold pointer-events-none" />
             <Input
               type="text"
+              style={{ paddingLeft: '38px', paddingRight: '38px' }}
+              className="font-semibold text-sm rounded-xl border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] shadow-2xs"
               value={inputHint ? inputValue : displayValue}
               readOnly={!inputHint}
               placeholder={

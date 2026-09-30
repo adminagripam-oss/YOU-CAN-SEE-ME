@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { human, loadHumanWithFallback } from './humanSingleton';
-import { createBrowserRouter, RouterProvider, Navigate, Outlet, useRouteError } from 'react-router-dom';
+import { RouterProvider } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
@@ -11,24 +11,12 @@ import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
-import ProtectedRoute from './components/ProtectedRoute';
-import PublicRoute from './components/PublicRoute';
-import AuthLayout from './layouts/AuthLayout';
-import DashboardLayout from './layouts/DashboardLayout';
-import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import AbsensiPage from './pages/AbsensiPage';
-import KaryawanPage from './pages/KaryawanPage';
-import DaftarKaryawanPage from './pages/DaftarKaryawanPage';
-import MutasiKaryawanPage from './pages/MutasiKaryawanPage';
-import LogsPage from './pages/LogsPage';
-import EnterpriseAnalyticsPage from './pages/EnterpriseAnalyticsPage';
 import ShadcnToast from './components/ShadcnToast';
 import ConfirmModal from './components/ConfirmModal';
-import OfflineOrderForm from './components/OfflineOrderForm';
 import OTAUpdateDialog from './components/OTAUpdateDialog';
 import AnimatedSplash from './components/AnimatedSplash';
-import MonitoringAbsensiPage from './pages/MonitoringAbsensiPage';
+import { AppDataProvider } from './context/AppDataContext';
+import appRouter from './router';
 
 function AppContent() {
   const { user } = useAuth();
@@ -1348,215 +1336,57 @@ function AppContent() {
     return () => clearTimeout(timer);
   }, [dbReady, isOnline, fetchLogs]);
 
+  const appData = useMemo(() => ({
+    employees,
+    logs,
+    modelsLoaded,
+    modelStatusText,
+    isOnline,
+    unsyncedCount,
+    isSyncing,
+    handleManualSync,
+    showToast,
+    openConfirmModal,
+    closeConfirmModal,
+    fetchEmployees,
+    fetchLogs,
+    theme,
+    toggleTheme,
+    checkForUpdates,
+    hasOTAUpdate,
+    pendingCheckOutsCount,
+    isPastShiftEnd,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    employees, logs, modelsLoaded, modelStatusText, isOnline, unsyncedCount,
+    isSyncing, handleManualSync, showToast, openConfirmModal, closeConfirmModal,
+    fetchEmployees, fetchLogs, theme, toggleTheme, checkForUpdates, hasOTAUpdate,
+    pendingCheckOutsCount, isPastShiftEnd,
+  ]);
 
-
-function AppErrorBoundary() {
-  const error = useRouteError();
-  console.error("AppErrorBoundary caught error:", error);
   return (
-    <div style={{ padding: '3rem 1.5rem', textAlign: 'center', fontFamily: 'inherit', color: 'var(--text-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
-      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚠️</div>
-      <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '0.5rem', color: 'var(--text-main)' }}>Terjadi Kesalahan Aplikasi</h2>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', maxWidth: '450px', marginBottom: '1.5rem', lineHeight: 1.5 }}>
-        {error?.message || "Aplikasi mengalami kendala teknis tak terduga. Silakan muat ulang halaman."}
-      </p>
-      <button 
-        onClick={() => window.location.reload()}
-        style={{
-          padding: '10px 20px', borderRadius: '8px', background: 'var(--accent-primary)',
-          color: '#ffffff', border: 'none', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-        }}
-      >
-        Muat Ulang Halaman
-      </button>
-    </div>
+    <AppDataProvider value={appData}>
+      {toasts.length > 0 && <ShadcnToast toasts={toasts} />}
+      <ConfirmModal
+        isOpen={confirmModalConfig.isOpen}
+        title={confirmModalConfig.title}
+        message={confirmModalConfig.message}
+        confirmText={confirmModalConfig.confirmText}
+        onConfirm={confirmModalConfig.onConfirm}
+        onCancel={closeConfirmModal}
+      />
+      <OTAUpdateDialog
+        isOpen={updateModalOpen}
+        version={updateVersion}
+        progress={updateProgress}
+        onUpdate={performUpdate}
+        onCancel={() => setUpdateModalOpen(false)}
+      />
+      <RouterProvider router={appRouter} />
+    </AppDataProvider>
   );
 }
 
-  const router = useMemo(() => {
-    return createBrowserRouter([
-      {
-        path: "/",
-        errorElement: <AppErrorBoundary />,
-        element: (
-          <>
-            <div className={`app-container ${theme}-theme`} style={{ display: 'none' }}></div>
-            {toasts.length > 0 && <ShadcnToast toasts={toasts} />}
-            <ConfirmModal
-              isOpen={confirmModalConfig.isOpen}
-              title={confirmModalConfig.title}
-              message={confirmModalConfig.message}
-              confirmText={confirmModalConfig.confirmText}
-              onConfirm={confirmModalConfig.onConfirm}
-              onCancel={closeConfirmModal}
-            />
-
-            <OTAUpdateDialog
-              isOpen={updateModalOpen}
-              version={updateVersion}
-              progress={updateProgress}
-              onUpdate={performUpdate}
-              onCancel={() => setUpdateModalOpen(false)}
-            />
-            <Outlet />
-          </>
-        ),
-        children: [
-          // PUBLIC ROUTES (Auth Layout)
-          {
-            element: <PublicRoute />,
-            children: [
-              {
-                element: <AuthLayout theme={theme} toggleTheme={toggleTheme} />,
-                children: [
-                  {
-                    path: "login",
-                    element: (
-                      <LoginPage
-                        employees={employees}
-                        showToast={showToast}
-                        theme={theme}
-                        toggleTheme={toggleTheme}
-                        refreshEmployees={fetchEmployees}
-                      />
-                    )
-                  }
-                ]
-              }
-            ]
-          },
-          // Analytics Page
-          {
-            path: "analytics",
-            element: <EnterpriseAnalyticsPage employees={employees} logs={logs} />
-          },
-          // Order Form Page
-          {
-            path: "order-form",
-            element: <OfflineOrderForm />
-          },
-          // PROTECTED ROUTES (Hanya Admin)
-          {
-            element: <ProtectedRoute />,
-            children: [
-              {
-                element: (
-                  <DashboardLayout
-                    isOnline={isOnline}
-                    unsyncedCount={unsyncedCount}
-                    isSyncing={isSyncing}
-                    onManualSync={handleManualSync}
-                    theme={theme}
-                    toggleTheme={toggleTheme}
-                    pendingCheckOutsCount={pendingCheckOutsCount}
-                    isPastShiftEnd={isPastShiftEnd}
-                    onCheckUpdate={checkForUpdates}
-                    hasOTAUpdate={hasOTAUpdate}
-                  />
-                ),
-                children: [
-                  {
-                    path: "dashboard",
-                    element: (
-                      <DashboardPage
-                        employees={employees}
-                        logs={logs}
-                        modelsLoaded={modelsLoaded}
-                      />
-                    )
-                  },
-                  {
-                    path: "absensi",
-                    element: (
-                      <AbsensiPage
-                        employees={employees}
-                        modelsLoaded={modelsLoaded}
-                        modelStatusText={modelStatusText}
-                        showToast={showToast}
-                        refreshLogs={fetchLogs}
-                        refreshEmployees={fetchEmployees}
-                      />
-                    )
-                  },
-                  {
-                    path: "karyawan",
-                    element: (
-                      <KaryawanPage
-                        employees={employees}
-                        modelsLoaded={modelsLoaded}
-                        showToast={showToast}
-                        refreshEmployees={fetchEmployees}
-                        openConfirmModal={openConfirmModal}
-                      />
-                    )
-                  },
-                  {
-                    path: "daftar-karyawan",
-                    element: (
-                      <DaftarKaryawanPage
-                        isOnline={isOnline}
-                        employees={employees}
-                        modelsLoaded={modelsLoaded}
-                        showToast={showToast}
-                        refreshEmployees={fetchEmployees}
-                        refreshLogs={fetchLogs}
-                        openConfirmModal={openConfirmModal}
-                      />
-                    )
-                  },
-                  {
-                    path: "daftar-karyawan/mutasi",
-                    element: (
-                      <MutasiKaryawanPage
-                        employees={employees}
-                        showToast={showToast}
-                      />
-                    )
-                  },
-                  {
-                    path: "logs",
-                    element: (
-                      <LogsPage
-                        logs={logs}
-                        refreshLogs={fetchLogs}
-                        showToast={showToast}
-                        openConfirmModal={openConfirmModal}
-                      />
-                    )
-                  },
-                  {
-                    path: "logs/monitoring",
-                    element: (
-                      <MonitoringAbsensiPage
-                        employees={employees}
-                        logs={logs}
-                      />
-                    )
-                  }
-                ]
-              }
-            ]
-          },
-          // Fallbacks
-          {
-            path: "",
-            element: <Navigate to="/login" replace />
-          },
-          {
-            path: "*",
-            element: <Navigate to="/absensi" replace />
-          }
-        ]
-      }
-    ]);
-  }, [
-    theme, toasts, confirmModalConfig, employees, modelsLoaded, modelStatusText,
-    isOnline, unsyncedCount, isSyncing, logs, fetchEmployees, fetchLogs, handleManualSync, openConfirmModal
-  ]);
-
-  return <RouterProvider router={router} />;
-}
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);

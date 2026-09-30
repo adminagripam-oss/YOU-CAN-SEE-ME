@@ -69,7 +69,7 @@ export function PeriodePicker({ value, onApply }) {
               onValueChange={(v) => setDraft((d) => ({ ...d, month: Number(v) }))}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue>{BULAN[draft.month]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {BULAN.map((b, i) => (
