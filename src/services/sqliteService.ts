@@ -1598,6 +1598,21 @@ export async function sqliteGetPendingEmployees(): Promise<any[]> {
 }
 
 /**
+ * Retrieve a single pending employee by ID
+ */
+export async function sqliteGetPendingEmployee(id: string | number): Promise<any | null> {
+    const db = await waitForConnection();
+    if (!db) return null;
+  try {
+    const res = await db.query(`SELECT * FROM local_employee_sync_queue WHERE id = ? LIMIT 1`, [String(id)]);
+    return res.values && res.values.length > 0 ? res.values[0] : null;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetPendingEmployee Error]:', err?.message || err);
+    return null;
+  }
+}
+
+/**
  * Remove a synced employee from pending queue
  */
 export async function sqliteRemovePendingEmployee(id: string | number): Promise<void> {

@@ -6,7 +6,11 @@
    ========================================================== */
 @import "tailwindcss";
 
-html, body, #root {
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+html,
+body,
+#root {
   height: 100%;
   width: 100%;
 }
@@ -38,13 +42,25 @@ html, body, #root {
 
   --animate-collapsible-down: collapsible-down 200ms ease-out;
   --animate-collapsible-up: collapsible-up 200ms ease-out;
+
   @keyframes collapsible-down {
-    from { height: 0; }
-    to { height: var(--radix-collapsible-content-height); }
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
   }
+
   @keyframes collapsible-up {
-    from { height: var(--radix-collapsible-content-height); }
-    to { height: 0; }
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+
+    to {
+      height: 0;
+    }
   }
 }
 
@@ -189,6 +205,7 @@ html, body, #root {
     scrollbar-width: thin;
     scrollbar-color: var(--border-hover) transparent;
   }
+
   body {
     font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   }
@@ -2778,16 +2795,42 @@ footer {
   flex-direction: column !important;
   flex: 1 !important;
   min-width: 0 !important;
-  overflow: hidden !important;
 }
 
 /* Topbar sticks to top of sidebar-inset */
 .app-topbar {
   position: sticky !important;
   top: 0 !important;
-  z-index: 90 !important;
+  z-index: 20 !important;
   background: var(--bg-card) !important;
   border-bottom: 1px solid var(--border-color) !important;
+  width: 100% !important;
+  transition: width 300ms ease-in-out !important;
+  box-sizing: border-box !important;
+  padding: 10px 16px 10px 0 !important;
+  min-height: 52px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+@media (max-width: 639px) {
+  .app-topbar {
+    padding: 8px 12px 8px 0 !important;
+    gap: 6px !important;
+  }
+  .breadcrumb-hide-mobile {
+    display: none !important;
+  }
+  .topbar-badges-wrapper {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .topbar-badges-wrapper::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* SidebarTrigger override */
@@ -3098,7 +3141,8 @@ footer {
 
 .dashboard-charts-grid {
   display: grid;
-  grid-template-columns: 4fr 6fr; /* 40% Pie Donut : 60% Kebun Bar Chart ratio */
+  grid-template-columns: 4fr 6fr;
+  /* 40% Pie Donut : 60% Kebun Bar Chart ratio */
   gap: 1.25rem;
   align-items: stretch;
 }
@@ -3433,4 +3477,3 @@ footer {
   flex-direction: column;
   min-width: 0;
 }
-

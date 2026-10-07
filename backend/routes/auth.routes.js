@@ -107,7 +107,7 @@ router.get('/me', authMiddleware, async (req, res) => {
         success: true,
         user: req.user,
       });
-    }
+    } 
 
     const userPayload = {
       id: employee.id,

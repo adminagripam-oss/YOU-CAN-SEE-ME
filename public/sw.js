@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agriface-v3.3.0';
+const CACHE_NAME = 'agriface-v3.4.0';
 
 // Install Event - Activate SW immediately
 self.addEventListener('install', (event) => {
@@ -21,26 +21,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Strict BYPASS CACHE for Supabase Cloud and API Endpoints
+// Fetch Event - Strict BYPASS CACHE for Supabase Cloud, API Endpoints, models, and human.esm.js
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Explicitly BYPASS Service Worker cache for all Supabase Cloud requests (*.supabase.co)
-  // and local Express/Serverless backend API requests (/api/) to guarantee fresh cloud data
-  if (url.hostname.includes('supabase.co') || url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request, { cache: 'no-store' }).catch((err) => {
-        console.warn('[SW Network Fallback] Cloud endpoint unreachable (offline):', url.href);
-        return new Response(JSON.stringify({ offline: true, error: 'Network unavailable' }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      })
-    );
+  // Direct network pass-through (do NOT intercept with event.respondWith)
+  if (url.hostname.includes('supabase.co') || url.pathname.startsWith('/api/') || url.pathname.includes('/models/') || url.pathname.includes('human.esm.js')) {
     return;
   }
 
-  // 2. Network-First for HTML navigation
+  // Network-First for HTML navigation
   if (event.request.mode === 'navigate' || (event.request.headers.get('accept') && event.request.headers.get('accept').includes('text/html'))) {
     event.respondWith(
       fetch(event.request, { cache: 'no-cache' }).catch(() => caches.match(event.request))
@@ -48,11 +38,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Stale-While-Revalidate for static assets (js, css, models, images)
+  // Stale-While-Revalidate for static assets (js, css, images)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (event.request.method === 'GET' && networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        const contentLength = networkResponse.headers.get('content-length');
+        if (
+          event.request.method === 'GET' &&
+          networkResponse &&
+          networkResponse.status === 200 &&
+          networkResponse.type === 'basic' &&
+          (!contentLength || parseInt(contentLength, 10) > 0)
+        ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
         }

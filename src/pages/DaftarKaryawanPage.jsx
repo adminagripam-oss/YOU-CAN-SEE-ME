@@ -18,6 +18,7 @@ import { supabase } from '../supabaseClient';
 import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
+import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, cosine } from '../biometrics';
 import { useAuth } from '../context/AuthContext';
 
 export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
@@ -108,10 +109,17 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [editPhotoPreview, setEditPhotoPreview] = useState(null);
   // null = belum dicek | { isDuplicate, matchedName, similarity } = hasil cek duplikasi
   const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
-  const EDIT_DUPLICATE_THRESHOLD = 0.85;
-  
+  const [editSamplesReady, setEditSamplesReady] = useState(false);
+
   const editCurrentDescriptorRef = useRef(null);
+  const editSamplesRef = useRef([]);
+  const editLastSampleTimeRef = useRef(0);
   const editVideoRef = useRef(null);
+  // Cosine >= 0.88 = batas bawah zona genuine pada embedding 1024-D FaceRes.
+  // Di bawah ini masih zona impostor/abu-abu; aman sebagai anti-duplikasi.
+  const EDIT_DUPLICATE_THRESHOLD = 0.88;
+
+  
   const editCanvasRef = useRef(null);
   const editStreamRef = useRef(null);
   const editFileInputRef = useRef(null);
@@ -124,11 +132,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [scanCameraStatusColor, setScanCameraStatusColor] = useState('var(--accent-warning)');
   const [scanFaceCheckResult, setScanFaceCheckResult] = useState(null);
   const [isScanningSubmit, setIsScanningSubmit] = useState(false);
+  const [scanSamplesReady, setScanSamplesReady] = useState(false);
 
   const scanCurrentDescriptorRef = useRef(null);
   const scanCurrentGFVRef = useRef(null);
   const scanVideoRef = useRef(null);
   const scanCanvasRef = useRef(null);
+  const scanSamplesRef = useRef([]);
+  const scanLastSampleTimeRef = useRef(0);
 
   const detectScanFacesCallback = React.useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
@@ -143,36 +154,61 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     if (smoothedMesh) {
       scanCurrentGFVRef.current = smoothedMesh;
     }
-    if (detection.embedding) {
-      const newVec = Array.from(detection.embedding);
-      scanCurrentDescriptorRef.current = newVec;
-
-      (async () => {
-        try {
-          const allMasters = await getAllMasterVectors();
-          let bestSim = 0, bestName = '';
-          for (const m of allMasters) {
-            if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
-            const vec = m.descriptor_json;
-            if (!Array.isArray(vec) || vec.length !== 1024) continue;
-            const sim = cosineSimilarity(newVec, vec);
-            if (sim > bestSim) { bestSim = sim; bestName = m.name; }
-          }
-          if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
-            setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
-            setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
-            setScanCameraStatusColor('var(--accent-error)');
+    
+    if (detection && detection.embedding) {
+      const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+      if (scanSamplesRef.current.length >= total) {
+        // Cukup sampel
+      } else {
+        const now = performance.now();
+        if (isGoodFrame(detection) && (now - scanLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
+          scanLastSampleTimeRef.current = now;
+          scanSamplesRef.current.push(Array.from(detection.embedding));
+          const count = scanSamplesRef.current.length;
+          
+          if (count < total) {
+            setScanCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
+            setScanCameraStatusColor('var(--accent-warning)');
           } else {
-            setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-            setScanCameraStatusText(`✓ Wajah Baru Valid`);
-            setScanCameraStatusColor('var(--accent-success)');
+            // Reject outliers
+            const rawAvg = Array.from(buildTemplate(scanSamplesRef.current));
+            let filtered = scanSamplesRef.current.filter(samp => cosine(samp, rawAvg) > 0.85);
+            if (filtered.length === 0) filtered = scanSamplesRef.current;
+            
+            const finalTemplate = Array.from(buildTemplate(filtered));
+            scanCurrentDescriptorRef.current = finalTemplate;
+            
+            (async () => {
+              try {
+                const allMasters = await getAllMasterVectors();
+                let bestSim = 0, bestName = '';
+                for (const m of allMasters) {
+                  if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
+                  const vec = m.descriptor_json;
+                  if (!Array.isArray(vec) || vec.length !== 1024) continue;
+                  const sim = cosine(finalTemplate, vec);
+                  if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+                }
+                if (isOnline && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+                  setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+                  setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+                  setScanCameraStatusColor('var(--accent-error)');
+                } else {
+                  setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+                  setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+                  setScanCameraStatusColor('var(--accent-success)');
+                  setScanSamplesReady(true);
+                }
+              } catch (_) {
+                setScanFaceCheckResult(null);
+                setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+                setScanCameraStatusColor('var(--accent-success)');
+                setScanSamplesReady(true);
+              }
+            })();
           }
-        } catch (_) {
-          setScanFaceCheckResult(null);
-          setScanCameraStatusText(`✓ Wajah Terdeteksi`);
-          setScanCameraStatusColor('var(--accent-success)');
         }
-      })();
+      }
     }
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -190,12 +226,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   }, [scanEmp, EDIT_DUPLICATE_THRESHOLD]);
 
   const onScanNoFace = React.useCallback(() => {
-    scanCurrentDescriptorRef.current = null;
-    scanCurrentGFVRef.current = null;
-    setScanFaceCheckResult(null);
-    setScanCameraStatusText('Menunggu Wajah di Kamera...');
-    setScanCameraStatusColor('var(--accent-warning)');
-  }, []);
+    if (!scanSamplesReady && scanSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+      setScanCameraStatusText('Menunggu Wajah di Kamera...');
+      setScanCameraStatusColor('var(--accent-warning)');
+    }
+  }, [scanSamplesReady]);
 
   const onScanCameraError = React.useCallback((err) => {
     setScanCameraStatusText('Kamera Tidak Bisa Diakses');
@@ -220,6 +255,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setScanFaceCheckResult(null);
     scanCurrentDescriptorRef.current = null;
     scanCurrentGFVRef.current = null;
+    scanSamplesRef.current = [];
+    scanLastSampleTimeRef.current = 0;
+    setScanSamplesReady(false);
     setScanModalOpen(true);
   };
 
@@ -353,37 +391,60 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
   // Callback saat wajah diproses
   const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
-    if (detection.embedding) {
-      const newVec = Array.from(detection.embedding);
-      editCurrentDescriptorRef.current = newVec;
-
-      // Cek duplikasi real-time, kecuali diri sendiri (editingEmp.id)
-      (async () => {
-        try {
-          const allMasters = await getAllMasterVectors();
-          let bestSim = 0, bestName = '';
-          for (const m of allMasters) {
-            if (String(m.employee_id) === String(editingEmp.id)) continue; // skip self
-            const vec = m.descriptor_json;
-            if (!Array.isArray(vec) || vec.length !== 1024) continue;
-            const sim = cosineSimilarity(newVec, vec);
-            if (sim > bestSim) { bestSim = sim; bestName = m.name; }
-          }
-          if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
-            setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
-            setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
-            setEditCameraStatusColor('var(--accent-error)');
+    if (detection && detection.embedding) {
+      const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+      if (editSamplesRef.current.length >= total) {
+        // Cukup sampel
+      } else {
+        const now = performance.now();
+        if (isGoodFrame(detection) && (now - editLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
+          editLastSampleTimeRef.current = now;
+          editSamplesRef.current.push(Array.from(detection.embedding));
+          const count = editSamplesRef.current.length;
+          
+          if (count < total) {
+            setEditCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
+            setEditCameraStatusColor('var(--accent-warning)');
           } else {
-            setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-            setEditCameraStatusText(`✓ Wajah Baru Valid [Belum Digunakan Karyawan Lain]`);
-            setEditCameraStatusColor('var(--accent-success)');
+            // Reject outliers
+            const rawAvg = Array.from(buildTemplate(editSamplesRef.current));
+            let filtered = editSamplesRef.current.filter(samp => cosine(samp, rawAvg) > 0.85);
+            if (filtered.length === 0) filtered = editSamplesRef.current;
+            
+            const finalTemplate = Array.from(buildTemplate(filtered));
+            editCurrentDescriptorRef.current = finalTemplate;
+            
+            (async () => {
+              try {
+                const allMasters = await getAllMasterVectors();
+                let bestSim = 0, bestName = '';
+                for (const m of allMasters) {
+                  if (String(m.employee_id) === String(editingEmp.id)) continue;
+                  const vec = m.descriptor_json;
+                  if (!Array.isArray(vec) || vec.length !== 1024) continue;
+                  const sim = cosine(finalTemplate, vec);
+                  if (sim > bestSim) { bestSim = sim; bestName = m.name; }
+                }
+                if (isOnline && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+                  setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+                  setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+                  setEditCameraStatusColor('var(--accent-error)');
+                } else {
+                  setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+                  setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+                  setEditCameraStatusColor('var(--accent-success)');
+                  setEditSamplesReady(true);
+                }
+              } catch (_) {
+                setEditFaceCheckResult(null);
+                setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+                setEditCameraStatusColor('var(--accent-success)');
+                setEditSamplesReady(true);
+              }
+            })();
           }
-        } catch (_) {
-          setEditFaceCheckResult(null);
-          setEditCameraStatusText(`✓ Wajah Terdeteksi [1024-dim Human]`);
-          setEditCameraStatusColor('var(--accent-success)');
         }
-      })();
+      }
     }
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -402,11 +463,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
   // Callback saat tidak ada wajah
   const onEditNoFace = React.useCallback(() => {
-    editCurrentDescriptorRef.current = null;
-    setEditFaceCheckResult(null);
-    setEditCameraStatusText('Menunggu Wajah di Kamera...');
-    setEditCameraStatusColor('var(--accent-warning)');
-  }, []);
+    if (!editSamplesReady && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+      setEditCameraStatusText('Menunggu Wajah di Kamera...');
+      setEditCameraStatusColor('var(--accent-warning)');
+    }
+  }, [editSamplesReady]);
 
   // Callback kamera error
   const onEditCameraError = React.useCallback((err) => {
@@ -510,6 +571,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setEditPhotoPreview(null);
     editCurrentDescriptorRef.current = null;
     setEditFaceCheckResult(null);
+    setEditSamplesReady(false);
+    editSamplesRef.current = [];
+    editLastSampleTimeRef.current = 0;
     setEditModalOpen(true);
   };
 
@@ -1410,7 +1474,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               </div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
                 <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setScanModalOpen(false)}>Batal</button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isScanningSubmit}>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isScanningSubmit || !scanSamplesReady}>
                   {isScanningSubmit ? 'Menyimpan...' : 'Simpan Biometrik'}
                 </button>
               </div>
@@ -1507,7 +1571,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
                 <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setEditModalOpen(false)}>Batal</button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Simpan Perubahan</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isSubmitting || (editUpdateBiometrics && editFormMode === 'camera' && !editSamplesReady)}>
+                  {isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
               </div>
             </form>
           </div>

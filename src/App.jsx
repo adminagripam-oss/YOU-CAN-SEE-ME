@@ -686,7 +686,7 @@ function AppContent() {
             for (let i = 0; i < localLogs.length; i++) {
               const isFakeOnline = String(localLogs[i].id).startsWith('online_');
               if (isFakeOnline || (!useLogDeltaSync && localLogs[i].is_synced)) {
-                await db.attendance_logs.delete(localLogs[i].id);
+                await db.attendance_logs.hardDelete(localLogs[i].id);
               }
             }
             if (onlineLogs.length > 0) {
@@ -803,7 +803,28 @@ function AppContent() {
       created_at: q.created_at || q.timestamp
     }));
 
-    const mergedLocalLogs = [...allLocalLogs, ...mappedQueue];
+    // Supabase bulkPut overwrites the local PENDING_DELETE marker, so the unsynced
+    // DELETE requests are the source of truth until the sync engine processes them.
+    const pendingDeleteIds = new Set();
+    try {
+      const reqs = await db.attendance_requests.toArray();
+      (reqs || []).forEach(r => {
+        if (r.request_type !== 'DELETE' || (r.is_synced && r.is_synced !== 0)) return;
+        let oldVal = r.old_value;
+        if (typeof oldVal === 'string') {
+          try { oldVal = JSON.parse(oldVal); } catch { oldVal = null; }
+        }
+        [r.log_id, oldVal?.logId, oldVal?.inLogId, oldVal?.outLogId]
+          .filter(Boolean)
+          .forEach(id => pendingDeleteIds.add(String(id)));
+      });
+    } catch (e) {
+      console.warn('[Local Database] Failed to load pending delete requests:', e);
+    }
+
+    const mergedLocalLogs = [...allLocalLogs, ...mappedQueue].filter(
+      l => l.syncStatus !== 'PENDING_DELETE' && !pendingDeleteIds.has(String(l.id))
+    );
 
     // Step 3: De-duplicate and resolve metadata
     const getLocalDateString = (ts) => {
@@ -1080,8 +1101,20 @@ function AppContent() {
         syncCallbacksRef.current.refreshUnsyncedCount();
       }
     };
+    const handleNewLog = (e) => {
+      const log = e.detail?.log;
+      if (!log) return;
+      setLogs(prev => [log, ...prev.filter(l => String(l.id) !== String(log.id))]);
+      if (syncCallbacksRef.current?.refreshUnsyncedCount) {
+        syncCallbacksRef.current.refreshUnsyncedCount();
+      }
+    };
     window.addEventListener('refresh_logs', handleRefreshLogs);
-    return () => window.removeEventListener('refresh_logs', handleRefreshLogs);
+    window.addEventListener('new_attendance_log', handleNewLog);
+    return () => {
+      window.removeEventListener('refresh_logs', handleRefreshLogs);
+      window.removeEventListener('new_attendance_log', handleNewLog);
+    };
   }, []);
 
   // Network Listener Setup (Supports both native SQLite/Network and web IndexedDB)
@@ -1222,7 +1255,26 @@ function AppContent() {
       } catch (err) {
         console.error('[MODEL LOAD ERROR]:', err);
         setModelStatusText('❌ Gagal memuat model AI: ' + err.message);
-        // Jangan set modelsLoaded = true — model benar-benar belum siap
+        
+        // Self-heal: If models fail to load, unregister SW & clear caches, then reload ONCE.
+        if (!sessionStorage.getItem('sw_self_healed')) {
+          sessionStorage.setItem('sw_self_healed', 'true');
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (let reg of regs) {
+              await reg.unregister();
+            }
+          }
+          if ('caches' in window) {
+            const names = await caches.keys();
+            for (let name of names) {
+              await caches.delete(name);
+            }
+          }
+          console.warn('[App] Caches cleared due to model load error. Reloading page...');
+          window.location.reload();
+          return;
+        }
       }
     }
 
@@ -1309,7 +1361,7 @@ function AppContent() {
 
               if (!error && insertedData && insertedData.length > 0) {
                 // Delete the temporary log from local DB
-                await db.attendance_logs.delete(log.id);
+                await db.attendance_logs.hardDelete(log.id);
                 // Insert the official log with the real numeric ID
                 const officialLog = {
                   ...log,
