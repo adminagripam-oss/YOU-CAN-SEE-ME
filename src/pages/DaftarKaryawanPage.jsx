@@ -110,6 +110,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   // null = belum dicek | { isDuplicate, matchedName, similarity } = hasil cek duplikasi
   const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
   const [editSamplesReady, setEditSamplesReady] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const editCurrentDescriptorRef = useRef(null);
   const editSamplesRef = useRef([]);
@@ -600,6 +601,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       return;
     }
 
+    setIsSubmitting(true);
+
     // Double-check saat submit jika ada vektor baru
     if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
       try {
@@ -615,6 +618,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               `Wajah ini sudah digunakan oleh "${m.name}" (NIK: ${m.nik}). Similaritas: ${(sim * 100).toFixed(1)}%.`,
               'error'
             );
+            setIsSubmitting(false);
             return;
           }
         }
@@ -727,6 +731,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       refreshEmployees();
     } catch (err) {
       showToast('Error', err.message, 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
