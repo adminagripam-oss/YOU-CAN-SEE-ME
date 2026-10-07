@@ -45,8 +45,10 @@ export default function TabEmployeeManagement({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // null = belum dicek | { isDuplicate, matchedName, matchedNik, similarity } = hasil cek
   const [faceCheckResult, setFaceCheckResult] = useState(null);
-  // [UPDATE]: Sesuai permintaan, Threshold diset ke 1.1 (lebih dari 1.0) agar tidak ada batasan duplikasi (semua kemiripan diabaikan).
-  const DUPLICATE_THRESHOLD = 1.1; // tidak ada batasan kemiripan
+  // Cosine >= 0.88 = batas genuine minimum pada embedding 1024-D FaceRes.
+  // Mencegah satu wajah didaftarkan ke dua karyawan berbeda.
+  const DUPLICATE_THRESHOLD = 0.88;
+
 
   // Removed Edit Modal State (moved to DaftarKaryawanPage)
 

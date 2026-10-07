@@ -46,7 +46,7 @@ export interface Config {
   oneEuroMinCutoff?: number;     // min cutoff freq in Hz (default 1.0)
   oneEuroBeta?: number;          // speed coefficient (default 0.007)
   oneEuroDCutoff?: number;        // cutoff freq for derivative (default 1.0)
-  detectFaces: (canvas: HTMLCanvasElement, timestamp: number) => Promise<any> | any;
+  detectFaces: (canvas: HTMLCanvasElement, timestamp: number, video?: HTMLVideoElement) => Promise<any> | any;
   onFaceProcessed?: (output: FaceMeshOutput) => void;
   onNoFace?: () => void;
   onCameraError?: (err: Error) => void;
@@ -410,7 +410,7 @@ export function useNormalizedFaceMesh({
         offscreen.height = STD_HEIGHT;
       }
 
-      const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+      const offCtx = offscreen.getContext('2d');
       if (!offCtx) return;
 
       // 2. Center Crop Logic
@@ -448,10 +448,10 @@ export function useNormalizedFaceMesh({
       // Restore transform state
       offCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-      // 3. Call injected facial model on the standardized offscreen image
+      // 3. Call injected facial model on the standardized offscreen image or fallback video
       let detection: any = null;
       try {
-        detection = await callbacksRef.current.detectFaces(offscreen, timestamp);
+        detection = await callbacksRef.current.detectFaces(offscreen, timestamp, video);
       } catch (err) {
         console.warn('[useNormalizedFaceMesh] Face detection error:', err);
       }
@@ -584,7 +584,12 @@ export function useNormalizedFaceMesh({
 
         // Initialize frame loop
         isRunningRef.current = true;
-        rafRef.current = requestAnimationFrame(processFrame);
+        // Short delay to let WebGL context stabilize after camera opens
+        setTimeout(() => {
+          if (isRunningRef.current) {
+            rafRef.current = requestAnimationFrame(processFrame);
+          }
+        }, 300);
       } catch (err) {
         console.error('[useNormalizedFaceMesh] Camera initialization error:', err);
         callbacksRef.current.onCameraError?.(err as Error);

@@ -22,7 +22,10 @@ export default function DashboardLayout() {
   };
 
   return (
-    <SidebarProvider defaultOpen={getDefaultOpen()}>
+    <SidebarProvider 
+      defaultOpen={getDefaultOpen()} 
+      style={{ '--sidebar-width': '18rem', '--sidebar-width-icon': '3.5rem' }}
+    >
       <AppSidebar />
 
       {/* SidebarInset auto-adjusts margin-left in sync with SidebarProvider state */}

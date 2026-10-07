@@ -10,7 +10,7 @@ export default function DynamicBreadcrumb() {
     <nav aria-label="Navigasi breadcrumb" className="dynamic-breadcrumb">
       <ol className="breadcrumb-list">
         {/* Root: Beranda */}
-        <li className="breadcrumb-item">
+        <li className={`breadcrumb-item ${trail.length > 0 ? 'breadcrumb-hide-mobile' : ''}`}>
           {trail.length === 0 ? (
             <span className="breadcrumb-current" aria-current="page">Beranda</span>
           ) : (
@@ -22,12 +22,12 @@ export default function DynamicBreadcrumb() {
           const isLast = idx === trail.length - 1;
           return (
             <React.Fragment key={item.title}>
-              <li className="breadcrumb-separator" aria-hidden="true">
+              <li className={`breadcrumb-separator ${!isLast ? 'breadcrumb-hide-mobile' : ''}`} aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
               </li>
-              <li className="breadcrumb-item">
+              <li className={`breadcrumb-item ${!isLast ? 'breadcrumb-hide-mobile' : ''}`}>
                 {isLast ? (
                   <span className="breadcrumb-current" aria-current="page">{item.title}</span>
                 ) : item.path ? (

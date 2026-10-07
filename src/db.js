@@ -27,6 +27,7 @@ import {
   sqliteSaveAdmin,
   sqliteGetAdmin,
   sqliteSavePendingEmployee,
+  sqliteGetPendingEmployee,
   sqliteGetPendingEmployees,
   sqliteRemovePendingEmployee,
   sqliteSaveAttendanceRequest,
@@ -426,6 +427,21 @@ export const db = {
     }
   },
   employee_sync_queue: {
+    async get(id) {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteGetPendingEmployee(id);
+      } else {
+        try {
+          return await dexieDb.employee_sync_queue.get(String(id));
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue Get Error]:', e);
+          return null;
+        }
+      }
+    },
+    async put(empData) {
+      return this.add(empData);
+    },
     async add(empData) {
       if (Capacitor.isNativePlatform()) {
         await sqliteSavePendingEmployee(empData);

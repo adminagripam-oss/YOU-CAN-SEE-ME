@@ -43,14 +43,16 @@ export function PeriodePicker({ value, onApply }) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          className="h-9 gap-2 whitespace-nowrap"
-        >
-          <CalendarIcon className="w-4 h-4 opacity-60" />
-          {BULAN[value.month].slice(0, 3)} {value.year}
-        </Button>
+      <DialogTrigger
+        render={
+          <Button
+            variant="outline"
+            className="h-9 gap-2 whitespace-nowrap"
+          />
+        }
+      >
+        <CalendarIcon className="w-4 h-4 opacity-60" />
+        {BULAN[value.month].slice(0, 3)} {value.year}
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-[420px]">

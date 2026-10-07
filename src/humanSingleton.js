@@ -21,26 +21,39 @@ function getHumanClass() {
 
 const humanConfig = {
   modelBasePath: window.location.origin + '/models',
+  cacheModels: false, // Menghindari korpsi model IndexedDB di Incognito / WebGL safemode
+  cacheSensitivity: 0, // FASE 1: Disable cache to prevent reusing embeddings
 
   env: {
     // Memaksa WebGL menggunakan presisi 16-bit (FP16) di semua perangkat, 
     // termasuk laptop/PC. Ini sangat penting agar vektor 1024-dimensi 
     // yang dihasilkan Laptop dan Tablet bernilai persis sama!
-    WEBGL_FORCE_F16_TEXTURES: true,
+    // WEBGL_FORCE_F16_TEXTURES: true, // Dinonaktifkan sementara untuk mencegah WebGL crash di beberapa GPU
   },
 
   face: {
     enabled: true,
     detector: {
       enabled: true,
+      modelPath: 'blazeface.json', // EXPLICIT: match public/models/blazeface.json
       rotation: true,
       maxDetected: 1,
       skipFrames: 0,
       minConfidence: 0.15,
     },
-    mesh: { enabled: true },
+    mesh: { 
+      enabled: true,
+      modelPath: 'facemesh.json', // EXPLICIT
+      skipFrames: 0, // FASE 1: Never skip frames
+      skipTime: 0
+    },
     iris: { enabled: false },
-    description: { enabled: true },
+    description: { 
+      enabled: true,
+      modelPath: 'faceres.json', // EXPLICIT
+      skipFrames: 0, // FASE 1: Never skip frames
+      skipTime: 0
+    },
     
     // EXPLICIT FIXED: Nonaktifkan semua sub-model yang tidak dipakai 
     // agar human.load() tidak mencari file model (.json/.bin) yang tidak ada di server/APK
@@ -53,7 +66,7 @@ const humanConfig = {
 
   // Task 2: Auto-Normalization (Lighting Correction)
   filter: {
-    enabled: true,
+    enabled: false, // FASE 1: Disabled by default for A/B testing
     equalization: true, // Otomatis meratakan kontras & kecerahan dari kamera (Histogram Equalization)
   },
 
@@ -76,11 +89,11 @@ function getHuman() {
     _human = new HumanClass(humanConfig);
     
     // Force override F16 configuration directly onto the Human instance and TF.js environment
-    _human.env.WEBGL_FORCE_F16_TEXTURES = true;
+    // _human.env.WEBGL_FORCE_F16_TEXTURES = true;
     if (_human.tf && _human.tf.env) {
       try {
-        _human.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
-        console.log('[Human Singleton] 🔥 Force-override: WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
+        // _human.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        // console.log('[Human Singleton] 🔥 Force-override: WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
       } catch (e) {
         console.warn('[Human Singleton] Failed to set WEBGL_FORCE_F16_TEXTURES in TF.js:', e.message);
       }
@@ -136,13 +149,26 @@ async function initBackend(humanInstance) {
  * 2. Inisialisasi backend TF.js (webgl → cpu fallback)
  * 3. Load model dari: Origin Domain → Relatif → CDN
  */
-export async function loadHumanWithFallback() {
+let _loadPromise = null;
+
+export function loadHumanWithFallback() {
+  if (!_loadPromise) {
+    _loadPromise = _doLoadHumanWithFallback().catch(err => {
+      _loadPromise = null; // allow retry if failed
+      throw err;
+    });
+  }
+  return _loadPromise;
+}
+
+async function _doLoadHumanWithFallback() {
   // Load /human.esm.js dynamically if not already loaded in window
   if (!window.HumanLib?.Human) {
     try {
       console.log('[Human Singleton] Loading human.esm.js dynamically from root...');
       // Menggunakan new Function('return import(...)') untuk menyembunyikan import dari static analyzer Vite
-      const importFunc = new Function('return import("/human.esm.js")');
+      // Tambahkan cache busting dengan versi statis agar tetap dicache setelah pembaruan
+      const importFunc = new Function('return import("/human.esm.js?v=3.3.6-patch4")');
       const mod = await importFunc();
       window.HumanLib = { Human: mod.Human };
       console.log('[Human Singleton] ✅ human.esm.js successfully loaded dynamically.');
@@ -167,11 +193,11 @@ export async function loadHumanWithFallback() {
   await initBackend(humanInstance);
 
   // Force-override environment parameters again after backend initialization
-  humanInstance.env.WEBGL_FORCE_F16_TEXTURES = true;
+  // humanInstance.env.WEBGL_FORCE_F16_TEXTURES = true;
   if (humanInstance.tf && humanInstance.tf.env) {
     try {
-      humanInstance.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
-      console.log('[Human Singleton] 🔥 Force-override (post-backend): WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
+      // humanInstance.tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+      // console.log('[Human Singleton] 🔥 Force-override (post-backend): WEBGL_FORCE_F16_TEXTURES set to true in TF.js env');
     } catch (e) {
       console.warn('[Human Singleton] Failed to set WEBGL_FORCE_F16_TEXTURES post-backend:', e.message);
     }
@@ -191,7 +217,27 @@ export async function loadHumanWithFallback() {
       console.log('[Human Singleton] Mencoba load model dari:', basePath);
       humanInstance.config.modelBasePath = basePath;
       await humanInstance.load();
+
+      const modelsReady = humanInstance.models && Object.keys(humanInstance.models).length > 0;
+      if (!modelsReady) {
+        throw new Error('Model ter-load tetapi registry models kosong');
+      }
+
       console.log('[Human Singleton] ✅ Model berhasil dimuat dari:', basePath);
+
+      // Phase 0: Print startup config
+      console.log('--- FASE 0 & FASE 1: STARTUP CONFIG ---');
+      console.log('human.config.cacheSensitivity:', humanInstance.config.cacheSensitivity);
+      console.log('human.config.face.description:', JSON.stringify(humanInstance.config.face.description, null, 2));
+      console.log('human.config.face.mesh:', JSON.stringify(humanInstance.config.face.mesh, null, 2));
+      console.log('human.config.filter:', JSON.stringify(humanInstance.config.filter, null, 2));
+      
+      const tfBackend = humanInstance.tf?.getBackend?.() || 'unknown';
+      const forceF16 = humanInstance.tf?.env?.()?.get?.('WEBGL_FORCE_F16_TEXTURES');
+      console.log(`[FASE 1] TF.js Backend Aktual: ${tfBackend}`);
+      console.log(`[FASE 1] TF.js WEBGL_FORCE_F16_TEXTURES Aktual: ${forceF16 !== undefined ? forceF16 : 'undefined'}`);
+      console.log('------------------------------');
+
       return true;
     } catch (err) {
       console.warn('[Human Singleton] ❌ Gagal dari:', basePath, '-', err?.message || err);

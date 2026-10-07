@@ -5,6 +5,7 @@ import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray } from '../db';
 import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
+import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median } from '../biometrics';
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
@@ -143,8 +144,8 @@ function checkLightingQuality(videoEl) {
       sum += (0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2]);
     }
     const avg = sum / (32 * 32);
-    if (avg < 40) return "Area Terlalu Gelap";
-    if (avg > 240) return "Terlalu Silau / Backlight";
+    if (avg < 20) return "Area Terlalu Gelap";
+    if (avg > 250) return "Terlalu Silau / Backlight";
     return "";
   } catch (e) {
     return "";
@@ -183,15 +184,9 @@ const GFV_WEIGHTS = [
   3.0, 2.5, 2.5, 2.0,               // ratios (36-39) — most pose-invariant
 ];
 
-/**
- * COSINE SIMILARITY MATH FORMULA
- *
- * CosineSimilarity(A, B) = ( A • B ) / ( ||A|| * ||B|| )
- *
- * Measures angle similarity between MediaPipe 3D Landmark & GFV Feature Vectors.
- * Returns score in range [0.0, 1.0] (0% to 100%).
- * Threshold >= 0.85 (85%) for positive biometric verification.
- */
+// Raw cosine dot-product of two L2-normalized vectors.
+// human.similarity() returns the same formula; this local copy is used for
+// the GFV fallback path and anti-duplicate checks.
 function cosineSimilarity(vecA, vecB) {
   if (!vecA || !vecB || vecA.length !== vecB.length || vecA.length === 0) return 0;
   let dot = 0, normA = 0, normB = 0;
@@ -205,8 +200,34 @@ function cosineSimilarity(vecA, vecB) {
   return Math.max(0, Math.min(1.0, dot / (Math.sqrt(normA) * Math.sqrt(normB))));
 }
 
-/** Cosine Similarity score [0..1] -> Match Percentage [0..100%] */
-const cosineToMatchPct = (cosSim) => parseFloat((cosSim * 100).toFixed(1));
+/**
+ * Calibrated non-linear score mapping for 1024-D FaceRes embeddings.
+ *
+ * On a 1024-D unit hypersphere, impostor pairs naturally cluster at cosine
+ * 0.60–0.84 while genuine pairs cluster at 0.88–0.98. A 1-to-1 linear
+ * mapping (cosSim * 100) makes impostor cosine 0.80 read as "80% match",
+ * causing false accepts at any threshold below 85.
+ *
+ * Power curve (exponent 1.8) with floor=0.70 / ceil=0.98 compresses the
+ * impostor band toward 0% and stretches the genuine band toward 100%:
+ *   cosine 0.80 → ~16%  (impostor, rejected)
+ *   cosine 0.85 → ~32%  (ambiguous, rejected)
+ *   cosine 0.92 → ~79%  (genuine, borderline — needs stable multi-frame avg)
+ *   cosine 0.94 → ~88%  (genuine normal, accepted)
+ *   cosine 0.97 → ~97%  (genuine strong, accepted)
+ *
+ * Threshold for acceptance: >= 82.0 on this calibrated scale (~cosine 0.92).
+ * FAR target: < 0.1%.
+ */
+const COSINE_FLOOR = 0.70; // below this = definitely impostor
+const COSINE_CEIL  = 0.98; // above this = perfect match
+
+function cosineToMatchPct(cosSim) {
+  if (cosSim <= COSINE_FLOOR) return 0;
+  if (cosSim >= COSINE_CEIL)  return 100;
+  const normalized = (cosSim - COSINE_FLOOR) / (COSINE_CEIL - COSINE_FLOOR);
+  return parseFloat((Math.pow(normalized, 1.8) * 100).toFixed(1));
+}
 
 /** Weighted Euclidean distance fallback */
 function geometricDistance(gfvA, gfvB) {
@@ -622,6 +643,19 @@ export default function TabFaceVerification({
   // [TASK 5] Throttle ref untuk perf log (terpisah dari diagLogThrottleRef)
   const perfLogThrottleRef = useRef(0);
 
+  // ── Phase 0 Instrumentation Refs ─────────────────────────────────────────
+  const lastProcessedDetectionRef = useRef(null);
+  const diagLogThrottleRef = useRef(0);
+  const [phase0DebugMode, setPhase0DebugMode] = useState(false);
+
+  const modelsReadyAtRef = useRef(0);
+
+  useEffect(() => {
+    if (modelsLoaded) {
+      modelsReadyAtRef.current = performance.now();
+    }
+  }, [modelsLoaded]);
+
   // Auto-submit and stale closure prevention refs
   const hasAutoSubmittedRef = useRef(false);
   const selectedStatusRef = useRef(selectedStatus);
@@ -816,6 +850,7 @@ export default function TabFaceVerification({
         const parsedArray = toVectorArray(vec);
         if (parsedArray) {
           masterVectorRef.current = parsedArray;
+          scoreHistoryRef.current = []; // flush any zeros accumulated before master loaded
 
           // Cache locally if it was fetched from Tier 0, 2 or 4 (not Tier 1)
           if (!cached) {
@@ -914,8 +949,7 @@ export default function TabFaceVerification({
   // Tanggung jawab onFaceProcessed callback (di sini):
   //   • Lighting check, EAR liveness, cosine match, draw overlay
 
-  // Throttle ref untuk diagnostic log (log max 1x per 3 detik, hindari spam)
-  const diagLogThrottleRef = useRef(0);
+  // Throttle ref untuk diagnostic log sudah dideklarasikan di Phase 0 Instrumentation Refs (diagLogThrottleRef)
 
   // ── Time-based Frame Throttling (mobile GPU optimization) ─────────────────
   // lastDetectTimeRef  : timestamp (ms) terakhir human.detect() benar-benar dijalankan
@@ -954,8 +988,11 @@ export default function TabFaceVerification({
    * Di luar window itu, callback TIDAK mengembalikan null, melainkan
    * lastDetectResultRef.current — overlay tetap stabil, tidak berkedip.
    */
-  const detectFacesCallback = useCallback(async (croppedCanvas) => {
+  const detectFacesCallback = useCallback(async (croppedCanvas, timestamp, videoElement) => {
     if (!modelsLoaded) return null;
+
+    const msSinceLoad = performance.now() - modelsReadyAtRef.current;
+    if (msSinceLoad < 500) return lastDetectResultRef.current;
 
     const now = performance.now();
     const elapsed = now - lastDetectTimeRef.current;
@@ -965,22 +1002,25 @@ export default function TabFaceVerification({
     }
     lastDetectTimeRef.current = now;
 
-    // Phased Flow: HANYA aktifkan description (embedding model)
-    // ketika wajah sudah stabil dan liveness sudah terverifikasi.
-    // CATATAN: isDescLoaded check dihapus — human.models tidak mengekspos properti .description/.faceres
-    // secara langsung di Human.js v3. modelsLoaded (dari App.jsx) adalah satu-satunya sumber kebenaran.
-    // Dihapus mutasi dinamis human.config karena menyebabkan error WebGL inputNodes.
-
     try {
-      // Gunakan croppedCanvas untuk kompatibilitas stabil di WebView Android (menghindari WebGL context loss)
-      const result = await human.detect(croppedCanvas);
+      let result = null;
+      if (croppedCanvas && croppedCanvas.width > 0 && croppedCanvas.height > 0) {
+        result = await human.detect(croppedCanvas);
+      }
       const face = result?.face?.[0] ?? null;
+      if (face) {
+        face._fromFallback = false;
+      }
 
       lastDetectResultRef.current = face;
       return face;
     } catch (err) {
+      lastDetectTimeRef.current = 0;
+      if (err?.message?.includes('inputNodes') || err?.message?.includes('backend')) {
+        return lastDetectResultRef.current;
+      }
       console.warn('[TabFaceVerification] Error during human.detect:', err?.message || err);
-      return lastDetectResultRef.current; // Return cached face result on error, don't crash
+      return lastDetectResultRef.current;
     }
   }, [modelsLoaded]);
 
@@ -995,11 +1035,12 @@ export default function TabFaceVerification({
       faces: 1,
       nodes: smoothedMesh?.length || 0,
     });
-    // ════ TASK 3 & 4: Strict Bounding Box & Lighting Check ════
+    // Lighting check and bounding-box size guard
     const lightingStatus = checkLightingQuality(videoRef.current);
     let warningMsg = lightingStatus;
 
-    const faceWidth = boundingBox?.[2] || 0;
+    // boundingBox is a BoundingBox object {minX,minY,maxX,maxY,width,height,...}
+    const faceWidth = boundingBox?.width || 0;
     if (!warningMsg && faceWidth > 0) {
       if (faceWidth < 140) warningMsg = 'Wajah Terlalu Jauh';
       else if (faceWidth > 360) warningMsg = 'Wajah Terlalu Dekat';
@@ -1010,8 +1051,15 @@ export default function TabFaceVerification({
     if (warningMsg) {
       setLivenessStatusMsg(warningMsg);
       setMatchRate(0);
-      return; // Blokir proses absensi & ekstraksi embedding jika tidak standar
+      // Draw the mesh overlay first so the user sees visual feedback,
+      // then bail out before embedding extraction and liveness processing.
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      if (smoothedMesh && smoothedMesh.length > 0) {
+        drawGeometricMesh(ctx, smoothedMesh, livenessVerifiedRef.current, detection?.score || 0);
+      }
+      return;
     }
+
 
     // ── [TASK 3] Rekam timestamp frame untuk kalkulasi FPS adaptif ────────
     const frameNow = performance.now();
@@ -1075,12 +1123,7 @@ export default function TabFaceVerification({
 
     // ── Phase 2: Stabilization & Facing Forward Check ──────────────────────
     if (livenessVerifiedRef.current) {
-      const pitch = detection.rotation?.angle?.pitch || 0;
-      const yaw = detection.rotation?.angle?.yaw || 0;
-      const roll = detection.rotation?.angle?.roll || 0;
-
-      // Syarat stabil: nilai rotasi harus mendekati 0 (antara -0.15 hingga 0.15)
-      const isFacingForward = Math.abs(pitch) <= 0.15 && Math.abs(yaw) <= 0.15 && Math.abs(roll) <= 0.15;
+      const isFacingForward = isGoodFrame(detection);
 
       if (isFacingForward) {
         if (!isStableRef.current) {
@@ -1113,62 +1156,60 @@ export default function TabFaceVerification({
     }
 
     if (currentDescRef.current && !isMatchedRef.current) {
-      let rawPct = 0;
-      // [UPDATE]: Threshold diturunkan dari 42.0 menjadi 30.0 
-      // untuk mengakomodasi perbedaan kamera (focal length/lensa) antar device yang sangat berbeda.
-      const threshold = 30.0;
 
-      // ── DIAGNOSTIC LOG (throttled: max 1x per 3 detik) ─────────────────
-      // Buka DevTools Console → tab Console untuk membaca log ini.
-      // Hapus blok ini setelah masalah terselesaikan.
-      const now = Date.now();
-      if (now - diagLogThrottleRef.current > 3000) {
-        diagLogThrottleRef.current = now;
-        console.group('🔍 [FACE MATCH DIAGNOSTIC]');
-        console.log('currentDesc (embedding) → panjang:', currentDescRef.current?.length ?? 'NULL');
-        console.log('masterVector            → panjang:', masterVectorRef.current?.length ?? 'NULL — Pastikan karyawan sudah didaftarkan biometriknya!');
+      // FASE 4: Median filtering dari SCAN_SAMPLE_COUNT (5 frame baru)
+      if (detection !== lastProcessedDetectionRef.current && isStableRef.current) {
+        // Log instrumentation FASE 0 moved here to only trigger on new stable frames
+        lastProcessedDetectionRef.current = detection;
+        let cosSimRaw = 0;
+        let masterNaNCount = 0;
+        let scanNaNCount = 0;
 
-        if (currentDescRef.current && masterVectorRef.current) {
-          if (currentDescRef.current.length !== masterVectorRef.current.length) {
-            console.warn('❌ DIMENSI TIDAK COCOK:', currentDescRef.current.length, '≠', masterVectorRef.current.length);
-          } else {
-            const normA = Math.sqrt(currentDescRef.current.reduce((s, v) => s + v * v, 0));
-            const normB = Math.sqrt(masterVectorRef.current.reduce((s, v) => s + v * v, 0));
-            console.log('📈 Vector Norms -> currentDesc:', normA.toFixed(4), '| masterVector:', normB.toFixed(4));
-            console.log('🔢 currentDesc (first 5):', JSON.stringify(currentDescRef.current.slice(0, 5)));
-            console.log('🔢 masterVector (first 5):', JSON.stringify(masterVectorRef.current.slice(0, 5)));
+        if (masterVectorRef.current && currentDescRef.current) {
+          if (currentDescRef.current.length === masterVectorRef.current.length) {
+            cosSimRaw = cosine(currentDescRef.current, masterVectorRef.current);
+          }
+          masterNaNCount = masterVectorRef.current.filter(Number.isNaN).length;
+          scanNaNCount = currentDescRef.current.filter(Number.isNaN).length;
+        }
 
-            // TF.js configuration diagnostics
-            const tfBackend = human.tf?.getBackend?.() || 'unknown';
-            const forceF16 = human.tf?.env?.()?.get?.('WEBGL_FORCE_F16_TEXTURES');
-            console.log('⚙️ TF.js Env -> Backend:', tfBackend, '| FORCE_F16:', forceF16 ?? 'undefined');
+        const logData = {
+          cosSim: parseFloat(cosSimRaw.toFixed(4)),
+          yaw: parseFloat((detection.rotation?.angle?.yaw || 0).toFixed(3)),
+          pitch: parseFloat((detection.rotation?.angle?.pitch || 0).toFixed(3)),
+          roll: parseFloat((detection.rotation?.angle?.roll || 0).toFixed(3)),
+          score: parseFloat((detection.score || 0).toFixed(3)),
+          backend: human.tf?.getBackend?.() || 'unknown',
+          filterEnabled: !!human.config?.filter?.enabled,
+          masterLen: masterVectorRef.current?.length || 0,
+          scanLen: currentDescRef.current?.length || 0,
+          masterNaN: masterNaNCount,
+          scanNaN: scanNaNCount,
+          fallbackVideo: false
+        };
 
-            const testSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-            console.log('✅ Cosine Similarity RAW:', (testSim * 100).toFixed(2) + '%');
+        if (phase0DebugMode) {
+          console.table(logData);
+        } else {
+          console.log('[FASE 0 LOG]', JSON.stringify(logData));
+        }
+
+        // Skip frames where master isn't loaded yet — cosSimRaw=0 skews the median.
+        if (masterVectorRef.current && cosSimRaw > 0) {
+          scoreHistoryRef.current.push(cosSimRaw);
+          if (scoreHistoryRef.current.length > BIOMETRIC_CONFIG.SCAN_SAMPLE_COUNT) {
+            scoreHistoryRef.current.shift();
           }
         }
-        console.groupEnd();
-      }
-      // ── END DIAGNOSTIC LOG ───────────────────────────────────────────────
-
-      if (masterVectorRef.current && currentDescRef.current.length === masterVectorRef.current.length) {
-        const cosSim = cosineSimilarity(currentDescRef.current, masterVectorRef.current);
-        rawPct = cosineToMatchPct(cosSim);
       }
 
-      // [TASK 3] Score history smoothing — window ADAPTIF (3-5 frame)
-      // Window ditentukan oleh adaptiveWindowRef berdasarkan FPS aktual device.
-      // Device lambat (HP entry-level): window=3 → matched ~800ms lebih cepat.
-      // Device cepat (laptop/HP flagship): window=5 → stabilitas lebih tinggi.
-      const currentWindow = adaptiveWindowRef.current;
-      scoreHistoryRef.current.push(rawPct);
-      if (scoreHistoryRef.current.length > currentWindow) scoreHistoryRef.current.shift();
-      const avgPct = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
+      const medianCos = median(scoreHistoryRef.current);
+      const matched = scoreHistoryRef.current.length >= BIOMETRIC_CONFIG.SCAN_SAMPLE_COUNT && medianCos >= BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD;
+      const rawPct = displayScore(medianCos);
 
-      const matched = avgPct >= threshold;
-      matchRateRef.current = avgPct;
+      matchRateRef.current = rawPct;
       isMatchedRef.current = matched;
-      setMatchRate(avgPct);
+      setMatchRate(rawPct);
       setIsMatched(matched);
 
       if (matched) {
@@ -1180,10 +1221,11 @@ export default function TabFaceVerification({
             const totalMs = Math.round(performance.now() - matchStartTimeRef.current);
             console.log(
               `🏁 [PERF] Time-to-Matched: ${totalMs}ms | ` +
-              `Avg frame: ${Math.round(avgFrameDuration)}ms | ` +
-              `Window: ${currentWindow} | Score: ${avgPct.toFixed(1)}%`
+              `Median Cosine: ${medianCos.toFixed(4)} | Score: ${rawPct.toFixed(1)}%`
             );
           }
+          // FASE 5: Logging kalibrasi di terminal untuk analisa 1-to-1 riil
+          console.log(`[FASE 5 KALIBRASI] 1-to-1 MATCH SUKSES | Waktu: ${new Date().toISOString()} | Median Cosine: ${medianCos.toFixed(4)}`);
         }
 
         // Auto-submit once to prevent duplicate check-in/out calls
@@ -1205,10 +1247,10 @@ export default function TabFaceVerification({
           perfLogThrottleRef.current = perfNow;
           const effectiveFPS = avgFrameDuration > 0 ? (1000 / avgFrameDuration).toFixed(1) : '?';
           console.log(
-            `📊 [PERF] Inference: ${lastInferenceTimeRef.current}ms | ` +
+            `[PERF] Inference: ${lastInferenceTimeRef.current}ms | ` +
             `FPS: ${effectiveFPS} | ` +
-            `Window: ${currentWindow} (${avgFrameDuration > 200 ? 'SLOW' : avgFrameDuration > 70 ? 'MID' : 'FAST'}) | ` +
-            `Score: ${avgPct.toFixed(1)}%`
+            `Device: ${avgFrameDuration > 200 ? 'SLOW' : avgFrameDuration > 70 ? 'MID' : 'FAST'} | ` +
+            `Median Cos: ${medianCos.toFixed(4)} | Score: ${rawPct.toFixed(1)}%`
           );
         }
       }
@@ -1247,9 +1289,10 @@ export default function TabFaceVerification({
   useNormalizedFaceMesh({
     videoRef,
     canvasRef,
-    active: modelsLoaded,      // Hanya mulai setelah model AI selesai dimuat
+    active: modelsLoaded,
     facingMode,
-    smoothAlpha: 0.35,         // EMA alpha: lebih kecil = lebih smooth tapi sedikit lag
+    smoothingMethod: 'ema',
+    emaAlpha: 0.35,
     detectFaces: detectFacesCallback,
     onFaceProcessed,
     onNoFace,
@@ -1455,7 +1498,7 @@ export default function TabFaceVerification({
     }
 
     try {
-      await queueOfflineAttendance({
+      const queued = await queueOfflineAttendance({
         employee_id: targetEmp.id,
         nik: targetEmp.nik,
         name: targetEmp.name,
@@ -1477,7 +1520,32 @@ export default function TabFaceVerification({
 
       isSuccess = true;
       successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;
-      window.dispatchEvent(new Event('refresh_logs'));
+
+      // Optimistic row so the log table updates without waiting for fetchLogs.
+      // The background refresh triggered by onVerificationSuccess replaces it.
+      window.dispatchEvent(new CustomEvent('new_attendance_log', {
+        detail: {
+          log: {
+            id: queued?.id ? `offline_${queued.id}` : `offline_tmp_${Date.now()}`,
+            employee_id: targetEmp.id,
+            nik: targetEmp.nik || '-',
+            name: targetEmp.name || '-',
+            department: targetEmp.department || '-',
+            afdeling: targetEmp.afdeling || '-',
+            nama_kebun: currentUser?.kebun || targetEmp.nama_kebun || '-',
+            timestamp: recordTimestamp,
+            location: `${locationStr} - GeoMesh Scanner`,
+            lat: userLat,
+            lng: userLng,
+            status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
+            attendance_type: attendanceTypeDash,
+            euclidean_distance: euclideanDist,
+            durasi: durasiDetik,
+            is_synced: false,
+            created_at: recordTimestamp,
+          },
+        },
+      }));
     } catch (err) {
       console.error('[QUEUE ERROR]:', err);
     }

@@ -33,6 +33,7 @@ import DashboardLayout from './layouts/DashboardLayout';
 import RoleGuard from './components/layout/RoleGuard';
 import Placeholder from './pages/Placeholder';
 import OfflineOrderForm from './components/OfflineOrderForm';
+import SinkronisasiPage from './pages/SinkronisasiPage';
 
 // Lazy-loaded pages
 const LoginPage             = lazy(() => import('./pages/LoginPage'));
@@ -239,7 +240,7 @@ const appRouter = createBrowserRouter([
                 children: [
                   { path: 'absensi',     element: <AbsensiRoute /> },
                   { path: 'karyawan',    element: <KaryawanRoute /> },
-                  { path: 'sinkronisasi', element: <Placeholder /> },
+                  { path: 'sinkronisasi', element: <SinkronisasiPage /> },
                   { path: 'hasil-panen', element: <Placeholder /> },
                   { path: 'pengajuan',   element: <Placeholder /> },
                 ],

@@ -8,7 +8,7 @@ import { cleanUserName } from '../utils/displayName';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
-  SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuBadge,
+  SidebarGroupLabel, SidebarHeader, SidebarMenu,
   SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton,
   SidebarMenuSubItem, SidebarRail, useSidebar,
 } from '@/components/ui/sidebar';
@@ -20,7 +20,7 @@ import {
 } from './ui/dialog';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuGroup,
 } from './ui/dropdown-menu';
 import {
   Activity, ArrowLeftRight, Camera, CheckSquare, ChevronDown, Circle,
@@ -48,11 +48,15 @@ function getInitials(name = '') {
 
 function NavBadge({ count }) {
   if (!count || count <= 0) return null;
-  const label = count > 99 ? '99+' : String(count);
   return (
-    <SidebarMenuBadge aria-label={`${count} notifikasi`}>
-      {label}
-    </SidebarMenuBadge>
+    <span
+      className="relative ml-1.5 flex size-2 shrink-0"
+      role="status"
+      aria-label={`${count} item menunggu`}
+    >
+      <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+    </span>
   );
 }
 
@@ -75,31 +79,35 @@ function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNav
                 className="relative"
                 aria-label={item.title}
               >
-                <Icon className="size-4 shrink-0" />
-                {badgeCount > 0 && (
-                  <span
-                    className="absolute right-1 top-1 flex size-2"
-                    aria-label={`${badgeCount} menunggu`}
-                  >
-                    <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
-                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
-                  </span>
-                )}
+                <div className="relative inline-flex">
+                  <Icon className="size-4 shrink-0" />
+                  {badgeCount > 0 && (
+                    <span
+                      className="absolute -right-1 -top-1 flex size-2"
+                      aria-label={`${badgeCount} menunggu`}
+                    >
+                      <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+                      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                    </span>
+                  )}
+                </div>
               </SidebarMenuButton>
             )}
           />
           <DropdownMenuContent side="right" align="start" sideOffset={8}>
-            <DropdownMenuLabel>{item.title}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {item.children.map((child) => (
-              <DropdownMenuItem
-                key={child.path}
-                render={<NavLink to={child.path} onClick={handleNavClick} />}
-                className={pathname === child.path ? 'bg-accent font-medium' : ''}
-              >
-                {child.title}
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{item.title}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {item.children.map((child) => (
+                <DropdownMenuItem
+                  key={child.path}
+                  render={<NavLink to={child.path} onClick={handleNavClick} />}
+                  className={pathname === child.path ? 'bg-accent font-medium' : ''}
+                >
+                  {child.title}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
@@ -110,14 +118,12 @@ function NavGroupItem({ item, pathname, isCollapsed, isMobile, badges, handleNav
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="group/collapsible">
       <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton tooltip={item.title} isActive={isChildActive}>
-            <Icon className="size-4 shrink-0" />
-            <span>{item.title}</span>
-            {badgeCount > 0 && <NavBadge count={badgeCount} />}
-            <ChevronDown className="ml-auto size-4 shrink-0 text-sidebar-foreground/50 motion-safe:transition-transform motion-safe:duration-200 group-data-[state=open]/collapsible:rotate-180" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
+        <SidebarMenuButton tooltip={item.title} isActive={isChildActive} render={<CollapsibleTrigger />}>
+          <Icon className="size-4 shrink-0" />
+          <span>{item.title}</span>
+          {badgeCount > 0 && <NavBadge count={badgeCount} />}
+          <ChevronDown className="ml-auto size-4 shrink-0 text-sidebar-foreground/50 motion-safe:transition-transform motion-safe:duration-200 group-data-[state=open]/collapsible:rotate-180" />
+        </SidebarMenuButton>
         <CollapsibleContent className="group-data-[collapsible=icon]:hidden overflow-hidden motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up">
           <SidebarMenuSub>
             {item.children.map((child, i) => {
@@ -244,18 +250,20 @@ export function AppSidebar() {
           tooltip={item.title}
           className="relative"
         >
-          <Icon className="size-4 shrink-0" />
+          <div className="relative inline-flex items-center justify-center">
+            <Icon className="size-4 shrink-0" />
+            {badgeCount > 0 && isCollapsed && (
+              <span
+                className="absolute -right-1 -top-1 flex size-2"
+                aria-label={`${badgeCount} menunggu`}
+              >
+                <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
+                <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+              </span>
+            )}
+          </div>
           <span>{item.title}</span>
           {badgeCount > 0 && !isCollapsed && <NavBadge count={badgeCount} />}
-          {badgeCount > 0 && isCollapsed && (
-            <span
-              className="absolute right-1 top-1 flex size-2"
-              aria-label={`${badgeCount} menunggu`}
-            >
-              <span className="absolute inline-flex size-full rounded-full bg-red-500 opacity-75 motion-safe:animate-ping" />
-              <span className="relative inline-flex size-2 rounded-full bg-red-500" />
-            </span>
-          )}
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -265,7 +273,7 @@ export function AppSidebar() {
 
   return (
     <TooltipProvider>
-      <Sidebar collapsible="icon" style={{ '--sidebar-width': '18rem' }}>
+      <Sidebar collapsible="icon">
         <SidebarHeader>
           <div className="flex items-center gap-2.5 px-2 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg overflow-hidden">

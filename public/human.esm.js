@@ -10994,19 +10994,19 @@ var Bl = class {
     return this.version;
   }
   get inputNodes() {
-    return this.executor.inputNodes;
+    return this.executor ? this.executor.inputNodes : [];
   }
   get outputNodes() {
-    return this.executor.outputNodes;
+    return this.executor ? this.executor.outputNodes : [];
   }
   get inputs() {
-    return this.executor.inputs;
+    return this.executor ? this.executor.inputs : [];
   }
   get outputs() {
-    return this.executor.outputs;
+    return this.executor ? this.executor.outputs : [];
   }
   get weights() {
-    return this.executor.weightMap;
+    return this.executor ? this.executor.weightMap : {};
   }
   get metadata() {
     return this.artifacts.userDefinedMetadata;
@@ -11122,11 +11122,13 @@ var Bl = class {
     }
   }
   execute(e, t10) {
+    if (!this.executor) throw new Error("GraphModel executor is not initialized. Model might still be loading.");
     this.resourceIdToCapturedInput == null && this.setResourceIdToCapturedInput(this.executeInitializerGraph()), e = this.normalizeInputs(e), t10 = this.normalizeOutputs(t10);
     let o = this.executor.execute(e, t10);
     return o.length > 1 ? o : o[0];
   }
   async executeAsync(e, t10) {
+    if (!this.executor) throw new Error("GraphModel executor is not initialized. Model might still be loading.");
     this.resourceIdToCapturedInput == null && this.setResourceIdToCapturedInput(await this.executeInitializerGraphAsync()), e = this.normalizeInputs(e), t10 = this.normalizeOutputs(t10);
     let o = await this.executor.executeAsync(e, t10);
     return o.length > 1 ? o : o[0];
@@ -33494,7 +33496,9 @@ var options = {
 var modelStats = {};
 async function httpHandler(url, init4) {
   if (options.debug) log("load model fetch:", url, init4);
-  return fetch(url, init4);
+  const fetchInit = init4 || {};
+  fetchInit.cache = 'no-store'; // Force bypass cache to prevent corrupted .bin reads
+  return fetch(url, fetchInit);
 }
 function setModelLoadOptions(config3) {
   options.cacheModels = config3.cacheModels;
@@ -33529,22 +33533,94 @@ async function loadModel(modelPath) {
   const tfLoadOptions = typeof fetch === "undefined" ? {} : { fetchFunc: (url, init4) => httpHandler(url, init4) };
   let model23 = new Bl(modelStats[shortModelName].url, tfLoadOptions);
   modelStats[shortModelName].loaded = false;
-  try {
-    model23.findIOHandler();
-    if (options.debug) log("model load handler:", model23["handler"]);
-  } catch (err) {
-    log("error finding model i/o handler:", modelUrl, err);
+  const bytesPerDtype = { float32: 4, float16: 2, int32: 4, uint16: 2, uint8: 1, bool: 1, complex64: 8 };
+  const getExpectedSize = (manifest) => {
+    let size = 0;
+    for (const group of manifest) {
+      for (const weight of group.weights) {
+        const els = weight.shape.reduce((a, b) => a * b, 1);
+        let dt = weight.dtype;
+        if (weight.quantization && weight.quantization.dtype) dt = weight.quantization.dtype;
+        size += els * (bytesPerDtype[dt] || 4);
+      }
+    }
+    return size;
+  };
+
+  let lastErr = null;
+  modelStats[shortModelName].loaded = false;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      // Fetch JSON topology
+      const jsonRes = await fetch(modelUrl, { cache: 'no-store' });
+      if (!jsonRes.ok) throw new Error(`HTTP ${jsonRes.status} on json`);
+      const modelJson = await jsonRes.json();
+      
+      const manifest = modelJson.weightsManifest;
+      if (!manifest || manifest.length === 0) throw new Error("No weightsManifest");
+      const expectedSize = getExpectedSize(manifest);
+      
+      const binUrl = modelUrl.replace('.json', '.bin');
+      const fetchUrl = attempt > 0 ? `${binUrl}?v=${Date.now()}` : binUrl;
+      
+      // Fetch BIN weights
+      let binBuf = null;
+      if (attempt < 2) {
+        const binRes = await fetch(fetchUrl, { cache: attempt === 0 ? 'no-cache' : 'reload' });
+        if (!binRes.ok) throw new Error(`HTTP ${binRes.status} on bin`);
+        binBuf = await binRes.arrayBuffer();
+        console.log(`[model fetch] ${shortModelName} status=${binRes.status} type=${binRes.type} bytes=${binBuf.byteLength}/${expectedSize}`);
+      } else {
+        binBuf = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("GET", fetchUrl, true);
+          xhr.responseType = "arraybuffer";
+          xhr.onload = () => {
+            if (xhr.status === 200) resolve(xhr.response);
+            else reject(new Error(`XHR HTTP ${xhr.status}`));
+          };
+          xhr.onerror = () => reject(new Error("XHR Error"));
+          xhr.send();
+        });
+        console.log(`[model fetch XHR] ${shortModelName} bytes=${binBuf.byteLength}/${expectedSize}`);
+      }
+
+      if (binBuf.byteLength === 0) throw new Error("Buffer is 0 bytes");
+      if (binBuf.byteLength < expectedSize) throw new Error(`Buffer smaller than expected: ${binBuf.byteLength} < ${expectedSize}`);
+
+      const artifacts = {
+        modelTopology: modelJson.modelTopology,
+        format: modelJson.format,
+        generatedBy: modelJson.generatedBy,
+        convertedBy: modelJson.convertedBy,
+        weightSpecs: [],
+        weightData: binBuf,
+      };
+      if (modelJson.signature) artifacts.signature = modelJson.signature;
+      if (modelJson.userDefinedMetadata) artifacts.userDefinedMetadata = modelJson.userDefinedMetadata;
+      if (modelJson.modelInitializer) artifacts.modelInitializer = modelJson.modelInitializer;
+      if (modelJson.initializerSignature) artifacts.initializerSignature = modelJson.initializerSignature;
+      
+      for (const group of manifest) artifacts.weightSpecs.push(...group.weights);
+
+      model23 = new Bl(modelStats[shortModelName].url, tfLoadOptions);
+      model23.loadSync(artifacts);
+      
+      if (!model23.executor) throw new Error("executor missing after loadSync()");
+      
+      modelStats[shortModelName].sizeLoadedWeights = binBuf.byteLength;
+      if (options.verbose) log("load:", { model: shortModelName, url: modelUrl, bytes: binBuf.byteLength });
+      modelStats[shortModelName].loaded = true;
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[model load] attempt ${attempt} failed:`, shortModelName, err.message);
+      modelStats[shortModelName].inCache = false;
+    }
   }
-  try {
-    const artifacts = await ((_a = model23.handler) == null ? void 0 : _a.load()) || null;
-    modelStats[shortModelName].sizeFromManifest = ((_b = artifacts == null ? void 0 : artifacts.weightData) == null ? void 0 : _b.byteLength) || 0;
-    if (artifacts) model23.loadSync(artifacts);
-    else model23 = await M8(modelStats[shortModelName].inCache ? cachedModelName : modelUrl, tfLoadOptions);
-    modelStats[shortModelName].sizeLoadedWeights = ((_d2 = (_c2 = model23.artifacts) == null ? void 0 : _c2.weightData) == null ? void 0 : _d2.byteLength) || ((_f2 = (_e = model23.artifacts) == null ? void 0 : _e.weightData) == null ? void 0 : _f2[0].byteLength) || 0;
-    if (options.verbose) log("load:", { model: shortModelName, url: model23["modelUrl"], bytes: modelStats[shortModelName].sizeLoadedWeights });
-    modelStats[shortModelName].loaded = true;
-  } catch (err) {
-    log("error loading model:", modelUrl, err);
+  if (!modelStats[shortModelName].loaded || !model23 || !model23.executor) {
+    throw new Error(`GraphModel executor is not initialized for ${shortModelName}. Model load failed: ${(lastErr == null ? void 0 : lastErr.message) || lastErr}`);
   }
   if (modelStats[shortModelName].loaded && options.cacheModels && options.cacheSupported && !modelStats[shortModelName].inCache) {
     try {
@@ -39104,7 +39180,7 @@ var size = () => inputSize4;
 async function load3(config3) {
   var _a;
   if (env.initial) model5 = null;
-  if (!model5) model5 = await loadModel((_a = config3.face.detector) == null ? void 0 : _a.modelPath);
+  if (!model5 || !model5["executor"]) model5 = await loadModel((_a = config3.face.detector) == null ? void 0 : _a.modelPath);
   else if (config3.debug) log("cached model:", model5["modelUrl"]);
   inputSize4 = model5["executor"] && model5.inputs[0].shape ? model5.inputs[0].shape[2] : 256;
   inputSizeT = ke(inputSize4, "int32");
@@ -46600,7 +46676,10 @@ var Human = class {
     this.state = "load";
     const timeStamp = now();
     const count2 = Object.values(this.models.models).filter((model23) => model23).length;
-    if (userConfig) this.config = mergeDeep(this.config, userConfig);
+    if (userConfig) {
+      this.config = mergeDeep(this.config, userConfig);
+      setModelLoadOptions(this.config);
+    }
     if (this.env.initial) {
       if (!await check(this, false)) log("error: backend check failed");
       await Ime();

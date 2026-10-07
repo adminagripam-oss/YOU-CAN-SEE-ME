@@ -306,17 +306,14 @@ export default function TabAttendanceLogs({
     if (!logs) return [];
     const groups = {};
 
-    // Optimistic filter: instantly exclude deleted items
-    const activeLogs = logs.filter(log => !deletedLogIds.includes(log.id));
+    // String-cast IDs before comparison; sources may return number or string.
+    const activeLogs = logs.filter(log => !deletedLogIds.includes(String(log.id)));
 
     activeLogs.forEach(log => {
       const tsDate = new Date(log.timestamp);
-      // Use explicit year/month/day to ensure reliable YYYY-MM-DD format regardless of locale
       const dateKey = `${tsDate.getFullYear()}-${String(tsDate.getMonth() + 1).padStart(2, '0')}-${String(tsDate.getDate()).padStart(2, '0')}`;
       const displayDate = tsDate.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
       const key = `${log.employee_id}_${dateKey}`;
-
-      console.log(`[DEBUG GROUPING] Log ID: ${log.id}, EmpID: ${log.employee_id}, DateKey: ${dateKey}, Key: ${key}, Type: ${log.attendance_type}`);
 
       if (!groups[key]) {
         groups[key] = {
@@ -381,7 +378,15 @@ export default function TabAttendanceLogs({
       }
     });
 
-    return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
+    // Group-level filter: remove groups whose primary log (inLog) is optimistically deleted.
+    // This handles the case where only a CHECK-IN exists (no outLog), or when
+    // the group key itself was built from a now-deleted log.
+    return Object.values(groups)
+      .filter(g => {
+        const inGone = g.inLog ? deletedLogIds.includes(String(g.inLog.id)) : false;
+        return !inGone;
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
   }, [logs, deletedLogIds]);
 
   // FILTER
@@ -429,9 +434,17 @@ export default function TabAttendanceLogs({
       confirmText: 'Hapus Data',
       onConfirm: async () => {
         try {
-          const idsToDelete = [];
-          if (group.inLog?.id) idsToDelete.push(group.inLog.id);
-          if (group.outLog?.id) idsToDelete.push(group.outLog.id);
+          // Grouping keeps only the last CHECK-IN/OUT per day; duplicates hidden behind
+          // inLog/outLog would resurface after refresh, so collect every log in the group.
+          const idSet = new Set();
+          if (group.inLog?.id) idSet.add(group.inLog.id);
+          if (group.outLog?.id) idSet.add(group.outLog.id);
+          (logs || []).forEach(l => {
+            const d = new Date(l.timestamp);
+            const k = `${l.employee_id}_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if (k === group.id && l.id) idSet.add(l.id);
+          });
+          const idsToDelete = [...idSet];
 
           if (idsToDelete.length === 0) {
             showToast('Tidak Ada Data', 'Tidak ada ID log yang valid untuk dihapus.', 'warning');
@@ -439,7 +452,7 @@ export default function TabAttendanceLogs({
           }
 
           try {
-            setDeletedLogIds(prev => [...prev, ...idsToDelete]);
+            setDeletedLogIds(prev => [...prev, ...idsToDelete.map(String)]);
 
             const localOnlyIds = idsToDelete.filter(id =>
               String(id).startsWith('offline_') || String(id).startsWith('auto_out_') || String(id).startsWith('online_')
@@ -524,15 +537,14 @@ export default function TabAttendanceLogs({
 
             showToast('Data Dihapus', `${idsToDelete.length} catatan absensi diproses untuk dihapus.`, 'success');
           } catch (sbEx) {
-            setDeletedLogIds(prev => prev.filter(id => !idsToDelete.includes(id)));
+            setDeletedLogIds(prev => prev.filter(id => !idsToDelete.map(String).includes(id)));
             showToast('Gagal Menghapus', 'Terjadi kesalahan sistem saat memproses penghapusan.', 'error');
+          } finally {
+            refreshLogs();
           }
-
-          refreshLogs();
         } catch (err) {
           console.error('[DELETE LOG ERROR]:', err);
           showToast('Error Sistem', `Gagal menghapus: ${err.message}`, 'error');
-          refreshLogs();
         }
       },
     });

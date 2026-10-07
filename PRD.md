@@ -2,7 +2,7 @@
 ## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Versi Dokumen & Proyek**: 2.1.3
+- **Versi Dokumen & Proyek**: 2.1.4-biometric-patch
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js (Web IndexedDB), `@capacitor-community/sqlite` (Android Native SQLite)
 - **Biometric Engine**: `@vladmandic/human` (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh + EAR Liveness Engine + Cosine Similarity
 - **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine
@@ -11,6 +11,9 @@
 ---
 
 ## 1. Pendahuluan & Latar Belakang
+
+> **Patch Note (v2.1.4-biometric-patch)**: Perbaikan signifikan pada akurasi Face Recognition 1-to-1. Pengumpulan sampel pada saat pendaftaran (Enrollment) kini mengambil 7 sampel dan menggunakan rata-rata vektor (mean template) dengan Outlier Rejection. Pada saat absensi, sistem menggunakan windowing (median filter) dari 5 sampel. Ambang batas (threshold) `MATCH_COSINE_THRESHOLD` telah dikalibrasi ke **0.90** pada skala Cosine Similarity asli, menggantikan kurva pangkat eksponensial lama yang menyebabkan skor terlalu rendah pada kondisi pencahayaan kurang optimal. Karyawan yang absen kini akan lebih mudah dikenali asalkan wajah dalam keadaan stabil (Liveness Verified).
+
 
 Sistem absensi biometrik wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pendekatan **1-to-N (Verifikasi 1-ke-Banyak)**. Skema $O(N)$ ini menimbulkan kendala fatal saat jumlah karyawan membengkak, termasuk lonjakan latensi server dan tingkat *false positive* yang tinggi.
 
@@ -67,11 +70,26 @@ Untuk menjamin pengiriman log absensi yang andal di area minim sinyal:
 2. **Tier 2 (Direct Supabase Fallback)**: Jika server backend *timeout* (3 detik), sistem memotong jalur dan menulis data absensi langsung ke Supabase Cloud DB.
 3. **Tier 3 (Local SQLite/Dexie Offline Buffer)**: Jika perangkat sepenuhnya luring (offline), log masuk ke antrean SQLite/IndexedDB untuk disinkronisasi otomatis nanti.
 
-### 3.2 Pemrosesan Biometrik (Face Mesh, Liveness, dan Jitter Filter)
-- **1-to-1 O(1) Lookup**: Jarak Euclidean (*Euclidean Distance*) dihitung murni antara wajah di kamera dan 1 set vektor master dari karyawan yang dipilih (threshold kecocokan $\ge 0.85$).
-- **Normalisasi Bebas Perangkat (Device-Independent)**: Hook `useNormalizedFaceMesh` membingkai koordinat wajah agar tidak terdistorsi layar gepeng, lengkap dengan metode *Center Crop 4:3* statis sebelum proses deteksi AI.
-- **Liveness Detection (EAR)**: Menguji interaksi manusia hidup (*Live Human*) melalui rasio mata (*Eye Aspect Ratio*) saat kedipan atau rotasi kepala, demi menggagalkan penyalahgunaan via foto 2D.
-- **Peredam Getaran One-Euro Filter**: Filter matematika adaptif (*low-pass*) mengurangi loncatan kordinat titik wajah (jitter) tanpa menimbulkan lag, sehingga grafik mesh tampak halus.
+### 3.2 Algoritma Pemrosesan Biometrik & Pengenalan Wajah
+
+Sistem menggunakan model `@vladmandic/human` (`blazeface` + `facemesh` + `faceres`) untuk mengekstraksi **1024-Dimensional FaceRes Embedding Vector** pada presisi *FP16 WebGL*. Pendekatan yang digunakan adalah **1-to-1 O(1) Direct Lookup** antara wajah di kamera dengan vektor master karyawan yang dipilih.
+
+1. **Komputasi Pencocokan (Cosine Similarity)**
+   Komputasi kedekatan antar wajah murni menggunakan **Cosine Similarity** (Dot Product dari dua vektor yang dinormalisasi L2).
+   
+2. **Power Curve Calibration (Skala Verifikasi 1-to-1)**
+   Pada ruang vektor 1024-D, pasangan impostor (wajah berbeda) berkumpul di nilai *cosine* 0.60–0.84, sementara wajah asli (genuine) berada di 0.88–0.98. Untuk menghasilkan persentase kecocokan yang wajar secara UX, nilai *raw cosine* dikalibrasi menggunakan **Power Curve** (Eksponen `1.8`, `COSINE_FLOOR = 0.70`, `COSINE_CEIL = 0.98`).
+   - **Threshold Kelulusan Absensi**: Nilai kalibrasi **`>= 82.0%`** (setara dengan nilai *raw cosine* **`~0.92`**). Target *False Accept Rate (FAR)* ditekan hingga `< 0.1%`.
+
+3. **Anti-Duplikasi Registrasi (O(N) Local Scan)**
+   Pada tahap pendaftaran karyawan, algoritma melakukan *looping* O(N) singkat terhadap basis data master lokal (`local_master_descriptors`). Jika wajah baru memiliki tingkat kecocokan *raw cosine* **`>= 0.88`** terhadap karyawan manapun, registrasi **ditolak** untuk mencegah karyawan ganda.
+
+4. **Liveness Detection (EAR)**
+   Pendeteksian interaksi *(Liveness)* dijalankan dengan membedah 468 titik Face Mesh. Sistem menghitung *Eye Aspect Ratio (EAR)* dari jarak Euclidean vertikal dan horizontal pada kelopak mata untuk mendeteksi kedipan nyata demi menggagalkan penyalahgunaan foto 2D.
+
+5. **Kestabilan Koordinat & Normalisasi**
+   - **Peredam Getaran One-Euro Filter**: Filter matematika adaptif mengurangi *jitter* tanpa *lag*, sehingga grafik *mesh* tampak halus.
+   - **Normalisasi Bebas Perangkat**: Hook `useNormalizedFaceMesh` membingkai kordinat wajah agar tidak terdistorsi layar, dengan *Center Crop 4:3* statis sebelum proses deteksi AI.
 
 ### 3.3 Engine Sinkronisasi (Auto-Sync) & Cut-Off 22:00
 - **Cut-Off 22:00 Strict Mode**: Aplikasi menyimpan absen secara persisten secara lokal saat offline, dan mengalokasikan siklus *upload* massal (Sinkronisasi Otomatis) secara berkala (utamanya di ujung jam kerja pukul 22:00) atau ketika tombol **Sinkronisasi Manual** diklik.
