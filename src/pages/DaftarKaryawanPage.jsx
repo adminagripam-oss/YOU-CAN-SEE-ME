@@ -111,6 +111,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
   const [editSamplesReady, setEditSamplesReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editFacingMode, setEditFacingMode] = useState('environment');
 
   const editCurrentDescriptorRef = useRef(null);
   const editSamplesRef = useRef([]);
@@ -480,7 +481,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     videoRef: editVideoRef,
     canvasRef: editCanvasRef,
     active: editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded,
-    facingMode: 'environment',
+    facingMode: editFacingMode,
     smoothAlpha: 0.35,
     detectFaces: detectEditFacesCallback,
     onFaceProcessed: onEditFaceProcessed,
@@ -1556,9 +1557,22 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                       <button type="button" className={`btn ${editFormMode === 'file' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'file' ? 'var(--bg-primary)' : undefined, color: editFormMode !== 'file' ? 'var(--text-main)' : '#fff', border: editFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent', width: 'auto' }} onClick={() => setEditFormMode('file')}><i className="fa-solid fa-upload"></i> Unggah File Foto</button>
                     </div>
                     {editFormMode === 'camera' ? (
-                      <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
-                        <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: 'scaleX(-1)' }}></video>
-                        <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: 'scaleX(-1)' }}></canvas>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setEditFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border-color)', width: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            title="Ganti Kamera Depan/Belakang"
+                          >
+                            <i className="fa-solid fa-rotate"></i> Tukar Kamera
+                          </button>
+                        </div>
+                        <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
+                          <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
+                          <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
+                        </div>
                       </div>
                     ) : (
                       <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border-color)', padding: '1rem', borderRadius: '10px', textAlign: 'center' }}>
