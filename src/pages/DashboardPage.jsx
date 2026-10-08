@@ -459,11 +459,11 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     
     // Add subtitle text for weeks
     const shortMonth = targetDate.toLocaleString('id-ID', { month: 'short' });
-    weeklyData[0].name = `W1|(1-7 ${shortMonth})`;
-    weeklyData[1].name = `W2|(8-14 ${shortMonth})`;
-    weeklyData[2].name = `W3|(15-21 ${shortMonth})`;
-    weeklyData[3].name = `W4|(22-28 ${shortMonth})`;
-    weeklyData[4].name = `W5|(29-${daysInMonth} ${shortMonth})`;
+    weeklyData[0].name = `Minggu 1|(1-7 ${shortMonth})`;
+    weeklyData[1].name = `Minggu 2|(8-14 ${shortMonth})`;
+    weeklyData[2].name = `Minggu 3|(15-21 ${shortMonth})`;
+    weeklyData[3].name = `Minggu 4|(22-28 ${shortMonth})`;
+    weeklyData[4].name = `Minggu 5|(29-${daysInMonth} ${shortMonth})`;
 
     if (daysInMonth < 29) {
       return weeklyData.slice(0, 4);
