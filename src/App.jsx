@@ -59,16 +59,15 @@ function AppContent() {
 
   // SQLite Native Initializer
   useEffect(() => {
-    // Beri tahu Capgo Updater bahwa aplikasi telah berhasil dijalankan agar tidak rollback
-    try {
-      CapacitorUpdater.notifyAppReady();
-    } catch (err) {
-      console.warn('[OTA] Capgo Updater not available natively', err);
-    }
-
     async function setupStorage() {
       try {
         await initSQLite();
+        // Beri tahu Capgo Updater bahwa aplikasi telah berhasil diinisialisasi agar tidak rollback
+        try {
+          CapacitorUpdater.notifyAppReady();
+        } catch (err) {
+          console.warn('[OTA] Capgo Updater not available natively', err);
+        }
       } catch (err) {
         console.error('[App] SQLite initialization error:', err);
       } finally {
@@ -94,6 +93,16 @@ function AppContent() {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 4500);
   }, []);
+
+  // Custom Event Listener untuk Toast dari sistem / non-react layer
+  useEffect(() => {
+    const handleCustomToast = (e) => {
+      const { title, message, type } = e.detail;
+      showToast(title, message, type || 'info');
+    };
+    window.addEventListener('agriface-toast', handleCustomToast);
+    return () => window.removeEventListener('agriface-toast', handleCustomToast);
+  }, [showToast]);
 
   // Proactive Background Polling for OTA Updates
   useEffect(() => {

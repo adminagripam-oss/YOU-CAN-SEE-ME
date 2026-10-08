@@ -617,7 +617,11 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         if (rpcError) {
           console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, rpcError.message);
-          window.alert(`[ERROR SINKRONISASI SUPABASE]\n\nGagal mengirim karyawan ${emp.name}.\n\nPesan Error: ${rpcError.message}`);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('agriface-toast', {
+              detail: { title: 'Error Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcError.message}`, type: 'error' }
+            }));
+          }
           return false;
         }
 
@@ -637,7 +641,11 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         if (rpcData && rpcData.status === 'error') {
            console.warn(`[Sync Employee Error] Error dari RPC:`, rpcData.message);
-           window.alert(`[ERROR SINKRONISASI DATABASE DOMINANT]\n\nPesan Error: ${rpcData.message}`);
+           if (typeof window !== 'undefined') {
+             window.dispatchEvent(new CustomEvent('agriface-toast', {
+               detail: { title: 'Error RPC Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcData.message}`, type: 'error' }
+             }));
+           }
            return false;
         }
 
