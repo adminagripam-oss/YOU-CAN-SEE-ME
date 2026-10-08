@@ -16,17 +16,22 @@ const CustomXAxisTick = (props) => {
   const { x, y, payload } = props;
   const rawText = payload?.value || '';
   
-  // Split by | to support two-line ticks if provided
   const lines = rawText.split('|');
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 480;
+  
+  let displayText = rawText;
+  if (lines.length > 1) {
+    if (isMobile) {
+      displayText = lines[0]; // Just "Minggu 1" or "Jan"
+    } else {
+      displayText = `${lines[0]} ${lines[1]}`;
+    }
+  }
 
   return (
     <g transform={`translate(${x},${y})`}>
-      <text textAnchor="middle" fill="var(--text-main)" fontSize={11} fontWeight="900" fontFamily="inherit">
-        {lines.map((line, i) => (
-          <tspan x={0} dy={i === 0 ? 12 : 14} key={i} style={{ fontSize: i > 0 ? 10 : 11, fill: i > 0 ? 'var(--text-muted)' : 'var(--text-main)' }}>
-            {line}
-          </tspan>
-        ))}
+      <text textAnchor="middle" fill="var(--text-muted)" fontSize={10} fontWeight="700" fontFamily="inherit" dy={16}>
+        {displayText}
       </text>
     </g>
   );
@@ -118,17 +123,7 @@ export function ComboBarLineChart({
                   tickMargin={8}
                 />
                 
-                {showYAxis && (
-                  <YAxis 
-                    domain={[0, dataMax => Math.ceil(dataMax * 1.2)]} 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                    tickCount={5}
-                    width={35}
-                  />
-                )}
-                {!showYAxis && <YAxis hide domain={[0, dataMax => Math.ceil(dataMax * 1.2)]} />}
+                <YAxis hide domain={[0, dataMax => Math.ceil(dataMax * 1.2)]} />
                 
                 <Tooltip
                   cursor={{ fill: 'var(--bg-primary)', opacity: 0.5 }}
@@ -155,15 +150,15 @@ export function ComboBarLineChart({
                   </Bar>
 
                   <Line 
-                    type="linear"
+                    type="monotone"
                     connectNulls={false}
                     dataKey={trendKey} 
                     name="trenKey"
                     stroke="#f97316" 
                     strokeWidth={2}
                     strokeDasharray="6 6"
-                    dot={{ r: 3, fill: '#ffffff', strokeWidth: 2, stroke: '#f97316' }}
-                    activeDot={{ r: 5, stroke: '#f97316', strokeWidth: 2 }}
+                    dot={{ r: 4, fill: '#f97316', stroke: 'none' }}
+                    activeDot={{ r: 6, fill: '#f97316', stroke: 'none' }}
                     isAnimationActive={!isLowEnd}
                   />
 
