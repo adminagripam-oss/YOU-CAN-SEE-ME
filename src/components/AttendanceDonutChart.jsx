@@ -1,5 +1,7 @@
-import React, { useMemo } from 'react';
-import { Label, Pie, PieChart, Sector, Tooltip } from 'recharts';
+import React, { useMemo, useState } from 'react';
+import { Label, Pie, PieChart, Sector, Tooltip, Cell } from 'recharts';
+import { AnimatedNumber } from './AnimatedNumber';
+import { ANIM, isLowEndDevice } from '../config/animation';
 
 import {
   Card,
@@ -18,15 +20,25 @@ const LEGEND_ITEMS = [
 ];
 
 export function AttendanceDonutChart({ verifiedCount = 0, izinCount = 0, sakitCount = 0, mangkirCount = 0, totalEmployees = 0, dateStr = '' }) {
-  const chartData = useMemo(() => [
+  const [hiddenKeys, setHiddenKeys] = useState(new Set());
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const rawData = useMemo(() => [
     { status: 'hadir',   count: verifiedCount,  fill: 'var(--color-hadir)' },
     { status: 'izin',    count: izinCount,       fill: 'var(--color-izin)' },
     { status: 'sakit',   count: sakitCount,      fill: 'var(--color-sakit)' },
     { status: 'mangkir', count: mangkirCount,    fill: 'var(--color-mangkir)' },
-  ].filter(d => d.count > 0), [verifiedCount, izinCount, sakitCount, mangkirCount]);
+  ], [verifiedCount, izinCount, sakitCount, mangkirCount]);
+
+  const chartData = useMemo(() => 
+    rawData.filter(d => d.count > 0 && !hiddenKeys.has(d.status)),
+  [rawData, hiddenKeys]);
 
   const total = chartData.reduce((sum, d) => sum + d.count, 0);
-  const hadirPct = total > 0 ? ((verifiedCount / total) * 100).toFixed(1) : 0;
+  
+  const totalVerified = rawData.find(d => d.status === 'hadir')?.count || 0;
+  const totalAllCategories = rawData.reduce((sum, d) => sum + d.count, 0);
+  const hadirPct = totalAllCategories > 0 ? ((totalVerified / totalAllCategories) * 100).toFixed(1) : 0;
 
   // Counts for legend display
   const counts = { hadir: verifiedCount, izin: izinCount, sakit: sakitCount, mangkir: mangkirCount };
@@ -100,13 +112,45 @@ export function AttendanceDonutChart({ verifiedCount = 0, izinCount = 0, sakitCo
                   paddingAngle={3}
                   stroke="var(--bg-card)"
                   strokeWidth={3}
+                  isAnimationActive={!isLowEndDevice()}
+                  animationDuration={ANIM.duration.slow}
+                  animationEasing={ANIM.easing}
+                  onMouseEnter={(_, index) => setActiveIndex(index)}
+                  onMouseLeave={() => setActiveIndex(-1)}
                   activeShape={({ outerRadius = 0, ...props }) => (
-                    <Sector {...props} outerRadius={outerRadius + 8} />
+                    <Sector {...props} outerRadius={outerRadius + 6} />
                   )}
+                  activeIndex={activeIndex}
                 >
+                  {chartData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={entry.fill} 
+                      style={{
+                        transition: 'opacity 0.3s ease',
+                        opacity: (activeIndex === -1 || activeIndex === index) ? 1 : 0.45
+                      }}
+                    />
+                  ))}
                   <Label
                     content={({ viewBox }) => {
                       if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
+                        let centerText = <AnimatedNumber value={total} duration={ANIM.duration.normal} formatValue={v => v.toLocaleString()} />;
+                        let subText = "Total Ditampilkan";
+                        
+                        if (activeIndex !== -1 && chartData[activeIndex]) {
+                          const activeEntry = chartData[activeIndex];
+                          centerText = activeEntry.count.toLocaleString();
+                          const pct = totalAllCategories > 0 ? ((activeEntry.count / totalAllCategories) * 100).toFixed(1) : 0;
+                          subText = `${chartConfig[activeEntry.status]?.label} (${pct}%)`;
+                        } else if (hiddenKeys.size === 0) {
+                          centerText = <AnimatedNumber value={totalVerified} duration={ANIM.duration.normal} formatValue={v => v.toLocaleString()} />;
+                          subText = `TK Hadir (${hadirPct}%)`;
+                        } else {
+                           centerText = <AnimatedNumber value={total} duration={ANIM.duration.normal} formatValue={v => v.toLocaleString()} />;
+                           subText = "Total Ditampilkan";
+                        }
+
                         return (
                           <text
                             x={viewBox.cx}
@@ -117,16 +161,16 @@ export function AttendanceDonutChart({ verifiedCount = 0, izinCount = 0, sakitCo
                             <tspan
                               x={viewBox.cx}
                               y={viewBox.cy - 8}
-                              style={{ fill: 'var(--text-main)', fontSize: '2rem', fontWeight: 900 }}
+                              style={{ fill: 'var(--text-main)', fontSize: '2rem', fontWeight: 900, transition: 'all 0.3s ease' }}
                             >
-                              {verifiedCount.toLocaleString()}
+                              {centerText}
                             </tspan>
                             <tspan
                               x={viewBox.cx}
                               y={(viewBox.cy || 0) + 18}
-                              style={{ fill: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 700 }}
+                              style={{ fill: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 700, transition: 'all 0.3s ease' }}
                             >
-                              TK Hadir ({hadirPct}%)
+                              {subText}
                             </tspan>
                           </text>
                         );
@@ -147,20 +191,41 @@ export function AttendanceDonutChart({ verifiedCount = 0, izinCount = 0, sakitCo
               marginBottom: '0.75rem',
               padding: '0 12px',
             }}>
-              {LEGEND_ITEMS.map(item => (
-                <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <div style={{
-                    width: '9px', height: '9px', borderRadius: '50%',
-                    background: item.color, flexShrink: 0
-                  }} />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {item.label}
-                  </span>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-main)', minWidth: '16px' }}>
-                    {counts[item.key]}
-                  </span>
-                </div>
-              ))}
+              {LEGEND_ITEMS.map(item => {
+                const isHidden = hiddenKeys.has(item.key);
+                return (
+                  <div 
+                    key={item.key} 
+                    onClick={() => {
+                      setHiddenKeys(prev => {
+                        const next = new Set(prev);
+                        if (next.has(item.key)) next.delete(item.key);
+                        else next.add(item.key);
+                        return next;
+                      });
+                    }}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '5px',
+                      cursor: 'pointer',
+                      opacity: isHidden ? 0.4 : 1,
+                      transition: 'opacity 0.2s ease'
+                    }}
+                  >
+                    <div style={{
+                      width: '9px', height: '9px', borderRadius: '50%',
+                      background: item.color, flexShrink: 0
+                    }} />
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-main)', minWidth: '16px' }}>
+                      {counts[item.key]}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

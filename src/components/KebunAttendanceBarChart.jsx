@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, Tooltip } from 'recharts';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, Tooltip, Cell } from 'recharts';
+import { ANIM, isLowEndDevice } from '../config/animation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import {
@@ -46,6 +47,7 @@ const CustomXAxisTick = (props) => {
 export function KebunAttendanceBarChart({ kebunSummary = [], dateStr, title }) {
   const displayTitle = title || 'TK All Kebun';
   const [currentPage, setCurrentPage] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
 
   useEffect(() => {
@@ -161,12 +163,45 @@ export function KebunAttendanceBarChart({ kebunSummary = [], dateStr, title }) {
                 }}
                 labelStyle={{ color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.78rem', marginBottom: '4px' }}
                 itemStyle={{ color: 'var(--text-main)', fontWeight: 700, fontSize: '0.82rem' }}
-                formatter={(value, name, props) => [
-                  `${value} org (Hadir: ${props.payload.hadirCount})`,
-                  'Total TK'
-                ]}
+                formatter={(value, name, props) => {
+                  let diff = 0;
+                  if (props.payload && props.payload.hadirCount) {
+                    diff = props.payload.totalEmployees - props.payload.hadirCount; // just an example diff to show Mangkir/Izin/Sakit
+                  }
+                  
+                  return [
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span>{value} org (Hadir: {props.payload.hadirCount})</span>
+                      {diff > 0 && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Sisa TK: {diff}</span>}
+                    </div>,
+                    'Total TK'
+                  ]
+                }}
               />
-              <Bar dataKey="totalEmployees" name="Total TK" fill="#15803d" radius={[4, 4, 0, 0]} barSize={38}>
+              <Bar 
+                dataKey="totalEmployees" 
+                name="Total TK" 
+                fill="#15803d" 
+                radius={[6, 6, 0, 0]} 
+                barSize={38}
+                minPointSize={2}
+                isAnimationActive={!isLowEndDevice()}
+                animationDuration={ANIM.duration.normal}
+                animationEasing={ANIM.easing}
+                onMouseEnter={(_, index) => setActiveIndex(index)}
+                onMouseLeave={() => setActiveIndex(-1)}
+              >
+                {paginatedData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill="#15803d"
+                    style={{
+                      transition: 'opacity 0.3s ease',
+                      opacity: (activeIndex === -1 || activeIndex === index) ? 1 : 0.5,
+                      animationDelay: `${index * ANIM.stagger}ms` // stagger entry
+                    }}
+                  />
+                ))}
                 <LabelList
                   dataKey="totalEmployees"
                   position="top"
