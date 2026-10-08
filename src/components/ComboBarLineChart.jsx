@@ -113,17 +113,23 @@ export function ComboBarLineChart({
         ) : (
           <div style={{ width: '100%', height: '100%' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={data} margin={{ top: 28, right: 12, left: 12, bottom: 44 }}>
+              <ComposedChart data={data} margin={{ top: 28, right: 12, left: 0, bottom: 44 }}>
                 <XAxis
                   dataKey="name"
                   tickLine={false}
-                  axisLine={false}
+                  axisLine={{ stroke: 'var(--axis-line-color)' }}
                   tick={<CustomXAxisTick />}
                   interval={0}
                   tickMargin={8}
                 />
                 
-                <YAxis hide domain={[0, dataMax => Math.ceil(dataMax * 1.2)]} />
+                <YAxis 
+                  domain={[0, dataMax => Math.ceil(dataMax * 1.2)]}
+                  axisLine={{ stroke: 'var(--axis-line-color)' }}
+                  tickLine={false}
+                  tick={{ fill: 'var(--text-muted)', fontSize: 10, fontWeight: 700 }}
+                  width={30}
+                />
                 
                 <Tooltip
                   cursor={{ fill: 'var(--bg-primary)', opacity: 0.5 }}
@@ -136,8 +142,7 @@ export function ComboBarLineChart({
                     dataKey={realisasiKey} 
                     name={realisasiKey}
                     fill="#15803d" 
-                    radius={[8, 8, 0, 0]} 
-                    maxBarSize={48}
+                    radius={[0, 0, 0, 0]}
                     isAnimationActive={!isLowEnd}
                   >
                     <LabelList
