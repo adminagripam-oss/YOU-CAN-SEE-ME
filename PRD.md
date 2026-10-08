@@ -2,7 +2,7 @@
 ## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Versi Dokumen & Proyek**: 2.1.4-biometric-patch
+- **Versi Dokumen & Proyek**: 3.1.2-ota-patch
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js (Web IndexedDB), `@capacitor-community/sqlite` (Android Native SQLite)
 - **Biometric Engine**: `@vladmandic/human` (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh + EAR Liveness Engine + Cosine Similarity
 - **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine
@@ -12,7 +12,11 @@
 
 ## 1. Pendahuluan & Latar Belakang
 
-> **Patch Note (v2.1.4-biometric-patch)**: Perbaikan signifikan pada akurasi Face Recognition 1-to-1. Pengumpulan sampel pada saat pendaftaran (Enrollment) kini mengambil 7 sampel dan menggunakan rata-rata vektor (mean template) dengan Outlier Rejection. Pada saat absensi, sistem menggunakan windowing (median filter) dari 5 sampel. Ambang batas (threshold) `MATCH_COSINE_THRESHOLD` telah dikalibrasi ke **0.90** pada skala Cosine Similarity asli, menggantikan kurva pangkat eksponensial lama yang menyebabkan skor terlalu rendah pada kondisi pencahayaan kurang optimal. Karyawan yang absen kini akan lebih mudah dikenali asalkan wajah dalam keadaan stabil (Liveness Verified).
+> **Patch Note (v3.1.2-ota-patch)**: Pembaruan besar untuk stabilitas Offline-First dan Keamanan Sinkronisasi. 
+> 1) Perlindungan **Safe SQLite Migration** kini memblokir hilangnya data (Drop Table) saat migrasi tabel SQLite gagal sebagian di Android.
+> 2) Pembaruan cache di `syncEngine.js` menggunakan metode `INSERT ... ON CONFLICT DO UPDATE SET kolom = COALESCE(...)` untuk menghindari *nullification* pada payload sinkronisasi.
+> 3) Validasi Biometrik Kiosk yang lebih ketat menolak array vektor cacat (`NaN` atau *All-Zeros*) dan memaksa pendaftaran ulang, menjamin keakuratan ekstraksi.
+> 4) Integrasi mulus antara `@capgo/capacitor-updater` dan `@vladmandic/human`, menahan pemberitahuan *AppReady* ke OS hingga GPU/Model AI selesai diunduh untuk mencegah *false OTA rollback*.
 
 
 Sistem absensi biometrik wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pendekatan **1-to-N (Verifikasi 1-ke-Banyak)**. Skema $O(N)$ ini menimbulkan kendala fatal saat jumlah karyawan membengkak, termasuk lonjakan latensi server dan tingkat *false positive* yang tinggi.
@@ -166,6 +170,12 @@ CREATE TABLE employees (
     department VARCHAR(100) NOT NULL,
     kebun VARCHAR(100),
     afdeling VARCHAR(100),
+    nama_kebun VARCHAR(100),
+    status_tk VARCHAR(50),
+    jabatan VARCHAR(100),
+    status_perkawinan VARCHAR(50),
+    has_master_biometric BOOLEAN DEFAULT false,
+    region VARCHAR(100),
     deleted_at TIMESTAMPTZ -- Pengganti Cascade Delete (Soft Delete)
 );
 

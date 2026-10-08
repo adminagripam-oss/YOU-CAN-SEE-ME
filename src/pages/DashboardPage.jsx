@@ -2,10 +2,55 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Users, UserCheck, FileText, Stethoscope, UserX, Clock, Calendar, Building2, ChevronDown, ListFilter } from 'lucide-react';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, ReferenceLine, Cell } from 'recharts';
+import { ANIM, isLowEndDevice } from '../config/animation';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { AttendanceDonutChart } from '../components/AttendanceDonutChart';
 import { KebunAttendanceBarChart } from '../components/KebunAttendanceBarChart';
+import { ComboBarLineChart } from '../components/ComboBarLineChart';
+import { KPICard } from '../components/KPICard';
+
+const CustomAreaLabel = (props) => {
+  const { x, y, value, index, totalPoints } = props;
+  if (value === undefined || value === null) return null;
+  const isDense = totalPoints > 14;
+  
+  if (isDense) {
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text
+          x={10}
+          y={0}
+          dy="0.3em"
+          textAnchor="start"
+          fill="var(--text-main)"
+          fontSize={9.5}
+          fontWeight="900"
+          fontFamily="inherit"
+          transform="rotate(-90)"
+        >
+          {value}
+        </text>
+      </g>
+    );
+  }
+  
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={-10}
+        textAnchor="middle"
+        fill="var(--text-main)"
+        fontSize={11}
+        fontWeight="900"
+        fontFamily="inherit"
+      >
+        {value}
+      </text>
+    </g>
+  );
+};
 
 const KEBUN_TO_REGION = {
   'Bukit Harapan I': 'Sumut 2',
@@ -50,6 +95,13 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
   const [kebunPage, setKebunPage] = useState(1);
   const [logsPage, setLogsPage] = useState(1);
   const ITEMS_PER_PAGE = 25;
+  const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 480);
+
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 480);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // List of all kebuns from regional CSV data
   const allKebunsFromCSV = useMemo(() => [
@@ -299,7 +351,12 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           if (log.status.includes('Izin')) ket = 'Izin';
           else if (log.status.includes('Sakit')) ket = 'Sakit';
           else if (log.status.includes('Mangkir')) ket = 'Mangkir';
-          else if (log.status.toLowerCase().includes('lupa_checkout') || log.status.toLowerCase().includes('lupa check-out')) ket = 'Hadir';
+          else if (log.status.toLowerCase().includes('lupa_checkout') || log.status.toLowerCase().includes('lupa check-out')) ket = 'Lupa Check-out';
+        }
+
+        // According to rule: Lupa Check-out counts as Hadir for sparkline
+        if (ket === 'Lupa Check-out') {
+          ket = 'Hadir';
         }
 
         // If employee already had 'Hadir', keep it. Else assign new ket.
@@ -309,14 +366,26 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
       });
 
       const hadirCount = Object.values(groups).filter(v => v === 'Hadir').length;
+      const izinCnt = Object.values(groups).filter(v => v === 'Izin').length;
+      const sakitCnt = Object.values(groups).filter(v => v === 'Sakit').length;
+      const totalEmpCount = selectedKebun && selectedKebun !== 'All' 
+        ? kebunEmpIds.size 
+        : totalEmployees;
+      
+      const mangkirCnt = totalEmpCount > 0 ? Math.max(totalEmpCount - hadirCount - izinCnt - sakitCnt, 0) : 0;
 
       trendData.push({
         date: displayDate,
-        signups: hadirCount
+        signups: hadirCount,
+        val: hadirCount, // for KPICard sparkline mapping
+        izin: izinCnt,
+        sakit: sakitCnt,
+        mangkir: mangkirCnt,
+        total: totalEmpCount
       });
     }
     return trendData;
-  }, [logs, dateRange, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees, totalEmployees]);
 
   // Grouping data by Week (W1-W5) for the selected month
   const weeklyChartData = useMemo(() => {
@@ -328,12 +397,27 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate(); // 28, 29, 30, or 31
 
     const weeklyData = [
-      { week: 'W1', desktop: 0 },
-      { week: 'W2', desktop: 0 },
-      { week: 'W3', desktop: 0 },
-      { week: 'W4', desktop: 0 },
-      { week: 'W5', desktop: 0 }
+      { name: 'W1', realisasi: 0 },
+      { name: 'W2', realisasi: 0 },
+      { name: 'W3', realisasi: 0 },
+      { name: 'W4', realisasi: 0 },
+      { name: 'W5', realisasi: 0 }
     ];
+
+    const today = new Date();
+    const isFutureMonth = currentYear > today.getFullYear() || (currentYear === today.getFullYear() && currentMonth > today.getMonth());
+    const isCurrentMonth = currentYear === today.getFullYear() && currentMonth === today.getMonth();
+    const todayDate = today.getDate();
+
+    if (isFutureMonth) {
+      weeklyData.forEach(w => w.realisasi = null);
+    } else if (isCurrentMonth) {
+      if (todayDate < 1) weeklyData[0].realisasi = null;
+      if (todayDate < 8) weeklyData[1].realisasi = null;
+      if (todayDate < 15) weeklyData[2].realisasi = null;
+      if (todayDate < 22) weeklyData[3].realisasi = null;
+      if (todayDate < 29) weeklyData[4].realisasi = null;
+    }
 
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
@@ -366,21 +450,27 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     });
 
     Object.values(groups).forEach(dateNum => {
-      if (dateNum >= 1 && dateNum <= 7) weeklyData[0].desktop++;
-      else if (dateNum >= 8 && dateNum <= 14) weeklyData[1].desktop++;
-      else if (dateNum >= 15 && dateNum <= 21) weeklyData[2].desktop++;
-      else if (dateNum >= 22 && dateNum <= 28) weeklyData[3].desktop++;
-      else if (dateNum >= 29 && dateNum <= 31) weeklyData[4].desktop++;
+      if (dateNum >= 1 && dateNum <= 7) weeklyData[0].realisasi++;
+      else if (dateNum >= 8 && dateNum <= 14) weeklyData[1].realisasi++;
+      else if (dateNum >= 15 && dateNum <= 21) weeklyData[2].realisasi++;
+      else if (dateNum >= 22 && dateNum <= 28) weeklyData[3].realisasi++;
+      else if (dateNum >= 29 && dateNum <= 31) weeklyData[4].realisasi++;
     });
+    
+    // Add subtitle text for weeks
+    const shortMonth = targetDate.toLocaleString('id-ID', { month: 'short' });
+    weeklyData[0].name = `W1|(1-7 ${shortMonth})`;
+    weeklyData[1].name = `W2|(8-14 ${shortMonth})`;
+    weeklyData[2].name = `W3|(15-21 ${shortMonth})`;
+    weeklyData[3].name = `W4|(22-28 ${shortMonth})`;
+    weeklyData[4].name = `W5|(29-${daysInMonth} ${shortMonth})`;
 
-    // Optionally remove W5 if there are no days 29-31 in a non-leap February, but usually keeping it constant W1-W5 is better for UI consistency.
-    // Let's filter out W5 if daysInMonth < 29
     if (daysInMonth < 29) {
       return weeklyData.slice(0, 4);
     }
 
     return weeklyData;
-  }, [logs, dateRange, selectedKebun, filteredEmployees]);
+  }, [logs, dateRange, selectedKebun, filteredEmployees, totalEmployees]);
 
   // Grouping data by Month (All months this year)
   const monthlyChartData = useMemo(() => {
@@ -388,44 +478,53 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
     if (isNaN(endDate.getTime())) return [];
 
     const currentYear = endDate.getFullYear();
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
 
     const monthlyData = [];
     const kebunEmpIds = new Set(filteredEmployees.map(e => String(e.id)));
     const kebunEmpNiks = new Set(filteredEmployees.map(e => String(e.nik)));
 
+    const today = new Date();
+
     for (let m = 0; m < 12; m++) {
-      const logsForMonth = logs.filter((l) => {
-        if (!l.timestamp) return false;
-        const logDate = new Date(l.timestamp);
-        if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== m) return false;
+      const isFuture = currentYear > today.getFullYear() || (currentYear === today.getFullYear() && m > today.getMonth());
+      
+      let realisasiVal = 0;
+      if (isFuture) {
+        realisasiVal = null;
+      } else {
+        const logsForMonth = logs.filter((l) => {
+          if (!l.timestamp) return false;
+          const logDate = new Date(l.timestamp);
+          if (logDate.getFullYear() !== currentYear || logDate.getMonth() !== m) return false;
 
-        if (selectedKebun && selectedKebun !== 'All') {
-          const empIdStr = String(l.employee_id);
-          const nikStr = String(l.nik);
-          return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
-        }
-        return true;
-      });
+          if (selectedKebun && selectedKebun !== 'All') {
+            const empIdStr = String(l.employee_id);
+            const nikStr = String(l.nik);
+            return kebunEmpIds.has(empIdStr) || kebunEmpNiks.has(nikStr);
+          }
+          return true;
+        });
 
-      const groups = {};
-      logsForMonth.forEach(log => {
-        const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT'));
-        let ket = 'Hadir';
-        if (log.status && (log.status.includes('Izin') || log.status.includes('Sakit') || log.status.includes('Mangkir'))) {
-          ket = 'Tidak Hadir';
-        }
-        if (ket === 'Hadir') {
-          const dateStrKey = new Date(log.timestamp).toLocaleDateString();
-          groups[`${log.employee_id}_${dateStrKey}`] = true;
-        }
-      });
+        const groups = {};
+        logsForMonth.forEach(log => {
+          const isCheckOut = log.attendance_type === 'CHECK-OUT' || (log.status && log.status.includes('CHECK-OUT'));
+          let ket = 'Hadir';
+          if (log.status && (log.status.includes('Izin') || log.status.includes('Sakit') || log.status.includes('Mangkir'))) {
+            ket = 'Tidak Hadir';
+          }
+          if (ket === 'Hadir') {
+            const dateStrKey = new Date(log.timestamp).toLocaleDateString();
+            groups[`${log.employee_id}_${dateStrKey}`] = true;
+          }
+        });
 
-      const hadirCount = Object.keys(groups).length;
+        realisasiVal = Object.keys(groups).length;
+      }
 
       monthlyData.push({
-        month: months[m],
-        desktop: hadirCount
+        name: `${months[m]}|${currentYear}`,
+        realisasi: realisasiVal
       });
     }
     return monthlyData;
@@ -581,199 +680,36 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
 
       {/* 1. TOP SECTION: 6 SYMMETRICAL WORKFORCE KPI CARDS */}
       <div className="dashboard-kpi-grid">
-
-        {/* KPI 1: Total Tenaga Kerja */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #3b82f6',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Total TK
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.5rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0 0.2rem', lineHeight: 1 }}>
-            {totalEmployees.toLocaleString('id-ID')}
-          </div>
-          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-            Seluruh Tenaga Kerja
-          </span>
-        </div>
-
-        {/* KPI 2: TK Hadir */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #15803d',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            TK Hadir
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
-            {verifiedCount.toLocaleString('id-ID')}
-          </div>
-          <div style={{ display: 'flex' }}>
-            {!isMultiDay ? (
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#15803d', background: 'rgba(21,128,61,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
-                {hadirPct}% Aktual
-              </span>
-            ) : (
-              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Verified Scan</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 3: Izin */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #4b5563',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Izin
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
-            {izinCount}
-          </div>
-          <div style={{ display: 'flex' }}>
-            {!isMultiDay ? (
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4b5563', background: 'rgba(75,85,99,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
-                {izinPct}% Resmi
-              </span>
-            ) : (
-              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Izin Resmi</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 4: Sakit */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #b45309',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Sakit
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
-            {sakitCount}
-          </div>
-          <div style={{ display: 'flex' }}>
-            {!isMultiDay ? (
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#b45309', background: 'rgba(180,83,9,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
-                {sakitPct}% Aktual
-              </span>
-            ) : (
-              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Ket. Dokter</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 5: Mangkir */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #b91c1c',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Mangkir
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
-            {mangkirCount}
-          </div>
-          <div style={{ display: 'flex' }}>
-            {!isMultiDay ? (
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#b91c1c', background: 'rgba(185,28,28,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
-                {mangkirPct}% Aktual
-              </span>
-            ) : (
-              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Tanpa Keterangan</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 6: Lupa Check-out */}
-        <div className="glass-card" style={{
-          position: 'relative',
-          overflow: 'hidden',
-          marginBottom: 0,
-          padding: '1.25rem',
-          border: '1px solid var(--border-color)',
-          borderTop: '4px solid #f97316',
-          borderRadius: '8px',
-          background: 'var(--bg-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          minHeight: '124px'
-        }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Lupa Checkout
-          </span>
-          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' }}>
-            {lupaCheckoutCount}
-          </div>
-          <div style={{ display: 'flex' }}>
-            {!isMultiDay ? (
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#f97316', background: 'rgba(249,115,22,0.12)', padding: '2px 7px', borderRadius: '4px' }}>
-                {lupaCheckoutPct}% Aktual
-              </span>
-            ) : (
-              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Butuh Koreksi</span>
-            )}
-          </div>
-        </div>
-
+        <KPICard 
+          index={0} title="Total TK" value={totalEmployees} subtitle="Seluruh Tenaga Kerja" color="#3b82f6"
+          trendData={trendChartData.map(d => ({ date: d.date, val: d.total }))}
+          isMultiDay={isMultiDay}
+        />
+        <KPICard 
+          index={1} title="TK Hadir" value={verifiedCount} subtitle="Verified Scan" color="#15803d" percentage={hadirPct}
+          trendData={trendChartData.map(d => ({ date: d.date, val: d.signups }))}
+          isMultiDay={isMultiDay}
+        />
+        <KPICard 
+          index={2} title="Izin" value={izinCount} subtitle="Izin Resmi" color="#4b5563" percentage={izinPct}
+          trendData={trendChartData.map(d => ({ date: d.date, val: d.izin }))}
+          isMultiDay={isMultiDay}
+        />
+        <KPICard 
+          index={3} title="Sakit" value={sakitCount} subtitle="Ket. Dokter" color="#b45309" percentage={sakitPct}
+          trendData={trendChartData.map(d => ({ date: d.date, val: d.sakit }))}
+          isMultiDay={isMultiDay}
+        />
+        <KPICard 
+          index={4} title="Mangkir" value={mangkirCount} subtitle="Tanpa Keterangan" color="#b91c1c" percentage={mangkirPct}
+          trendData={trendChartData.map(d => ({ date: d.date, val: d.mangkir }))}
+          isMultiDay={isMultiDay}
+        />
+        <KPICard 
+          index={5} title="Lupa Checkout" value={lupaCheckoutCount} subtitle="Butuh Koreksi" color="#f97316" percentage={lupaCheckoutPct}
+          trendData={[]} // No historical array explicitly created for Lupa Checkout yet
+          isMultiDay={isMultiDay}
+        />
       </div>
 
       {/* 2. CHARTS SECTION — RESPONSIVE 40:60 GRID */}
@@ -829,8 +765,8 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
           </div>
 
           {/* DYNAMIC CHARTS BASED ON SELECTED BADGE */}
+          <div style={{ position: 'relative', width: '100%', height: isMobileScreen ? '220px' : '280px', marginBottom: '2rem', marginTop: '0.5rem', opacity: 1, transition: 'all 0.25s ease' }}>
           {chartView === 'Harian' && trendChartData.length > 0 && (
-            <div style={{ width: '100%', height: '230px', marginBottom: '2rem', marginTop: '0.5rem' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={trendChartData}
@@ -850,7 +786,6 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                       <feComposite in="SourceGraphic" in2="blur" operator="over" />
                     </filter>
                   </defs>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
                   <XAxis
                     dataKey="date"
                     tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
@@ -861,6 +796,7 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                     tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
                     tickLine={false}
                     axisLine={false}
+                    domain={[0, dataMax => Math.ceil(dataMax * 1.2)]}
                   />
                   <Tooltip
                     allowEscapeViewBox={{ x: true, y: true }}
@@ -891,79 +827,25 @@ export default function DashboardPage({ employees = [], logs = [], modelsLoaded 
                   >
                     <LabelList
                       dataKey="signups"
-                      position="top"
-                      formatter={(val) => `${val}`}
-                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
+                      content={<CustomAreaLabel totalPoints={trendChartData.length} />}
                     />
                   </Area>
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
           )}
 
           {chartView === 'Mingguan' && weeklyChartData.length > 0 && (
-            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weeklyChartData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis
-                    dataKey="week"
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--border-color)' }}
-                  />
-                  <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    allowEscapeViewBox={{ x: true, y: true }}
-                    wrapperStyle={{ zIndex: 100 }}
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '4px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}
-                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
-                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                  />
-                  <Bar dataKey="desktop" name="TK Hadir" fill="#15803d" radius={4}>
-                    <LabelList
-                      dataKey="desktop"
-                      position="top"
-                      formatter={(val) => `${val}`}
-                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
-                    />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+             <ComboBarLineChart 
+                data={weeklyChartData}
+             />
           )}
 
           {chartView === 'Bulanan' && monthlyChartData.length > 0 && (
-            <div style={{ width: '100%', height: '220px', marginBottom: '2rem', marginTop: '0.5rem' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyChartData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis
-                    dataKey="month"
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--border-color)' }}
-                  />
-                  <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold', fontFamily: 'inherit' }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    allowEscapeViewBox={{ x: true, y: true }}
-                    wrapperStyle={{ zIndex: 100 }}
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '4px', color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}
-                    itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
-                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                  />
-                  <Bar dataKey="desktop" name="TK Hadir" fill="#15803d" radius={4}>
-                    <LabelList
-                      dataKey="desktop"
-                      position="top"
-                      formatter={(val) => `${val}`}
-                      style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 900 }}
-                    />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+             <ComboBarLineChart 
+                data={monthlyChartData}
+             />
           )}
+          </div>
 
           {filteredKebunSummary.length === 0 ? (
             <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
