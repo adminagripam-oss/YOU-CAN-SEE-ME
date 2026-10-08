@@ -62,12 +62,6 @@ function AppContent() {
     async function setupStorage() {
       try {
         await initSQLite();
-        // Beri tahu Capgo Updater bahwa aplikasi telah berhasil diinisialisasi agar tidak rollback
-        try {
-          CapacitorUpdater.notifyAppReady();
-        } catch (err) {
-          console.warn('[OTA] Capgo Updater not available natively', err);
-        }
       } catch (err) {
         console.error('[App] SQLite initialization error:', err);
       } finally {
@@ -76,6 +70,29 @@ function AppContent() {
     }
     setupStorage();
   }, []);
+
+  // Notify Capacitor Updater when both DB and Models are ready
+  useEffect(() => {
+    let timeoutId;
+    if (dbReady && modelsLoaded) {
+      try {
+        CapacitorUpdater.notifyAppReady();
+      } catch (err) {
+        console.warn('[OTA] Capgo Updater not available natively', err);
+      }
+    } else if (dbReady) {
+      // Fallback: Notify after 8 seconds anyway if models are taking too long
+      // so Capgo doesn't rollback the OTA
+      timeoutId = setTimeout(() => {
+        try {
+          CapacitorUpdater.notifyAppReady();
+        } catch (err) {}
+      }, 8000);
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [dbReady, modelsLoaded]);
 
   const [confirmModalConfig, setConfirmModalConfig] = useState({
     isOpen: false,
@@ -1283,6 +1300,9 @@ function AppContent() {
           console.warn('[App] Caches cleared due to model load error. Reloading page...');
           window.location.reload();
           return;
+        } else {
+          // If already healed once and still failing, allow UI to load so it doesn't get stuck
+          setModelsLoaded(true);
         }
       }
     }

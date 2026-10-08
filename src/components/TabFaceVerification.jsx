@@ -849,10 +849,22 @@ export default function TabFaceVerification({
       if (vec) {
         const parsedArray = toVectorArray(vec);
         if (parsedArray) {
-          if (parsedArray.length !== 1024) {
-             console.warn(`[LOAD MASTER VECTORS] Template lama terdeteksi (${parsedArray.length}-dim). Perlu daftar ulang.`);
+          let isAllZeros = true;
+          let hasNaN = false;
+          for (let i = 0; i < parsedArray.length; i++) {
+            if (Number.isNaN(parsedArray[i]) || parsedArray[i] === null || parsedArray[i] === undefined) {
+              hasNaN = true;
+              break;
+            }
+            if (parsedArray[i] !== 0) {
+              isAllZeros = false;
+            }
+          }
+
+          if (parsedArray.length !== 1024 || hasNaN || isAllZeros) {
+             console.warn(`[LOAD MASTER VECTORS] Template rusak terdeteksi (Dim: ${parsedArray.length}, NaN: ${hasNaN}, Zeros: ${isAllZeros}). Perlu daftar ulang.`);
              masterVectorRef.current = null;
-             if (showToast) showToast('Template Kedaluwarsa', 'Karyawan menggunakan versi biometrik lama. Re-Scan wajah (Pendaftaran Ulang) diperlukan melalui Edit Karyawan.', 'error');
+             if (showToast) showToast('Template Biometrik Rusak', 'Data wajah rusak atau menggunakan versi lama. Silakan Re-Scan wajah melalui Edit Karyawan.', 'error');
              return;
           }
 

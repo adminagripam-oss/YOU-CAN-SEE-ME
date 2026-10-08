@@ -394,6 +394,9 @@ export async function initSQLite(): Promise<void> {
       const empIdCol = aqInfo.values?.find((c: any) => c.name === 'employee_id');
       if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
         console.log('[SQLite Service] Migrating local_attendance_queue employee_id column from INTEGER to TEXT...');
+        const resQueue = await dbConnection.query(`SELECT COUNT(*) as count FROM local_attendance_queue`);
+        const countQueue = resQueue?.values?.[0]?.count || 0;
+
         await dbConnection.execute(`
           CREATE TABLE IF NOT EXISTS local_attendance_queue_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,10 +417,20 @@ export async function initSQLite(): Promise<void> {
           );
           INSERT OR IGNORE INTO local_attendance_queue_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
             SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_queue;
-          DROP TABLE IF EXISTS local_attendance_queue_legacy;
-          ALTER TABLE local_attendance_queue RENAME TO local_attendance_queue_legacy;
-          ALTER TABLE local_attendance_queue_v2 RENAME TO local_attendance_queue;
         `);
+
+        const resQueueV2 = await dbConnection.query(`SELECT COUNT(*) as count FROM local_attendance_queue_v2`);
+        const countQueueV2 = resQueueV2?.values?.[0]?.count || 0;
+
+        if (countQueueV2 >= countQueue) {
+          await dbConnection.execute(`
+            DROP TABLE IF EXISTS local_attendance_queue_legacy;
+            ALTER TABLE local_attendance_queue RENAME TO local_attendance_queue_legacy;
+            ALTER TABLE local_attendance_queue_v2 RENAME TO local_attendance_queue;
+          `);
+        } else {
+          console.error('[SQLite Service] Migration failed row count check for local_attendance_queue.');
+        }
         console.log('[SQLite Service] Migrated local_attendance_queue to TEXT employee_id.');
       }
     } catch (e) {
@@ -429,6 +442,9 @@ export async function initSQLite(): Promise<void> {
       const empIdCol = alInfo.values?.find((c: any) => c.name === 'employee_id');
       if (empIdCol && empIdCol.type && empIdCol.type.toUpperCase().includes('INT')) {
         console.log('[SQLite Service] Migrating local_attendance_logs employee_id column from INTEGER to TEXT...');
+        const resLogs = await dbConnection.query(`SELECT COUNT(*) as count FROM local_attendance_logs`);
+        const countLogs = resLogs?.values?.[0]?.count || 0;
+
         await dbConnection.execute(`
           CREATE TABLE IF NOT EXISTS local_attendance_logs_v2 (
             id TEXT PRIMARY KEY,
@@ -450,10 +466,20 @@ export async function initSQLite(): Promise<void> {
           );
           INSERT OR IGNORE INTO local_attendance_logs_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
             SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_logs;
-          DROP TABLE IF EXISTS local_attendance_logs_legacy;
-          ALTER TABLE local_attendance_logs RENAME TO local_attendance_logs_legacy;
-          ALTER TABLE local_attendance_logs_v2 RENAME TO local_attendance_logs;
         `);
+
+        const resLogsV2 = await dbConnection.query(`SELECT COUNT(*) as count FROM local_attendance_logs_v2`);
+        const countLogsV2 = resLogsV2?.values?.[0]?.count || 0;
+
+        if (countLogsV2 >= countLogs) {
+          await dbConnection.execute(`
+            DROP TABLE IF EXISTS local_attendance_logs_legacy;
+            ALTER TABLE local_attendance_logs RENAME TO local_attendance_logs_legacy;
+            ALTER TABLE local_attendance_logs_v2 RENAME TO local_attendance_logs;
+          `);
+        } else {
+          console.error('[SQLite Service] Migration failed row count check for local_attendance_logs.');
+        }
         console.log('[SQLite Service] Migrated local_attendance_logs to TEXT employee_id.');
       }
     } catch (e) {
@@ -625,8 +651,20 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 
     // 1. Cache to local_employees
     await db.run(
-      `INSERT OR REPLACE INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO local_employees (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET 
+         has_master_biometric = EXCLUDED.has_master_biometric,
+         nik = COALESCE(NULLIF(EXCLUDED.nik, ''), local_employees.nik),
+         name = COALESCE(NULLIF(EXCLUDED.name, ''), local_employees.name),
+         department = COALESCE(NULLIF(EXCLUDED.department, ''), local_employees.department),
+         afdeling = COALESCE(NULLIF(EXCLUDED.afdeling, ''), local_employees.afdeling),
+         nama_kebun = COALESCE(NULLIF(EXCLUDED.nama_kebun, ''), local_employees.nama_kebun),
+         status_tk = COALESCE(NULLIF(EXCLUDED.status_tk, ''), local_employees.status_tk),
+         jabatan = COALESCE(NULLIF(EXCLUDED.jabatan, ''), local_employees.jabatan),
+         status_perkawinan = COALESCE(NULLIF(EXCLUDED.status_perkawinan, ''), local_employees.status_perkawinan),
+         region = COALESCE(NULLIF(EXCLUDED.region, ''), local_employees.region),
+         is_synced = EXCLUDED.is_synced`,
       [
         empIdStr,
         user.nik,
@@ -645,8 +683,12 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 
     // 2. Cache to local_master_descriptors
     await db.run(
-      `INSERT OR REPLACE INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(employee_id) DO UPDATE SET
+         descriptor_json = COALESCE(NULLIF(EXCLUDED.descriptor_json, ''), local_master_descriptors.descriptor_json),
+         geometric_descriptor_json = COALESCE(NULLIF(EXCLUDED.geometric_descriptor_json, ''), local_master_descriptors.geometric_descriptor_json),
+         updated_at = EXCLUDED.updated_at`,
       [
         empIdStr,
         vectorStr,
@@ -1518,9 +1560,23 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
 
     // 1. Simpan ke Antrean Sync (Outbox)
     const sql = `
-      INSERT OR REPLACE INTO local_employee_sync_queue 
+      INSERT INTO local_employee_sync_queue 
       (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      ON CONFLICT(id) DO UPDATE SET
+         nik = COALESCE(NULLIF(EXCLUDED.nik, ''), local_employee_sync_queue.nik),
+         name = COALESCE(NULLIF(EXCLUDED.name, ''), local_employee_sync_queue.name),
+         department = COALESCE(NULLIF(EXCLUDED.department, ''), local_employee_sync_queue.department),
+         afdeling = COALESCE(NULLIF(EXCLUDED.afdeling, ''), local_employee_sync_queue.afdeling),
+         nama_kebun = COALESCE(NULLIF(EXCLUDED.nama_kebun, ''), local_employee_sync_queue.nama_kebun),
+         status_tk = COALESCE(NULLIF(EXCLUDED.status_tk, ''), local_employee_sync_queue.status_tk),
+         jabatan = COALESCE(NULLIF(EXCLUDED.jabatan, ''), local_employee_sync_queue.jabatan),
+         status_perkawinan = COALESCE(NULLIF(EXCLUDED.status_perkawinan, ''), local_employee_sync_queue.status_perkawinan),
+         region = COALESCE(NULLIF(EXCLUDED.region, ''), local_employee_sync_queue.region),
+         descriptor_json = COALESCE(NULLIF(EXCLUDED.descriptor_json, ''), local_employee_sync_queue.descriptor_json),
+         geometric_descriptor_json = COALESCE(NULLIF(EXCLUDED.geometric_descriptor_json, ''), local_employee_sync_queue.geometric_descriptor_json),
+         has_master_biometric = EXCLUDED.has_master_biometric,
+         is_synced = 0
     `;
     const params = [
       String(empData.id),
@@ -1542,9 +1598,21 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
 
     // 2. Simpan juga ke Cache Karyawan agar langsung muncul di UI dengan status lengkap (konsisten dengan Web/IndexedDB)
     const cacheSql = `
-      INSERT OR REPLACE INTO local_employees 
+      INSERT INTO local_employees 
       (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, is_synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+         nik = COALESCE(NULLIF(EXCLUDED.nik, ''), local_employees.nik),
+         name = COALESCE(NULLIF(EXCLUDED.name, ''), local_employees.name),
+         department = COALESCE(NULLIF(EXCLUDED.department, ''), local_employees.department),
+         afdeling = COALESCE(NULLIF(EXCLUDED.afdeling, ''), local_employees.afdeling),
+         nama_kebun = COALESCE(NULLIF(EXCLUDED.nama_kebun, ''), local_employees.nama_kebun),
+         status_tk = COALESCE(NULLIF(EXCLUDED.status_tk, ''), local_employees.status_tk),
+         jabatan = COALESCE(NULLIF(EXCLUDED.jabatan, ''), local_employees.jabatan),
+         status_perkawinan = COALESCE(NULLIF(EXCLUDED.status_perkawinan, ''), local_employees.status_perkawinan),
+         region = COALESCE(NULLIF(EXCLUDED.region, ''), local_employees.region),
+         has_master_biometric = EXCLUDED.has_master_biometric,
+         is_synced = EXCLUDED.is_synced
     `;
     const cacheParams = [
       String(empData.id),
