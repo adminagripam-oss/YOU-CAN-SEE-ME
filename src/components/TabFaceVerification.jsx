@@ -849,6 +849,13 @@ export default function TabFaceVerification({
       if (vec) {
         const parsedArray = toVectorArray(vec);
         if (parsedArray) {
+          if (parsedArray.length !== 1024) {
+             console.warn(`[LOAD MASTER VECTORS] Template lama terdeteksi (${parsedArray.length}-dim). Perlu daftar ulang.`);
+             masterVectorRef.current = null;
+             if (showToast) showToast('Template Kedaluwarsa', 'Karyawan menggunakan versi biometrik lama. Re-Scan wajah (Pendaftaran Ulang) diperlukan melalui Edit Karyawan.', 'error');
+             return;
+          }
+
           masterVectorRef.current = parsedArray;
           scoreHistoryRef.current = []; // flush any zeros accumulated before master loaded
 

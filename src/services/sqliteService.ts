@@ -414,7 +414,8 @@ export async function initSQLite(): Promise<void> {
           );
           INSERT OR IGNORE INTO local_attendance_queue_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
             SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_queue;
-          DROP TABLE local_attendance_queue;
+          DROP TABLE IF EXISTS local_attendance_queue_legacy;
+          ALTER TABLE local_attendance_queue RENAME TO local_attendance_queue_legacy;
           ALTER TABLE local_attendance_queue_v2 RENAME TO local_attendance_queue;
         `);
         console.log('[SQLite Service] Migrated local_attendance_queue to TEXT employee_id.');
@@ -449,7 +450,8 @@ export async function initSQLite(): Promise<void> {
           );
           INSERT OR IGNORE INTO local_attendance_logs_v2 (id, employee_id, nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at)
             SELECT id, CAST(employee_id AS TEXT), nik, name, department, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, is_synced, created_at FROM local_attendance_logs;
-          DROP TABLE local_attendance_logs;
+          DROP TABLE IF EXISTS local_attendance_logs_legacy;
+          ALTER TABLE local_attendance_logs RENAME TO local_attendance_logs_legacy;
           ALTER TABLE local_attendance_logs_v2 RENAME TO local_attendance_logs;
         `);
         console.log('[SQLite Service] Migrated local_attendance_logs to TEXT employee_id.');
