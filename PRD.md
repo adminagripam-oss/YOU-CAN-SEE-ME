@@ -2,7 +2,7 @@
 ## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Versi Dokumen & Proyek**: 3.1.2-ota-patch
+- **Versi Dokumen & Proyek**: 3.1.3-ota-patch
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js (Web IndexedDB), `@capacitor-community/sqlite` (Android Native SQLite)
 - **Biometric Engine**: `@vladmandic/human` (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh + EAR Liveness Engine + Cosine Similarity
 - **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine
@@ -12,11 +12,12 @@
 
 ## 1. Pendahuluan & Latar Belakang
 
-> **Patch Note (v3.1.2-ota-patch)**: Pembaruan besar untuk stabilitas Offline-First dan Keamanan Sinkronisasi. 
-> 1) Perlindungan **Safe SQLite Migration** kini memblokir hilangnya data (Drop Table) saat migrasi tabel SQLite gagal sebagian di Android.
-> 2) Pembaruan cache di `syncEngine.js` menggunakan metode `INSERT ... ON CONFLICT DO UPDATE SET kolom = COALESCE(...)` untuk menghindari *nullification* pada payload sinkronisasi.
-> 3) Validasi Biometrik Kiosk yang lebih ketat menolak array vektor cacat (`NaN` atau *All-Zeros*) dan memaksa pendaftaran ulang, menjamin keakuratan ekstraksi.
-> 4) Integrasi mulus antara `@capgo/capacitor-updater` dan `@vladmandic/human`, menahan pemberitahuan *AppReady* ke OS hingga GPU/Model AI selesai diunduh untuk mencegah *false OTA rollback*.
+> **Patch Note (v3.1.3-ota-patch)**: Pembaruan presentasi visual pada Executive Dashboard.
+> 1) Memperbaiki *bug* *infinite re-render* animasi angka (count-up) pada kartu KPI dan chart Donut. Animasi kini menggunakan state terisolasi (`AnimatedNumber`) agar tidak memicu render berulang pada *parent*.
+> 2) Koreksi rumusan pembagi persentase *TK Hadir* pada *Donut Chart* untuk rentang tanggal > 1 hari (menggunakan total hari-orang aktual pada rentang tersebut, sehingga tidak melebihi 100%).
+> 3) Penggantian grafik "Ringkasan HK Per Kebun" Mingguan dan Bulanan menjadi `ComboBarLineChart` (Realisasi HK, Garis Tren, Garis Target HK) untuk memudahkan analisis pencapaian secara visual.
+> 
+> *(Catatan V3.1.2)*: Penambahan *Safe SQLite Migration*, pembaruan *cache sync*, dan validasi ketat Array Kosong/NaN pada biometrik.
 
 
 Sistem absensi biometrik wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pendekatan **1-to-N (Verifikasi 1-ke-Banyak)**. Skema $O(N)$ ini menimbulkan kendala fatal saat jumlah karyawan membengkak, termasuk lonjakan latensi server dan tingkat *false positive* yang tinggi.
