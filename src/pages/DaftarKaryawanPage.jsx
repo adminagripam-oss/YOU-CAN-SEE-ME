@@ -20,9 +20,15 @@ import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, cosine } from '../biometrics';
 import { useAuth } from '../context/AuthContext';
+import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 
 export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
+
+  // Face Frame Geometry Refs
+  const editFrameStateRef = useRef({ state: 'idle', progress: 0 });
+  const scanFrameStateRef = useRef({ state: 'idle', progress: 0 });
+  const FRAME_RECT = useMemo(() => getFrameRect(640, 480), []);
 
   // Filters State
   const { user } = useAuth();
@@ -152,16 +158,30 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     return result?.face?.[0] ?? null;
   }, [modelsLoaded]);
 
-  const onScanFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
+  const onScanFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx, boundingBox }) => {
     if (smoothedMesh) {
       scanCurrentGFVRef.current = smoothedMesh;
     }
     
+    // Evaluate if face is properly within the UI frame (same as check-in)
+    const frameCheck = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+    let currentProgress = scanSamplesRef.current.length / BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+
+    if (!frameCheck.ok) {
+      scanFrameStateRef.current = { state: 'misaligned', progress: currentProgress };
+      if (!scanSamplesReady && scanSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+        setScanCameraStatusText(FRAME_HINTS[frameCheck.reason]);
+        setScanCameraStatusColor('var(--accent-danger)');
+      }
+    } else {
+      scanFrameStateRef.current = { state: 'scanning', progress: currentProgress };
+    }
+
     if (detection && detection.embedding) {
       const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
       if (scanSamplesRef.current.length >= total) {
         // Cukup sampel
-      } else {
+      } else if (frameCheck.ok) { // Hanya proses jika berada di dalam bingkai
         const now = performance.now();
         if (isGoodFrame(detection) && (now - scanLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
           scanLastSampleTimeRef.current = now;
@@ -211,6 +231,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           }
         }
       }
+    }
+
+    if (scanSamplesReady) {
+      scanFrameStateRef.current = { state: 'success', progress: 1 };
     }
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -387,12 +411,26 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   }, [modelsLoaded]);
 
   // Callback saat wajah diproses
-  const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx }) => {
+  const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx, boundingBox }) => {
+    // Evaluate if face is properly within the UI frame (same as check-in)
+    const frameCheck = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+    let currentProgress = editSamplesRef.current.length / BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+
+    if (!frameCheck.ok) {
+      editFrameStateRef.current = { state: 'misaligned', progress: currentProgress };
+      if (!editSamplesReady && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+        setEditCameraStatusText(FRAME_HINTS[frameCheck.reason]);
+        setEditCameraStatusColor('var(--accent-danger)');
+      }
+    } else {
+      editFrameStateRef.current = { state: 'scanning', progress: currentProgress };
+    }
+
     if (detection && detection.embedding) {
       const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
       if (editSamplesRef.current.length >= total) {
         // Cukup sampel
-      } else {
+      } else if (frameCheck.ok) { // Hanya proses jika berada di dalam bingkai
         const now = performance.now();
         if (isGoodFrame(detection) && (now - editLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
           editLastSampleTimeRef.current = now;
@@ -442,6 +480,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           }
         }
       }
+    }
+
+    if (editSamplesReady) {
+      editFrameStateRef.current = { state: 'success', progress: 1 };
     }
 
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -1474,6 +1516,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
                 <video ref={scanVideoRef} autoPlay muted playsInline style={{ transform: scanFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
                 <canvas ref={scanCanvasRef} className="overlay-canvas" style={{ transform: scanFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
+                <FaceFrameOverlay mode="rescan" stateRef={scanFrameStateRef} />
               </div>
               <div style={{ marginTop: '8px', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px' }}>
                 <span>Status:</span>
@@ -1572,6 +1615,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                         <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
                           <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
                           <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
+                          <FaceFrameOverlay mode="register" stateRef={editFrameStateRef} />
                         </div>
                       </div>
                     ) : (

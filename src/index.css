@@ -625,7 +625,7 @@ canvas.overlay-canvas {
   width: 100% !important;
   height: 100% !important;
   pointer-events: none;
-  z-index: 10 !important;
+  z-index: 4 !important; /* Di bawah FaceFrameOverlay (5) dan badge (10) */
 }
 
 .loading-overlay {

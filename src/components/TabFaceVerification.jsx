@@ -7,6 +7,7 @@ import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
 import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median } from '../biometrics';
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
+import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 
@@ -433,9 +434,7 @@ function drawGeometricMesh(ctx, pts, livenessDone, detectionScore) {
     [R, G, B] = [255, 50, 50];
   }
 
-  if (!isNaN(minX) && !isNaN(minY) && !isNaN(maxX) && !isNaN(maxY)) {
-    drawScannerCorners(ctx, minX, minY, maxX, maxY, R, G, B, livenessDone);
-  }
+  // Bingkai lama telah dihapus dan digantikan FaceFrameOverlay
 
   // Perbesar ukuran titik (radius dari 1.2 menjadi 2.5) dan buat lebih tegas (opacity 0.85)
   ctx.fillStyle = `rgba(${R}, ${G}, ${B}, 0.85)`;
@@ -567,6 +566,8 @@ function calculateEAR(pts, eyePoints) {
 const MP_LEFT_EYE = [33, 133, 160, 158, 144, 153];
 const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 
+const FRAME_RECT = getFrameRect(640, 480);
+
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
   gpsPermission = 'granted', liveCoords = null, onRefreshEmployees,
@@ -658,6 +659,12 @@ export default function TabFaceVerification({
 
   // Auto-submit and stale closure prevention refs
   const hasAutoSubmittedRef = useRef(false);
+
+  const frameStateRef = useRef({ state: 'idle', progress: 0 });
+  const setFrame = useCallback((state, progress = 0) => {
+    if (hasAutoSubmittedRef.current) return;
+    frameStateRef.current = { state, progress };
+  }, []);
   const selectedStatusRef = useRef(selectedStatus);
   const attendanceStatusRef = useRef(attendanceStatus);
   const handleVerifySubmitRef = useRef(null);
@@ -722,6 +729,7 @@ export default function TabFaceVerification({
     livenessVerifiedRef.current = false;
     hasBeepedRef.current = false; // Reset beep state
     hasAutoSubmittedRef.current = false; // Reset auto-submit state
+    frameStateRef.current = { state: 'idle', progress: 0 };
     masterGFVRef.current = null;
     masterVectorRef.current = null;
     matchRateRef.current = 0;
@@ -1061,13 +1069,16 @@ export default function TabFaceVerification({
     // boundingBox is a BoundingBox object {minX,minY,maxX,maxY,width,height,...}
     const faceWidth = boundingBox?.width || 0;
     if (!warningMsg && faceWidth > 0) {
-      if (faceWidth < 140) warningMsg = 'Wajah Terlalu Jauh';
-      else if (faceWidth > 360) warningMsg = 'Wajah Terlalu Dekat';
+      const fit = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+      if (!fit.ok) {
+        warningMsg = FRAME_HINTS[fit.reason];
+      }
     }
 
     setLightingWarning(warningMsg);
 
     if (warningMsg) {
+      setFrame('misaligned');
       setLivenessStatusMsg(warningMsg);
       setMatchRate(0);
       // Draw the mesh overlay first so the user sees visual feedback,
@@ -1151,6 +1162,7 @@ export default function TabFaceVerification({
           setLivenessStatusMsg('Mencocokkan Wajah...');
         }
       } else {
+        setFrame('misaligned');
         if (isStableRef.current) {
           isStableRef.current = false;
           setIsStable(false);
@@ -1167,6 +1179,7 @@ export default function TabFaceVerification({
     // Skip calculations if already matched or if attendance is complete for today
     const currentStatus = attendanceStatusRef.current;
     if (currentStatus.checkInTime && currentStatus.checkOutTime) {
+      setFrame('idle');
       setLivenessStatusMsg('✓ Absensi Hari Ini Sudah Lengkap');
       setMatchRate(0);
       setIsMatched(false);
@@ -1230,6 +1243,7 @@ export default function TabFaceVerification({
       isMatchedRef.current = matched;
       setMatchRate(rawPct);
       setIsMatched(matched);
+      setFrame('scanning', matched ? 1 : Math.min(1, scoreHistoryRef.current.length / BIOMETRIC_CONFIG.SCAN_SAMPLE_COUNT));
 
       if (matched) {
         if (!hasBeepedRef.current) {
@@ -1290,6 +1304,7 @@ export default function TabFaceVerification({
   /** Callback saat tidak ada wajah terdeteksi di frame */
   const onNoFace = useCallback(() => {
     currentDescRef.current = null;
+    setFrame('idle');
     setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
     setDebugAiInfo({
       backend: human.tf?.getBackend?.() || 'webgl',
@@ -1321,11 +1336,13 @@ export default function TabFaceVerification({
   // ── Submit Attendance (Transactional async/await) ──────────────────────
   const handleVerifySubmit = async (attendanceType = 'CHECK_IN') => {
     if (!selectedEmployeeId) {
+      hasAutoSubmittedRef.current = false;
       showToast('Pilih Karyawan', 'Harap pilih karyawan terlebih dahulu!', 'error');
       return;
     }
 
     if (attendanceStatus.checkInTime && attendanceStatus.checkOutTime) {
+      hasAutoSubmittedRef.current = false;
       showToast('Absensi Lengkap', 'Karyawan ini sudah melakukan Check-In dan Check-Out hari ini.', 'warning');
       return;
     }
@@ -1342,14 +1359,17 @@ export default function TabFaceVerification({
     // Wajibkan scan wajah baik saat CHECK-IN maupun CHECK-OUT untuk status Hadir
     if ((attendanceType === 'CHECK_IN' || attendanceType === 'CHECK_OUT') && selectedStatus === 'Hadir') {
       if (!currentDescRef.current) {
+        hasAutoSubmittedRef.current = false;
         showToast('Deteksi Gagal', 'Wajah belum terdeteksi!', 'error');
         return;
       }
       if (!livenessVerifiedRef.current) {
+        hasAutoSubmittedRef.current = false;
         showToast('Liveness Ditolak', 'Harap lakukan verifikasi kedip mata!', 'error');
         return;
       }
       if (!isMatchedRef.current) {
+        hasAutoSubmittedRef.current = false;
         showToast('Wajah Tidak Cocok', `Skor ${matchRateRef.current.toFixed(1)}% — tidak sesuai data karyawan!`, 'error');
         return;
       }
@@ -1378,6 +1398,7 @@ export default function TabFaceVerification({
 
     if (isAbsenHadir) {
       if (!navigator.geolocation) {
+        hasAutoSubmittedRef.current = false;
         showToast('GPS Tidak Didukung', 'Perangkat Anda tidak mendukung pelacakan lokasi GPS.', 'error');
         setIsSubmitting(false);
         return;
@@ -1570,6 +1591,7 @@ export default function TabFaceVerification({
     }
 
     if (isSuccess) {
+      frameStateRef.current = { state: 'success', progress: 1 };
       showToast('Absensi Berhasil', successMsg, 'success');
 
       setAttendanceStatus((prev) => ({
@@ -1589,11 +1611,14 @@ export default function TabFaceVerification({
         setNikInput('');
         setAttendanceStatus({ checkedIn: false, checkInTime: null, checkOutTime: null, loaded: false });
         hasAutoSubmittedRef.current = false;
+        frameStateRef.current = { state: 'idle', progress: 0 };
       }, 2500);
 
       if (onVerificationSuccess) onVerificationSuccess();
     } else {
       // Jika Catch Error: Tampilkan Toast Gagal & Biarkan Mode Tombol Tetap (State Tidak Berubah)
+      frameStateRef.current = { state: 'error', progress: 0 };
+      setTimeout(() => { frameStateRef.current = { state: 'idle', progress: 0 }; }, 1500);
       showToast('Absensi Gagal', `Gagal memproses absensi ${typeLabel}. Silakan coba lagi.`, 'error');
       hasAutoSubmittedRef.current = false;
     }
@@ -1836,6 +1861,10 @@ export default function TabFaceVerification({
                   className="overlay-canvas"
                   style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }}
                 ></canvas>
+                <FaceFrameOverlay
+                  mode={(attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? 'checkout' : 'checkin'}
+                  stateRef={frameStateRef}
+                />
 
                 {/* ── GPS Granted Badge (koordinat live di bawah kamera) ───── */}
                 {gpsPermission === 'granted' && liveCoords && (
