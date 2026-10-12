@@ -10,6 +10,9 @@ import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } fr
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
+import { useScanViewport } from '../hooks/useScanViewport';
+import FullscreenScanShell from './FullscreenScanShell';
+import FaceScanSurface from './FaceScanSurface';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GEOFENCING CONFIGURATION (Dipindahkan dari server.js)
@@ -566,12 +569,18 @@ function calculateEAR(pts, eyePoints) {
 const MP_LEFT_EYE = [33, 133, 160, 158, 144, 153];
 const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 
-const FRAME_RECT = getFrameRect(640, 480);
-
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
   gpsPermission = 'granted', liveCoords = null, onRefreshEmployees,
 }) {
+  const { useFullscreen, canvasSize } = useScanViewport();
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const frameRectRef = useRef(getFrameRect(canvasSize.width, canvasSize.height));
+
+  useEffect(() => {
+    frameRectRef.current = getFrameRect(canvasSize.width, canvasSize.height);
+  }, [canvasSize.width, canvasSize.height]);
+
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedAfdelingFilter, setSelectedAfdelingFilter] = useState('');
   const [nikInput, setNikInput] = useState('');
@@ -712,6 +721,56 @@ export default function TabFaceVerification({
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [attendanceStatus.checkedIn, attendanceStatus.checkInTime, attendanceStatus.checkOutTime]);
 
+  // ── Ekstrak reset sesi scan (Fase 3.2) ──────────────────────────────────
+  const resetScanSession = useCallback(() => {
+    livenessVerifiedRef.current = false;
+    hasBeepedRef.current = false;
+    hasAutoSubmittedRef.current = false;
+    matchRateRef.current = 0;
+    isMatchedRef.current = false;
+    scoreHistoryRef.current = [];
+    frameTimesRef.current = [];
+    adaptiveWindowRef.current = 5;
+    matchTimerStartedRef.current = false;
+    matchStartTimeRef.current = 0;
+    lastDetectTimeRef.current = 0;
+    lastDetectResultRef.current = null;
+    lastProcessedDetectionRef.current = null;
+    isStableRef.current = false;
+    currentDescRef.current = null;
+    frameStateRef.current = { state: 'idle', progress: 0 };
+    setIsStable(false);
+    setLivenessVerified(false);
+    setIsLiveHuman(false);
+    setMatchRate(0);
+    setIsMatched(false);
+    setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
+    setLightingWarning('');
+  }, []);
+
+  const openScanner = useCallback(() => {
+    if (!selectedEmployeeId) {
+      if (showToast) showToast('Pilih Karyawan', 'Harap pilih karyawan terlebih dahulu!', 'warning');
+      return;
+    }
+    if (!modelsLoaded) {
+      if (showToast) showToast('Model Belum Siap', 'Tunggu hingga AI Face Recognition selesai dimuat.', 'warning');
+      return;
+    }
+    if (!masterVectorRef.current) {
+      if (showToast) showToast('Template Wajah Belum Tersedia', 'Karyawan ini belum memiliki template wajah atau template rusak. Silakan daftarkan wajah terlebih dahulu.', 'error');
+      return;
+    }
+    resetScanSession();
+    setScannerOpen(true);
+  }, [selectedEmployeeId, modelsLoaded, showToast, resetScanSession]);
+
+  const closeScanner = useCallback(() => {
+    if (isSubmitting) return;
+    setScannerOpen(false);
+    resetScanSession();
+  }, [isSubmitting, resetScanSession]);
+
   // Select employee
   const handleEmployeeSelect = async (e) => {
     const empId = e.target.value;
@@ -726,27 +785,12 @@ export default function TabFaceVerification({
 
     headTurnRef.current = { left: false, right: false };
     eyeClosedRef.current = false;
-    livenessVerifiedRef.current = false;
-    hasBeepedRef.current = false; // Reset beep state
-    hasAutoSubmittedRef.current = false; // Reset auto-submit state
-    frameStateRef.current = { state: 'idle', progress: 0 };
     masterGFVRef.current = null;
     masterVectorRef.current = null;
-    matchRateRef.current = 0;
-    isMatchedRef.current = false;
-    scoreHistoryRef.current = [];
-    // Reset mobile perf refs on employee switch
-    frameTimesRef.current = [];
-    adaptiveWindowRef.current = 5;
-    matchTimerStartedRef.current = false;
-    matchStartTimeRef.current = 0;
-    lastDetectTimeRef.current = 0;
-    lastDetectResultRef.current = null;
-    isStableRef.current = false;
-    setIsStable(false);
     setHeadTurnState({ left: false, right: false });
-    setLivenessVerified(false); setMatchRate(0); setIsMatched(false);
-    setGfvMode(false); setLastResultMsg(null);
+    setGfvMode(false);
+    setLastResultMsg(null);
+    resetScanSession();
 
     const emp = employees.find((it) => String(it.id) === String(empId));
     if (emp) {
@@ -1069,7 +1113,7 @@ export default function TabFaceVerification({
     // boundingBox is a BoundingBox object {minX,minY,maxX,maxY,width,height,...}
     const faceWidth = boundingBox?.width || 0;
     if (!warningMsg && faceWidth > 0) {
-      const fit = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+      const fit = evaluateFaceInFrame(boundingBox, frameRectRef.current);
       if (!fit.ok) {
         warningMsg = FRAME_HINTS[fit.reason];
       }
@@ -1323,7 +1367,7 @@ export default function TabFaceVerification({
   useNormalizedFaceMesh({
     videoRef,
     canvasRef,
-    active: modelsLoaded,
+    active: modelsLoaded && (!useFullscreen || scannerOpen),
     facingMode,
     smoothingMethod: 'ema',
     emaAlpha: 0.35,
@@ -1331,6 +1375,7 @@ export default function TabFaceVerification({
     onFaceProcessed,
     onNoFace,
     onCameraError,
+    canvasSize,
   });
 
   // ── Submit Attendance (Transactional async/await) ──────────────────────
@@ -1594,6 +1639,10 @@ export default function TabFaceVerification({
       frameStateRef.current = { state: 'success', progress: 1 };
       showToast('Absensi Berhasil', successMsg, 'success');
 
+      setTimeout(() => {
+        closeScanner();
+      }, 1500);
+
       setAttendanceStatus((prev) => ({
         checkedIn: attendanceType === 'CHECK_IN' ? true : (attendanceType === 'CHECK_OUT' ? false : prev.checkedIn),
         checkInTime: attendanceType === 'CHECK_IN' ? recordTimestamp : prev.checkInTime,
@@ -1618,7 +1667,10 @@ export default function TabFaceVerification({
     } else {
       // Jika Catch Error: Tampilkan Toast Gagal & Biarkan Mode Tombol Tetap (State Tidak Berubah)
       frameStateRef.current = { state: 'error', progress: 0 };
-      setTimeout(() => { frameStateRef.current = { state: 'idle', progress: 0 }; }, 1500);
+      setTimeout(() => {
+        frameStateRef.current = { state: 'idle', progress: 0 };
+        resetScanSession();
+      }, 1500);
       showToast('Absensi Gagal', `Gagal memproses absensi ${typeLabel}. Silakan coba lagi.`, 'error');
       hasAutoSubmittedRef.current = false;
     }
@@ -1789,8 +1841,8 @@ export default function TabFaceVerification({
             )}
           </div>
 
-          {/* Live Camera */}
-          {isHadir && (
+          {/* Desktop Live Camera */}
+          {isHadir && !useFullscreen && (
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <label style={{ margin: 0 }}>Kamera Scanner</label>
@@ -1910,7 +1962,7 @@ export default function TabFaceVerification({
                         : isLiveHuman
                           ? isStable
                             ? 'rgba(59, 130, 246, 0.92)'
-                            : 'rgba(245, 158, 11, 0.92)' // Yellow/orange alert background when face needs to stabilize
+                            : 'rgba(245, 158, 11, 0.92)'
                           : 'rgba(15, 23, 42, 0.88)',
                       color: '#ffffff',
                       fontSize: '0.8rem',
@@ -1930,7 +1982,7 @@ export default function TabFaceVerification({
                       isStable ? (
                         <>✓ Liveness Terverifikasi! · Mencocokkan...</>
                       ) : (
-                        <>{livenessStatusMsg}</> // Will be "Tatap lurus ke kamera dan diam sejenak..."
+                        <>{livenessStatusMsg}</>
                       )
                     ) : (
                       <>{livenessStatusMsg}</>
@@ -1949,7 +2001,7 @@ export default function TabFaceVerification({
                       zIndex: 10,
                       padding: '4px 12px',
                       borderRadius: '12px',
-                      background: 'rgba(239, 68, 68, 0.9)', // Red warning
+                      background: 'rgba(239, 68, 68, 0.9)',
                       color: '#ffffff',
                       fontSize: '0.75rem',
                       fontWeight: 700,
@@ -1975,74 +2027,246 @@ export default function TabFaceVerification({
             </div>
           )}
 
-
-
-          {/* ── ATTENDANCE BUTTON ──────────────────────────────────── */}
-          <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexDirection: 'column' }}>
-            {attendanceStatus.checkInTime && attendanceStatus.checkOutTime ? (
-              /* ALREADY COMPLETED BOTH CHECK-IN & CHECK-OUT */
-              <button
-                type="button"
-                className="btn"
-                disabled
+          {/* Mobile Scanner Card when useFullscreen */}
+          {isHadir && useFullscreen && (
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <div
                 style={{
-                  padding: '13px',
-                  fontSize: '0.9rem',
-                  fontWeight: 800,
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-muted)',
+                  background: 'var(--bg-card)',
                   border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  cursor: 'not-allowed',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
                 }}
               >
-                <i className="fa-solid fa-lock"></i> Absensi Selesai Hari Ini
-              </button>
-            ) : (attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? (
-              /* CHECK OUT BUTTON — shown after successful check-in */
-              <button
-                type="button"
-                className="btn"
-                disabled={isSubmitting}
-                onClick={() => handleVerifySubmit('CHECK_OUT')}
-                style={{
-                  padding: '13px',
-                  fontSize: '0.9rem',
-                  fontWeight: 800,
-                  background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                }}
-              >
-                {isSubmitting ? (
-                  <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    Scanner Biometrik
+                  </span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      color: modelsLoaded ? '#10b981' : '#f59e0b'
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: modelsLoaded ? '#10b981' : '#f59e0b'
+                      }}
+                    />
+                    {modelsLoaded ? 'AI Siap' : 'Memuat AI...'}
+                  </span>
+                </div>
+
+                {selectedEmployee ? (
+                  <div
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px'
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        background: 'var(--accent-primary)',
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '1rem',
+                        fontWeight: 'bold',
+                        flexShrink: 0
+                      }}
+                    >
+                      {selectedEmployee.name ? selectedEmployee.name.charAt(0).toUpperCase() : '?'}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {selectedEmployee.name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        NIK: {selectedEmployee.nik || '-'} · {selectedEmployee.afdeling || selectedEmployee.department || '-'}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <><i className="fa-solid fa-right-from-bracket"></i> LOG OUT (CHECK-OUT)</>
+                  <div
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px dashed var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '14px',
+                      textAlign: 'center',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    Pilih karyawan dari daftar di atas untuk memulai absensi.
+                  </div>
                 )}
-              </button>
-            ) : (
-              /* CHECK IN BUTTON */
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={
-                  isSubmitting ||
-                  !selectedEmployeeId ||
-                  (isHadir && (!canCheckIn || isSubmitting))
-                }
-                onClick={() => handleVerifySubmit('CHECK_IN')}
-                style={{ padding: '13px', fontSize: '0.9rem', fontWeight: 800 }}
-              >
-                {isSubmitting ? (
-                  <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
+
+                {/* Primary Mobile Action Button */}
+                {attendanceStatus.checkInTime && attendanceStatus.checkOutTime ? (
+                  <button
+                    type="button"
+                    disabled
+                    style={{
+                      padding: '14px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-primary)',
+                      color: 'var(--text-muted)',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      cursor: 'not-allowed',
+                      minHeight: '48px'
+                    }}
+                  >
+                    <i className="fa-solid fa-lock" /> Absensi Selesai Hari Ini
+                  </button>
+                ) : (attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? (
+                  <button
+                    type="button"
+                    disabled={!selectedEmployeeId || !modelsLoaded || isSubmitting}
+                    onClick={openScanner}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                      color: '#fff',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      cursor: (!selectedEmployeeId || !modelsLoaded || isSubmitting) ? 'not-allowed' : 'pointer',
+                      opacity: (!selectedEmployeeId || !modelsLoaded || isSubmitting) ? 0.6 : 1,
+                      minHeight: '48px',
+                      boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)'
+                    }}
+                  >
+                    <i className="fa-solid fa-camera" /> BUKA SCANNER CHECK-OUT
+                  </button>
                 ) : (
-                  <><i className="fa-solid fa-circle-check"></i> PROSES ABSENSI (CHECK-IN)</>
+                  <button
+                    type="button"
+                    disabled={!selectedEmployeeId || !modelsLoaded || isSubmitting}
+                    onClick={openScanner}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'var(--accent-primary)',
+                      color: '#fff',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      cursor: (!selectedEmployeeId || !modelsLoaded || isSubmitting) ? 'not-allowed' : 'pointer',
+                      opacity: (!selectedEmployeeId || !modelsLoaded || isSubmitting) ? 0.6 : 1,
+                      minHeight: '48px',
+                      boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
+                    }}
+                  >
+                    <i className="fa-solid fa-camera" /> BUKA SCANNER CHECK-IN
+                  </button>
                 )}
-              </button>
-            )}
-          </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── ATTENDANCE BUTTON (Desktop atau non-Hadir) ───────────────── */}
+          {(!useFullscreen || !isHadir) && (
+            <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexDirection: 'column' }}>
+              {attendanceStatus.checkInTime && attendanceStatus.checkOutTime ? (
+                /* ALREADY COMPLETED BOTH CHECK-IN & CHECK-OUT */
+                <button
+                  type="button"
+                  className="btn"
+                  disabled
+                  style={{
+                    padding: '13px',
+                    fontSize: '0.9rem',
+                    fontWeight: 800,
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    cursor: 'not-allowed',
+                  }}
+                >
+                  <i className="fa-solid fa-lock"></i> Absensi Selesai Hari Ini
+                </button>
+              ) : (attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? (
+                /* CHECK OUT BUTTON — shown after successful check-in */
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={isSubmitting}
+                  onClick={() => handleVerifySubmit('CHECK_OUT')}
+                  style={{
+                    padding: '13px',
+                    fontSize: '0.9rem',
+                    fontWeight: 800,
+                    background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isSubmitting ? (
+                    <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
+                  ) : (
+                    <><i className="fa-solid fa-right-from-bracket"></i> LOG OUT (CHECK-OUT)</>
+                  )}
+                </button>
+              ) : (
+                /* CHECK IN BUTTON */
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={
+                    isSubmitting ||
+                    !selectedEmployeeId ||
+                    (isHadir && (!canCheckIn || isSubmitting))
+                  }
+                  onClick={() => handleVerifySubmit('CHECK_IN')}
+                  style={{ padding: '13px', fontSize: '0.9rem', fontWeight: 800 }}
+                >
+                  {isSubmitting ? (
+                    <><i className="fa-solid fa-spinner fa-spin"></i> Memproses...</>
+                  ) : (
+                    <><i className="fa-solid fa-circle-check"></i> PROSES ABSENSI (CHECK-IN)</>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── RIGHT PANEL ─────────────────────────────────────────────── */}
@@ -2317,6 +2541,57 @@ export default function TabFaceVerification({
           )}
         </div>
       </div>
+
+      {/* Fullscreen Biometric Scanner for Mobile */}
+      {useFullscreen && (
+        <FullscreenScanShell
+          open={scannerOpen}
+          onClose={closeScanner}
+          title={(attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? 'SCAN CHECK-OUT' : 'SCAN CHECK-IN'}
+          subtitle={`${selectedEmployee?.name || '-'} (${selectedEmployee?.nik || '-'})`}
+          facingMode={facingMode}
+          onToggleFacing={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+          hint={lightingWarning || livenessStatusMsg}
+          hintTone={lightingWarning ? 'warning' : (isLiveHuman && isMatched ? 'success' : 'info')}
+        >
+          <FaceScanSurface
+            videoRef={videoRef}
+            canvasRef={canvasRef}
+            facingMode={facingMode}
+            canvasSize={canvasSize}
+            mode={(attendanceStatus.checkedIn || attendanceStatus.checkInTime) ? 'checkout' : 'checkin'}
+            frameStateRef={frameStateRef}
+            extraOverlay={
+              gpsPermission === 'granted' && liveCoords && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '12px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 15,
+                    padding: '5px 14px',
+                    borderRadius: '20px',
+                    background: 'rgba(16, 185, 129, 0.88)',
+                    color: '#fff',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backdropFilter: 'blur(4px)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <Navigation size={13} />
+                  {liveCoords.lat.toFixed(5)}, {liveCoords.lng.toFixed(5)}
+                  <span style={{ opacity: 0.8 }}>±{liveCoords.accuracy.toFixed(0)}m</span>
+                </div>
+              )
+            }
+          />
+        </FullscreenScanShell>
+      )}
     </div>
   );
 }

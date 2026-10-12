@@ -21,14 +21,22 @@ import { human } from '../humanSingleton';
 import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, cosine } from '../biometrics';
 import { useAuth } from '../context/AuthContext';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
+import { useScanViewport } from '../hooks/useScanViewport';
+import FullscreenScanShell from '../components/FullscreenScanShell';
+import FaceScanSurface from '../components/FaceScanSurface';
 
 export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
+  const { useFullscreen, isPortrait, canvasSize } = useScanViewport();
 
   // Face Frame Geometry Refs
   const editFrameStateRef = useRef({ state: 'idle', progress: 0 });
   const scanFrameStateRef = useRef({ state: 'idle', progress: 0 });
-  const FRAME_RECT = useMemo(() => getFrameRect(640, 480), []);
+  const frameRectRef = useRef(getFrameRect(canvasSize.width, canvasSize.height, isPortrait));
+
+  useEffect(() => {
+    frameRectRef.current = getFrameRect(canvasSize.width, canvasSize.height, isPortrait);
+  }, [canvasSize, isPortrait]);
 
   // Filters State
   const { user } = useAuth();
@@ -116,6 +124,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   // null = belum dicek | { isDuplicate, matchedName, similarity } = hasil cek duplikasi
   const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
   const [editSamplesReady, setEditSamplesReady] = useState(false);
+  const [editScannerOpen, setEditScannerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editFacingMode, setEditFacingMode] = useState('environment');
 
@@ -164,7 +173,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     }
     
     // Evaluate if face is properly within the UI frame (same as check-in)
-    const frameCheck = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+    const frameCheck = evaluateFaceInFrame(boundingBox, frameRectRef.current);
     let currentProgress = scanSamplesRef.current.length / BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
 
     if (!frameCheck.ok) {
@@ -220,12 +229,22 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                   setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
                   setScanCameraStatusColor('var(--accent-success)');
                   setScanSamplesReady(true);
+                  if (useFullscreen) {
+                    setTimeout(() => {
+                      handleScanSubmitRef.current?.();
+                    }, 1500);
+                  }
                 }
               } catch (_) {
                 setScanFaceCheckResult(null);
                 setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
                 setScanCameraStatusColor('var(--accent-success)');
                 setScanSamplesReady(true);
+                if (useFullscreen) {
+                  setTimeout(() => {
+                    handleScanSubmitRef.current?.();
+                  }, 1500);
+                }
               }
             })();
           }
@@ -263,6 +282,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setScanCameraStatusColor('var(--accent-danger)');
   }, []);
 
+  const handleScanSubmitRef = useRef(null);
+
   useNormalizedFaceMesh({
     videoRef: scanVideoRef,
     canvasRef: scanCanvasRef,
@@ -273,6 +294,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     onFaceProcessed: onScanFaceProcessed,
     onNoFace: onScanNoFace,
     onCameraError: onScanCameraError,
+    canvasSize,
   });
 
   const openScanModal = (emp) => {
@@ -288,7 +310,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   };
 
   const handleScanSubmit = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!scanCurrentDescriptorRef.current) {
       showToast('Peringatan', 'Wajah belum terdeteksi.', 'error');
       return;
@@ -398,6 +420,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       setIsScanningSubmit(false);
     }
   };
+
+  useEffect(() => {
+    handleScanSubmitRef.current = handleScanSubmit;
+  });
   // -------------------------
 
   // Injected detection callback untuk human.js di mode Edit Kamera
@@ -413,7 +439,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   // Callback saat wajah diproses
   const onEditFaceProcessed = React.useCallback(({ detection, smoothedMesh, ctx, boundingBox }) => {
     // Evaluate if face is properly within the UI frame (same as check-in)
-    const frameCheck = evaluateFaceInFrame(boundingBox, FRAME_RECT);
+    const frameCheck = evaluateFaceInFrame(boundingBox, frameRectRef.current);
     let currentProgress = editSamplesRef.current.length / BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
 
     if (!frameCheck.ok) {
@@ -469,12 +495,22 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                   setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
                   setEditCameraStatusColor('var(--accent-success)');
                   setEditSamplesReady(true);
+                  if (useFullscreen) {
+                    setTimeout(() => {
+                      setEditScannerOpen(false);
+                    }, 1500);
+                  }
                 }
               } catch (_) {
                 setEditFaceCheckResult(null);
                 setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
                 setEditCameraStatusColor('var(--accent-success)');
                 setEditSamplesReady(true);
+                if (useFullscreen) {
+                  setTimeout(() => {
+                    setEditScannerOpen(false);
+                  }, 1500);
+                }
               }
             })();
           }
@@ -517,13 +553,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   useNormalizedFaceMesh({
     videoRef: editVideoRef,
     canvasRef: editCanvasRef,
-    active: editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded,
+    active: editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && modelsLoaded && (!useFullscreen || editScannerOpen),
     facingMode: editFacingMode,
     smoothAlpha: 0.35,
     detectFaces: detectEditFacesCallback,
     onFaceProcessed: onEditFaceProcessed,
     onNoFace: onEditNoFace,
     onCameraError: onEditCameraError,
+    canvasSize,
   });
 
   // Handle Edit Photo File
@@ -611,6 +648,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     editCurrentDescriptorRef.current = null;
     setEditFaceCheckResult(null);
     setEditSamplesReady(false);
+    setEditScannerOpen(false);
     editSamplesRef.current = [];
     editLastSampleTimeRef.current = 0;
     setEditModalOpen(true);
@@ -1481,8 +1519,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
       </div>
 
-      {/* Modal Scan Wajah */}
-      {scanModalOpen && scanEmp && (
+      {/* Modal Scan Wajah (Desktop) */}
+      {scanModalOpen && scanEmp && !useFullscreen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
           <div className="glass-card" style={{ maxWidth: '400px', width: '100%', border: '1px solid var(--accent-primary)' }}>
             <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1531,6 +1569,29 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             </form>
           </div>
         </div>
+      )}
+
+      {/* Fullscreen Rescan Shell for Mobile */}
+      {scanModalOpen && scanEmp && useFullscreen && (
+        <FullscreenScanShell
+          open={scanModalOpen}
+          onClose={() => setScanModalOpen(false)}
+          title="SCAN ULANG WAJAH"
+          subtitle={`${scanEmp.name} (NIK: ${scanEmp.nik})`}
+          facingMode={scanFacingMode}
+          onToggleFacing={() => setScanFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+          hint={scanCameraStatusText}
+          hintTone={scanFaceCheckResult?.isDuplicate ? 'error' : (scanSamplesReady ? 'success' : 'info')}
+        >
+          <FaceScanSurface
+            videoRef={scanVideoRef}
+            canvasRef={scanCanvasRef}
+            facingMode={scanFacingMode}
+            canvasSize={canvasSize}
+            mode="rescan"
+            frameStateRef={scanFrameStateRef}
+          />
+        </FullscreenScanShell>
       )}
 
       {/* Modal Edit Data Karyawan (Sama seperti sebelumnya) */}
@@ -1595,35 +1656,123 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 </label>
                 {editUpdateBiometrics && (
                   <div style={{ marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                      <button type="button" className={`btn ${editFormMode === 'camera' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'camera' ? 'var(--bg-primary)' : undefined, color: editFormMode !== 'camera' ? 'var(--text-main)' : '#fff', border: editFormMode !== 'camera' ? '1px solid var(--border-color)' : '1px solid transparent', width: 'auto' }} onClick={() => setEditFormMode('camera')}><i className="fa-solid fa-video"></i> Gunakan Kamera</button>
-                      <button type="button" className={`btn ${editFormMode === 'file' ? 'btn-primary' : ''}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: editFormMode !== 'file' ? 'var(--bg-primary)' : undefined, color: editFormMode !== 'file' ? 'var(--text-main)' : '#fff', border: editFormMode !== 'file' ? '1px solid var(--border-color)' : '1px solid transparent', width: 'auto' }} onClick={() => setEditFormMode('file')}><i className="fa-solid fa-upload"></i> Unggah File Foto</button>
-                    </div>
                     {editFormMode === 'camera' ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <>
+                        {!useFullscreen ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Kamera Biometrik Wajah</span>
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() => setEditFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+                                style={{ padding: '4px 8px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border-color)', width: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                title="Ganti Kamera Depan/Belakang"
+                              >
+                                <i className="fa-solid fa-rotate"></i> Tukar Kamera
+                              </button>
+                            </div>
+                            <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
+                              <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
+                              <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
+                              <FaceFrameOverlay mode="register" stateRef={editFrameStateRef} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {editSamplesReady ? (
+                              <div
+                                style={{
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  border: '1px solid #10b981',
+                                  borderRadius: '8px',
+                                  padding: '12px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  gap: '8px'
+                                }}
+                              >
+                                <span style={{ color: '#10b981', fontWeight: 700, fontSize: '0.85rem' }}>
+                                  ✓ 7 Sampel Wajah Berhasil Diambil
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  onClick={() => {
+                                    editSamplesRef.current = [];
+                                    editCurrentDescriptorRef.current = null;
+                                    setEditSamplesReady(false);
+                                    setEditScannerOpen(true);
+                                  }}
+                                  style={{
+                                    fontSize: '0.78rem',
+                                    padding: '6px 14px',
+                                    background: 'var(--bg-secondary)',
+                                    color: 'var(--text-main)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <i className="fa-solid fa-camera" /> Ambil Ulang Sampel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={() => {
+                                  editSamplesRef.current = [];
+                                  editCurrentDescriptorRef.current = null;
+                                  setEditSamplesReady(false);
+                                  setEditScannerOpen(true);
+                                }}
+                                style={{
+                                  padding: '12px',
+                                  fontSize: '0.85rem',
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '8px',
+                                  minHeight: '44px'
+                                }}
+                              >
+                                <i className="fa-solid fa-camera" /> Buka Scanner Wajah Fullscreen
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: '8px', textAlign: 'center' }}>
                           <button
                             type="button"
                             className="btn"
-                            onClick={() => setEditFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
-                            style={{ padding: '4px 8px', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border-color)', width: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            title="Ganti Kamera Depan/Belakang"
+                            style={{ fontSize: '0.78rem', background: 'transparent', border: 'none', color: 'var(--text-muted)', textDecoration: 'underline', cursor: 'pointer', padding: '4px' }}
+                            onClick={() => setEditFormMode('file')}
                           >
-                            <i className="fa-solid fa-rotate"></i> Tukar Kamera
+                            <i className="fa-solid fa-upload" style={{ marginRight: '4px' }}></i> Atau Unggah File Foto
                           </button>
                         </div>
-                        <div className="webcam-wrapper" style={{ aspectRatio: '4/3', borderRadius: '6px' }}>
-                          <video ref={editVideoRef} autoPlay muted playsInline style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></video>
-                          <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
-                          <FaceFrameOverlay mode="register" stateRef={editFrameStateRef} />
-                        </div>
-                      </div>
+                      </>
                     ) : (
-                      <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border-color)', padding: '1rem', borderRadius: '10px', textAlign: 'center' }}>
-                        <input type="file" ref={editFileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleEditPhotoFileUpload} />
-                        <button type="button" className="btn" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid var(--accent-primary)', width: 'auto' }} onClick={() => editFileInputRef.current && editFileInputRef.current.click()}><i className="fa-solid fa-image"></i> Pilih Foto</button>
-                        {editPhotoPreview && <img src={editPhotoPreview} style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '8px', marginTop: '10px' }} alt="Preview" />}
-                      </div>
+                      <>
+                        <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border-color)', padding: '1rem', borderRadius: '10px', textAlign: 'center' }}>
+                          <input type="file" ref={editFileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleEditPhotoFileUpload} />
+                          <button type="button" className="btn" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid var(--accent-primary)', width: 'auto' }} onClick={() => editFileInputRef.current && editFileInputRef.current.click()}><i className="fa-solid fa-image"></i> Pilih Foto</button>
+                          {editPhotoPreview && <img src={editPhotoPreview} style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '8px', marginTop: '10px' }} alt="Preview" />}
+                        </div>
+                        <div style={{ marginTop: '8px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ fontSize: '0.78rem', background: 'transparent', border: 'none', color: 'var(--accent-primary)', textDecoration: 'underline', cursor: 'pointer', padding: '4px' }}
+                            onClick={() => setEditFormMode('camera')}
+                          >
+                            <i className="fa-solid fa-camera" style={{ marginRight: '4px' }}></i> Beralih ke Scanner Kamera
+                          </button>
+                        </div>
+                      </>
                     )}
                     <div style={{ marginTop: '8px', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px' }}>
                       <span>Status Biometrik:</span>
@@ -1634,7 +1783,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
-                <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setEditModalOpen(false)}>Batal</button>
+                <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => { setEditModalOpen(false); setEditScannerOpen(false); }}>Batal</button>
                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isSubmitting || (editUpdateBiometrics && editFormMode === 'camera' && !editSamplesReady)}>
                   {isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
                 </button>
@@ -1642,6 +1791,29 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             </form>
           </div>
         </div>
+      )}
+
+      {/* Fullscreen Edit / Registration Scanner for Mobile */}
+      {editModalOpen && editUpdateBiometrics && editFormMode === 'camera' && useFullscreen && (
+        <FullscreenScanShell
+          open={editScannerOpen}
+          onClose={() => setEditScannerOpen(false)}
+          title="PENDAFTARAN WAJAH"
+          subtitle={`${editingEmp.name || 'Karyawan'} (NIK: ${editingEmp.nik || '-'})`}
+          facingMode={editFacingMode}
+          onToggleFacing={() => setEditFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+          hint={editCameraStatusText}
+          hintTone={editFaceCheckResult?.isDuplicate ? 'error' : (editSamplesReady ? 'success' : 'info')}
+        >
+          <FaceScanSurface
+            videoRef={editVideoRef}
+            canvasRef={editCanvasRef}
+            facingMode={editFacingMode}
+            canvasSize={canvasSize}
+            mode="register"
+            frameStateRef={editFrameStateRef}
+          />
+        </FullscreenScanShell>
       )}
 
       {/* ── Bulk Import CSV + Photos Modal ── */}
