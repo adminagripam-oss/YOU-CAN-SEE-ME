@@ -55,16 +55,20 @@ export const FRAME_H = 480;
 // Persegi di tengah kanvas, sedikit ke atas agar dagu tidak terpotong.
 // sizeRatio 0.72 -> ~345px pada kanvas 480px: cukup untuk kepala + rambut,
 // dan mesh wajah (~190-210px pada screenshot Anda) mengisi sekitar 55-60% bingkai.
-export function getFrameRect(width = FRAME_W, height = FRAME_H, { sizeRatio = 0.72, offsetY = -0.02 } = {}) {
+export function getFrameRect(width = FRAME_W, height = FRAME_H, opts = {}) {
+  const isPortrait = height > width;
+  const defaultSizeRatio = isPortrait ? 0.80 : 0.72;
+  const defaultOffsetY = isPortrait ? -0.05 : -0.02;
+  const sizeRatio = opts.sizeRatio ?? defaultSizeRatio;
+  const offsetY = opts.offsetY ?? defaultOffsetY;
   const size = Math.min(width, height) * sizeRatio;
   return { x: (width - size) / 2, y: (height - size) / 2 + height * offsetY, size };
 }
 
 // Terima boundingBox objek {minX,minY,width,height} (dari hook) atau array [x,y,w,h].
-// boundingBox dari hook dihitung dari landmark mesh (lebih sempit dari kepala utuh).
-// Batas ukuran: minFill 0.40 ~ 138px (sama dgn batas lama 140px "Terlalu Jauh"),
-// maxFill 0.95 ~ 328px pada bingkai 345px. Sesuaikan setelah uji di lapangan.
-export function evaluateFaceInFrame(box, rect, { minFill = 0.40, maxFill = 0.95 } = {}) {
+// boundingBox dari hook dihitung dari landmark mesh.
+// Batas ukuran: minWidth 140px (batas lama "Terlalu Jauh"), maxWidth rect.size * 0.95.
+export function evaluateFaceInFrame(box, rect, opts = {}) {
   if (!box) return { ok: false, reason: 'no-face' };
   let x, y, w, h;
   if (Array.isArray(box)) [x, y, w, h] = box;
@@ -75,9 +79,10 @@ export function evaluateFaceInFrame(box, rect, { minFill = 0.40, maxFill = 0.95 
   const inside = cx > rect.x && cx < rect.x + rect.size && cy > rect.y && cy < rect.y + rect.size;
   if (!inside) return { ok: false, reason: 'off-center' };
 
-  const fill = Math.max(w, h) / rect.size;
-  if (fill < minFill) return { ok: false, reason: 'too-far' };
-  if (fill > maxFill) return { ok: false, reason: 'too-close' };
+  const minWidth = opts.minWidth ?? 140;
+  const maxWidth = opts.maxWidth ?? (rect.size * 0.95);
+  if (w < minWidth) return { ok: false, reason: 'too-far' };
+  if (w > maxWidth) return { ok: false, reason: 'too-close' };
 
   const tol = rect.size * 0.08;
   const fullyIn = x > rect.x - tol && y > rect.y - tol &&

@@ -7,8 +7,10 @@ import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
 import { Capacitor } from '@capacitor/core';
 import { checkOnline } from '../syncEngine';
-
-
+import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
+import { useScanViewport } from '../hooks/useScanViewport';
+import FullscreenScanShell from './FullscreenScanShell';
+import FaceScanSurface from './FaceScanSurface';
 
 export default function TabEmployeeManagement({
   employees,
@@ -18,6 +20,16 @@ export default function TabEmployeeManagement({
   openConfirmModal,
 }) {
   const { user } = useAuth();
+  const { useFullscreen, isPortrait, canvasSize } = useScanViewport();
+
+  // Face Frame Geometry Refs
+  const regFrameStateRef = useRef({ state: 'idle', progress: 0 });
+  const [regScannerOpen, setRegScannerOpen] = useState(false);
+  const frameRectRef = useRef(getFrameRect(canvasSize.width, canvasSize.height, isPortrait));
+
+  useEffect(() => {
+    frameRectRef.current = getFrameRect(canvasSize.width, canvasSize.height, isPortrait);
+  }, [canvasSize, isPortrait]);
 
   // Form State
   const [empNik, setEmpNik] = useState('');
@@ -66,8 +78,17 @@ export default function TabEmployeeManagement({
   }, [modelsLoaded]);
 
   // Callback saat wajah diproses di register mode
-  const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx }) => {
-    if (detection.embedding) {
+  const onRegFaceProcessed = useCallback(({ detection, smoothedMesh, ctx, boundingBox }) => {
+    const frameCheck = evaluateFaceInFrame(boundingBox, frameRectRef.current);
+    if (!frameCheck.ok) {
+      regFrameStateRef.current = { state: 'misaligned', progress: 0 };
+      setCameraStatusText(FRAME_HINTS[frameCheck.reason]);
+      setCameraStatusColor('var(--accent-warning)');
+    } else {
+      regFrameStateRef.current = { state: 'scanning', progress: 0.5 };
+    }
+
+    if (detection?.embedding && frameCheck.ok) {
       const newVec = Array.from(detection.embedding);
 
       // Multi-Template Averaging (Buffer 5 frames)
@@ -111,12 +132,24 @@ export default function TabEmployeeManagement({
             setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
             setCameraStatusText(`✓ Wajah Baru Terdeteksi [Valid — Belum Terdaftar]`);
             setCameraStatusColor('var(--accent-success)');
+            regFrameStateRef.current = { state: 'success', progress: 1 };
+            if (useFullscreen) {
+              setTimeout(() => {
+                setRegScannerOpen(false);
+              }, 1500);
+            }
           }
         } catch (_) {
           // fallback: jika tidak bisa cek, tetap izinkan
           setCameraStatusText(`✓ Biometrik Wajah Master Terdeteksi [1024-dim Human]`);
           setCameraStatusColor('var(--accent-success)');
           setFaceCheckResult(null);
+          regFrameStateRef.current = { state: 'success', progress: 1 };
+          if (useFullscreen) {
+            setTimeout(() => {
+              setRegScannerOpen(false);
+            }, 1500);
+          }
         }
       })();
     }
@@ -134,7 +167,7 @@ export default function TabEmployeeManagement({
         ctx.fill();
       }
     }
-  }, [DUPLICATE_THRESHOLD]);
+  }, [DUPLICATE_THRESHOLD, useFullscreen]);
 
   // Callback saat tidak ada wajah di register mode
   const onRegNoFace = useCallback(() => {
@@ -142,6 +175,7 @@ export default function TabEmployeeManagement({
     descriptorHistoryRef.current = [];
     currentEmpGFVRef.current = null;
     setFaceCheckResult(null);
+    regFrameStateRef.current = { state: 'idle', progress: 0 };
     setCameraStatusText('Menunggu Wajah di Kamera...');
     setCameraStatusColor('var(--accent-warning)');
   }, []);
@@ -157,13 +191,14 @@ export default function TabEmployeeManagement({
   useNormalizedFaceMesh({
     videoRef: regVideoRef,
     canvasRef: regCanvasRef,
-    active: modelsLoaded && empFormMode === 'camera' && formStep === 2,
+    active: modelsLoaded && empFormMode === 'camera' && formStep === 2 && (!useFullscreen || regScannerOpen),
     facingMode: cameraFacingMode,
     smoothAlpha: 0.35,
     detectFaces: detectRegFacesCallback,
     onFaceProcessed: onRegFaceProcessed,
     onNoFace: onRegNoFace,
     onCameraError: onRegCameraError,
+    canvasSize,
   });
 
 
@@ -578,20 +613,85 @@ export default function TabEmployeeManagement({
                 </div>
 
                 {empFormMode === 'camera' && (
-                  <div className="webcam-wrapper" style={{ aspectRatio: '4/3' }}>
-                    <video
-                      ref={regVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-                    ></video>
-                    <canvas
-                      ref={regCanvasRef}
-                      className="overlay-canvas"
-                      style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-                    ></canvas>
-                  </div>
+                  !useFullscreen ? (
+                    <div className="webcam-wrapper" style={{ aspectRatio: '4/3' }}>
+                      <video
+                        ref={regVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+                      ></video>
+                      <canvas
+                        ref={regCanvasRef}
+                        className="overlay-canvas"
+                        style={{ transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+                      ></canvas>
+                      <FaceFrameOverlay mode="register" stateRef={regFrameStateRef} />
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {currentEmpDescriptorRef.current ? (
+                        <div
+                          style={{
+                            background: 'rgba(16, 185, 129, 0.1)',
+                            border: '1px solid #10b981',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}
+                        >
+                          <span style={{ color: '#10b981', fontWeight: 700, fontSize: '0.85rem' }}>
+                            ✓ Wajah Master Terdeteksi
+                          </span>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => {
+                              currentEmpDescriptorRef.current = null;
+                              descriptorHistoryRef.current = [];
+                              setRegScannerOpen(true);
+                            }}
+                            style={{
+                              fontSize: '0.78rem',
+                              padding: '6px 14px',
+                              background: 'var(--bg-secondary)',
+                              color: 'var(--text-main)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '6px'
+                            }}
+                          >
+                            <i className="fa-solid fa-camera" /> Ambil Ulang Foto
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => {
+                            currentEmpDescriptorRef.current = null;
+                            descriptorHistoryRef.current = [];
+                            setRegScannerOpen(true);
+                          }}
+                          style={{
+                            padding: '12px',
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            minHeight: '44px'
+                          }}
+                        >
+                          <i className="fa-solid fa-camera" /> Buka Scanner Wajah Fullscreen
+                        </button>
+                      )}
+                    </div>
+                  )
                 )}
 
 
@@ -681,6 +781,29 @@ export default function TabEmployeeManagement({
           )}
         </form>
       </div>
+
+      {/* Fullscreen Registration Scanner for Mobile */}
+      {formStep === 2 && empFormMode === 'camera' && useFullscreen && (
+        <FullscreenScanShell
+          open={regScannerOpen}
+          onClose={() => setRegScannerOpen(false)}
+          title="PENDAFTARAN WAJAH"
+          subtitle={`${empName || 'Karyawan Baru'} (NIK: ${empNik || '-'})`}
+          facingMode={cameraFacingMode}
+          onToggleFacing={() => setCameraFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+          hint={cameraStatusText}
+          hintTone={faceCheckResult?.isDuplicate ? 'error' : (currentEmpDescriptorRef.current ? 'success' : 'info')}
+        >
+          <FaceScanSurface
+            videoRef={regVideoRef}
+            canvasRef={regCanvasRef}
+            facingMode={cameraFacingMode}
+            canvasSize={canvasSize}
+            mode="register"
+            frameStateRef={regFrameStateRef}
+          />
+        </FullscreenScanShell>
+      )}
     </div>
   );
 }

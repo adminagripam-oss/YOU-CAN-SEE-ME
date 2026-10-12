@@ -50,6 +50,7 @@ export interface Config {
   onFaceProcessed?: (output: FaceMeshOutput) => void;
   onNoFace?: () => void;
   onCameraError?: (err: Error) => void;
+  canvasSize?: { width: number; height: number };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -362,11 +363,27 @@ export function useNormalizedFaceMesh({
   onFaceProcessed,
   onNoFace,
   onCameraError,
+  canvasSize,
 }: Config) {
   // Loop execution & stream references
   const rafRef = useRef<number | null>(null);
   const isRunningRef = useRef<boolean>(false);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Dynamic canvas size support (defaults to 640x480)
+  const canvasSizeRef = useRef<{ width: number; height: number }>(canvasSize || { width: STD_WIDTH, height: STD_HEIGHT });
+  const prevCanvasSizeRef = useRef<{ width: number; height: number }>(canvasSizeRef.current);
+  canvasSizeRef.current = canvasSize || { width: STD_WIDTH, height: STD_HEIGHT };
+
+  useEffect(() => {
+    const cur = canvasSizeRef.current;
+    const prev = prevCanvasSizeRef.current;
+    if (cur.width !== prev.width || cur.height !== prev.height) {
+      smoothedMeshRef.current = null;
+      oneEuroFiltersRef.current = [];
+      prevCanvasSizeRef.current = cur;
+    }
+  }, [canvasSize?.width, canvasSize?.height]);
 
   // References for keeping state between frames (avoid re-rendering)
   const smoothedMeshRef = useRef<Point3D[] | null>(null);
@@ -400,14 +417,17 @@ export function useNormalizedFaceMesh({
     const canvas = canvasRef.current;
 
     if (video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
-      // 1. Ensure Offscreen Canvas is setup for standard 640x480 crop
+      const targetW = canvasSizeRef.current.width;
+      const targetH = canvasSizeRef.current.height;
+
+      // 1. Ensure Offscreen Canvas is setup for standard cropped target
       if (!offscreenCanvasRef.current) {
         offscreenCanvasRef.current = document.createElement('canvas');
       }
       const offscreen = offscreenCanvasRef.current;
-      if (offscreen.width !== STD_WIDTH || offscreen.height !== STD_HEIGHT) {
-        offscreen.width = STD_WIDTH;
-        offscreen.height = STD_HEIGHT;
+      if (offscreen.width !== targetW || offscreen.height !== targetH) {
+        offscreen.width = targetW;
+        offscreen.height = targetH;
       }
 
       const offCtx = offscreen.getContext('2d');
@@ -417,18 +437,18 @@ export function useNormalizedFaceMesh({
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
       const videoRatio = videoWidth / videoHeight;
-      const TARGET_RATIO = STD_WIDTH / STD_HEIGHT;
+      const TARGET_RATIO = targetW / targetH;
 
       let sourceWidth, sourceHeight, sourceX, sourceY;
 
       if (videoRatio > TARGET_RATIO) {
-        // Video is wider than 4:3 (e.g. 16:9 laptop) -> cut left and right sides
+        // Video is wider than target ratio -> cut left and right sides
         sourceHeight = videoHeight;
         sourceWidth = sourceHeight * TARGET_RATIO;
         sourceX = (videoWidth - sourceWidth) / 2;
         sourceY = 0;
       } else {
-        // Video is taller than 4:3 (e.g. portrait tablet 9:16) -> cut top and bottom sides
+        // Video is taller than target ratio -> cut top and bottom sides
         sourceWidth = videoWidth;
         sourceHeight = sourceWidth / TARGET_RATIO;
         sourceX = 0;
@@ -442,7 +462,7 @@ export function useNormalizedFaceMesh({
       offCtx.drawImage(
         video,
         sourceX, sourceY, sourceWidth, sourceHeight,
-        0, 0, STD_WIDTH, STD_HEIGHT
+        0, 0, targetW, targetH
       );
 
       // Restore transform state
@@ -456,9 +476,9 @@ export function useNormalizedFaceMesh({
         console.warn('[useNormalizedFaceMesh] Face detection error:', err);
       }
 
-      // 4. Align output canvas overlay to match standard 640x480 coordinates
-      if (canvas.width !== STD_WIDTH) canvas.width = STD_WIDTH;
-      if (canvas.height !== STD_HEIGHT) canvas.height = STD_HEIGHT;
+      // 4. Align output canvas overlay to match target coordinates
+      if (canvas.width !== targetW) canvas.width = targetW;
+      if (canvas.height !== targetH) canvas.height = targetH;
 
       const ctx = canvas.getContext('2d');
 
@@ -466,7 +486,7 @@ export function useNormalizedFaceMesh({
 
       if (!detection || !meshData || meshData.length === 0) {
         // Clear screen and reset filters if face is lost
-        if (ctx) ctx.clearRect(0, 0, STD_WIDTH, STD_HEIGHT);
+        if (ctx) ctx.clearRect(0, 0, targetW, targetH);
         smoothedMeshRef.current = null;
         oneEuroFiltersRef.current = [];
         callbacksRef.current.onNoFace?.();
