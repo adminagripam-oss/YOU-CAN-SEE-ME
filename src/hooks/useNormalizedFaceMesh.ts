@@ -353,7 +353,7 @@ export function useNormalizedFaceMesh({
   videoRef,
   canvasRef,
   active = true,
-  facingMode = 'user',
+  facingMode = 'environment',
   smoothingMethod = 'one-euro',
   emaAlpha = 0.4,
   oneEuroMinCutoff = 1.0,

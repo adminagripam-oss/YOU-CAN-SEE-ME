@@ -13,7 +13,7 @@ export default function FullscreenScanShell({
   hintTone = 'info', // 'info' | 'warn' | 'error' | 'success'
   headerExtra = null,
   onToggleFacing = null,
-  facingMode = 'user',
+  facingMode = 'environment',
   footer = null,
   children,
 }) {
