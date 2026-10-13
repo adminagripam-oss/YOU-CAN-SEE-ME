@@ -18,7 +18,7 @@ import { supabase } from '../supabaseClient';
 import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
-import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, cosine } from '../biometrics';
+import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, buildTemplateDetailed, cosine } from '../biometrics';
 import { useAuth } from '../context/AuthContext';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { useScanViewport } from '../hooks/useScanViewport';
@@ -221,13 +221,18 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             setScanCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
             setScanCameraStatusColor('var(--accent-warning)');
           } else {
-            // Reject outliers
-            const rawAvg = Array.from(buildTemplate(scanSamplesRef.current));
-            let filtered = scanSamplesRef.current.filter(samp => cosine(samp, rawAvg) > 0.85);
-            if (filtered.length === 0) filtered = scanSamplesRef.current;
-            
-            const finalTemplate = Array.from(buildTemplate(filtered));
-            scanCurrentDescriptorRef.current = finalTemplate;
+            const templateResult = buildTemplateDetailed(scanSamplesRef.current);
+            if (!templateResult) return;
+
+            if (templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
+              setScanCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
+              setScanCameraStatusColor('var(--accent-warning)');
+              scanSamplesRef.current = [];
+              setScanSamplesReady(false);
+              return;
+            }
+
+            scanCurrentDescriptorRef.current = Array.from(templateResult.vector);
             
             (async () => {
               try {
@@ -487,13 +492,18 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             setEditCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
             setEditCameraStatusColor('var(--accent-warning)');
           } else {
-            // Reject outliers
-            const rawAvg = Array.from(buildTemplate(editSamplesRef.current));
-            let filtered = editSamplesRef.current.filter(samp => cosine(samp, rawAvg) > 0.85);
-            if (filtered.length === 0) filtered = editSamplesRef.current;
-            
-            const finalTemplate = Array.from(buildTemplate(filtered));
-            editCurrentDescriptorRef.current = finalTemplate;
+            const templateResult = buildTemplateDetailed(editSamplesRef.current);
+            if (!templateResult) return;
+
+            if (templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
+              setEditCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
+              setEditCameraStatusColor('var(--accent-warning)');
+              editSamplesRef.current = [];
+              setEditSamplesReady(false);
+              return;
+            }
+
+            editCurrentDescriptorRef.current = Array.from(templateResult.vector);
             
             (async () => {
               try {

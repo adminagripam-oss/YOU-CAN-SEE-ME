@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
 import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity, toVectorArray } from '../db';
+import { buildTemplateDetailed, BIOMETRIC_CONFIG } from '../biometrics';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -96,20 +97,16 @@ export default function TabEmployeeManagement({
       hist.push(newVec);
       if (hist.length > 5) hist.shift();
 
-      const vecLength = newVec.length;
-      const avgVec = new Array(vecLength).fill(0);
-      for (const v of hist) {
-        // Fallback safety if one frame is somehow different size
-        const len = Math.min(vecLength, v.length);
-        for (let i = 0; i < len; i++) {
-          avgVec[i] += (v[i] || 0);
-        }
-      }
-      for (let i = 0; i < vecLength; i++) {
-        avgVec[i] /= hist.length;
+      const templateResult = buildTemplateDetailed(hist);
+      if (!templateResult) return;
+
+      if (hist.length >= 5 && templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
+        setCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
+        setCameraStatusColor('var(--accent-warning)');
+        return;
       }
 
-      currentEmpDescriptorRef.current = avgVec;
+      currentEmpDescriptorRef.current = Array.from(templateResult.vector);
       currentEmpGFVRef.current = [];
 
       // Cek duplikasi wajah secara real-time (async, non-blocking)
