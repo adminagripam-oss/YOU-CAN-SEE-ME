@@ -10,10 +10,14 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { Search, FileSpreadsheet, FileDown, Edit2, Trash2, CheckCircle, Mail, Power, XCircle, MapPin, Clock, CloudOff, AlertTriangle, ChevronLeftIcon, ChevronRightIcon, Filter } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { DateRangePicker } from './DateRangePicker';
+import { useIsMobileLayout } from '../hooks/useIsMobileLayout';
+import MobileDataPage from './mobile/MobileDataPage';
+import MobileFilterSheet from './mobile/MobileFilterSheet';
+import MobileTableViewport from './mobile/MobileTableViewport';
 
 function formatDurasi(durasi) {
   if (!durasi) return '-';
@@ -84,6 +88,10 @@ export default function TabAttendanceLogs({
   const [filterAfdeling, setFilterAfdeling] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
+
+  const isMobile = useIsMobileLayout();
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const activeFilterCount = (Boolean(dateRange?.start || dateRange?.end) ? 1 : 0) + (filterKebun ? 1 : 0) + (filterAfdeling ? 1 : 0);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -918,7 +926,459 @@ export default function TabAttendanceLogs({
         }
       `}</style>
 
-      <div className="page-layout">
+      {isMobile ? (
+        <MobileDataPage
+          title="Log Absensi"
+          actions={
+            <>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToCSV}
+                aria-label="Export Excel"
+                title="Export Excel"
+              >
+                <FileSpreadsheet size={18} color="#107C41" />
+              </button>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToPDF}
+                aria-label="Export PDF"
+                title="Export PDF"
+              >
+                <FileDown size={18} color="#E81123" />
+              </button>
+            </>
+          }
+          tabs={
+            user?.role === 'headoffice_admin' ? (
+              <div className="mobile-tabs">
+                <button
+                  type="button"
+                  className={activeTab === 'logs' ? 'active' : ''}
+                  onClick={() => setActiveTab('logs')}
+                >
+                  Riwayat Log
+                </button>
+                <button
+                  type="button"
+                  className={activeTab === 'requests' ? 'active' : ''}
+                  onClick={() => setActiveTab('requests')}
+                >
+                  Persetujuan
+                  {approvalRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                    <span className="mobile-filter-badge" style={{ position: 'static', marginLeft: '6px' }}>
+                      {approvalRequests.filter(r => r.status === 'PENDING').length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            ) : null
+          }
+          toolbar={
+            <>
+              <div className="mobile-data-search">
+                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Cari Nama / NIK..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mobile-chip-remove"
+                    style={{ position: 'absolute', right: '10px' }}
+                    aria-label="Hapus Pencarian"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mobile-filter-btn"
+                onClick={() => setIsMobileFilterOpen(true)}
+                aria-label="Buka Filter"
+              >
+                <Filter size={15} />
+                <span>Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="mobile-filter-badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </>
+          }
+          chips={
+            activeFilterCount > 0 ? (
+              <>
+                {Boolean(dateRange?.start || dateRange?.end) && (
+                  <span className="mobile-chip">
+                    <span>Tgl: {dateRange.start ? dateRange.start.slice(5) : '...'} - {dateRange.end ? dateRange.end.slice(5) : '...'}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setDateRange({ start: null, end: null })}>×</button>
+                  </span>
+                )}
+                {Boolean(filterKebun) && (
+                  <span className="mobile-chip">
+                    <span>Kebun: {filterKebun}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterKebun('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterAfdeling) && (
+                  <span className="mobile-chip">
+                    <span>Afd: {filterAfdeling}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterAfdeling('')}>×</button>
+                  </span>
+                )}
+              </>
+            ) : null
+          }
+        >
+          {activeTab === 'logs' ? (
+            <>
+              <MobileTableViewport>
+                <Table className="enterprise-table compact-mobile-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead style={{ width: '40px', textAlign: 'center' }}>No.</TableHead>
+                      <TableHead className="col-sticky">Nama Karyawan</TableHead>
+                      <TableHead>Tanggal</TableHead>
+                      <TableHead>NIK</TableHead>
+                      <TableHead>Nama Kebun</TableHead>
+                      <TableHead>Afdeling</TableHead>
+                      <TableHead>Check In</TableHead>
+                      <TableHead>Check Out</TableHead>
+                      <TableHead>Durasi</TableHead>
+                      <TableHead>Keterangan</TableHead>
+                      <TableHead>Lokasi</TableHead>
+                      <TableHead className="no-print">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredLogs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={12} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                          Belum ada log absensi yang tercatat.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedLogs.map((log, index) => (
+                        <TableRow key={log.id}>
+                          <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                            {((currentPage - 1) * itemsPerPage) + index + 1}
+                          </TableCell>
+                          <TableCell data-label="Nama Karyawan" className="col-sticky">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontWeight: 700 }}>{log.name}</span>
+                              {((log.inLog && (log.inLog.needs_resolution || log.inLog.sync_notes === 'Membutuhkan Resolusi NIK')) || (log.outLog && (log.outLog.needs_resolution || log.outLog.sync_notes === 'Membutuhkan Resolusi NIK'))) ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    background: 'rgba(245, 158, 11, 0.2)',
+                                    color: '#f59e0b',
+                                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    fontWeight: 'bold',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '2px'
+                                  }}
+                                  title="Data absensi membutuhkan pembaruan/resolusi NIK manual oleh Admin sebelum disinkronkan"
+                                >
+                                  <AlertTriangle size={11} /> Resolusi
+                                </span>
+                              ) : (((log.inLog && (log.inLog.isOfflineQueue || log.inLog.is_synced === false)) || (log.outLog && (log.outLog.isOfflineQueue || log.outLog.is_synced === false))) && (
+                                <span
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    background: 'var(--accent-warning)',
+                                    color: '#fff',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    fontWeight: 'bold',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '2px'
+                                  }}
+                                  title="Data absensi disimpan lokal dan akan disinkronkan saat online"
+                                >
+                                  <CloudOff size={11} /> Offline
+                                </span>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell data-label="Tanggal" style={{ fontWeight: 600 }}>{log.displayDate}</TableCell>
+                          <TableCell data-label="NIK" className="nik-cell">{log.nik}</TableCell>
+                          <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{log.nama_kebun || '-'}</TableCell>
+                          <TableCell data-label="Afdeling" style={{ color: 'var(--text-muted)' }}>{log.afdeling}</TableCell>
+                          <TableCell data-label="Check In" style={{ color: log.checkIn !== '-' ? 'var(--accent-cyan)' : 'inherit', fontWeight: 600 }}>{log.checkIn}</TableCell>
+                          <TableCell data-label="Check Out" style={{ color: log.checkOut !== '-' ? 'var(--accent-primary)' : 'inherit', fontWeight: 600 }}>{log.checkOut}</TableCell>
+                          <TableCell data-label="Durasi">
+                            {log.durasi ? (
+                              <span className="durasi-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Clock size={13} /> {formatDurasi(log.durasi)}</span>
+                            ) : (log.checkIn !== '-' && log.checkOut === '-' && log.keterangan === 'Hadir') ? (
+                              <span className="durasi-badge checkin" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Sedang Bekerja</span>
+                            ) : '-'}
+                          </TableCell>
+                          <TableCell data-label="Keterangan">{renderKeteranganIcon(log.keterangan)}</TableCell>
+                          <TableCell data-label="Lokasi" style={{ fontSize: '0.8rem', maxWidth: '180px' }}>
+                            {(() => {
+                              const gps = parseLokasiGPS(log.lokasi);
+                              if (gps) {
+                                const mapsUrl = `https://www.google.com/maps?q=${gps.lat},${gps.lng}`;
+                                return (
+                                  <a
+                                    href={mapsUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={log.lokasi}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      color: '#10b981',
+                                      textDecoration: 'none',
+                                      fontWeight: 600,
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    <MapPin size={13} style={{ flexShrink: 0 }} />
+                                    {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}
+                                  </a>
+                                );
+                              }
+                              return log.lokasi || '-';
+                            })()}
+                          </TableCell>
+                          <TableCell data-label="Aksi" className="no-print">
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                className="btn-action edit"
+                                onClick={() => handleOpenEditModal(log)}
+                                title="Edit Log"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-action delete"
+                                onClick={() => handleDeleteLog(log)}
+                                title="Hapus Log"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </MobileTableViewport>
+
+              {filteredLogs.length > 0 && totalPages > 1 && (
+                <div style={{ flex: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 12px', gap: '8px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                    aria-label="Halaman Sebelumnya"
+                  >
+                    <ChevronLeftIcon size={16} />
+                  </button>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)', padding: '0 8px' }}>
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                    aria-label="Halaman Selanjutnya"
+                  >
+                    <ChevronRightIcon size={16} />
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <MobileTableViewport>
+              {isLoadingRequests ? (
+                <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Memuat data request persetujuan...
+                </div>
+              ) : (
+                <Table className="enterprise-table compact-mobile-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Tipe Request</TableHead>
+                      <TableHead className="col-sticky">Nama Karyawan</TableHead>
+                      <TableHead>Kebun</TableHead>
+                      <TableHead>Pemohon</TableHead>
+                      <TableHead>Waktu Request</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Detail Perubahan</TableHead>
+                      <TableHead className="no-print">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {approvalRequests.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                          Tidak ada permohonan persetujuan terdaftar.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      approvalRequests.map((req) => (
+                        <TableRow key={req.id}>
+                          <TableCell data-label="Tipe Request">
+                            <span 
+                              style={{
+                                fontSize: '0.7rem',
+                                background: req.request_type === 'DELETE' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                                color: req.request_type === 'DELETE' ? '#ef4444' : '#38bdf8',
+                                border: req.request_type === 'DELETE' ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(56, 189, 248, 0.25)',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontWeight: 700
+                              }}
+                            >
+                              {req.request_type}
+                            </span>
+                          </TableCell>
+                          <TableCell data-label="Nama Karyawan" className="col-sticky">
+                            <div style={{ fontWeight: 700 }}>{req.name}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>NIK: {req.nik}</div>
+                          </TableCell>
+                          <TableCell data-label="Kebun" style={{ color: 'var(--text-muted)' }}>{req.nama_kebun || '-'}</TableCell>
+                          <TableCell data-label="Pemohon" style={{ fontWeight: 600 }}>{req.requested_by}</TableCell>
+                          <TableCell data-label="Waktu Request" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            {req.requested_at ? new Date(req.requested_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                          </TableCell>
+                          <TableCell data-label="Status">
+                            <span 
+                              style={{
+                                fontSize: '0.7rem',
+                                background: req.status === 'APPROVED' ? 'rgba(21, 128, 61, 0.12)' : req.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                                color: req.status === 'APPROVED' ? '#15803d' : req.status === 'REJECTED' ? '#ef4444' : '#f59e0b',
+                                border: req.status === 'APPROVED' ? '1px solid rgba(21, 128, 61, 0.25)' : req.status === 'REJECTED' ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(245, 158, 11, 0.25)',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontWeight: 700
+                              }}
+                            >
+                              {req.status}
+                            </span>
+                          </TableCell>
+                          <TableCell data-label="Detail Perubahan" style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'normal', wordBreak: 'break-word', color: 'var(--text-main)', textAlign: 'left' }}>
+                            {req.request_type === 'DELETE' ? (
+                              <span style={{ color: '#ef4444' }}>
+                                Hapus absensi tanggal: <strong>{req.old_value?.date || '-'}</strong>
+                              </span>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                {req.old_value?.checkIn !== req.new_value?.checkIn && (
+                                  <div>
+                                    Check-In: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.checkIn || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-cyan)' }}>{req.new_value?.checkIn || '-'}</strong>
+                                  </div>
+                                )}
+                                {req.old_value?.checkOut !== req.new_value?.checkOut && (
+                                  <div>
+                                    Check-Out: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.checkOut || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-primary)' }}>{req.new_value?.checkOut || '-'}</strong>
+                                  </div>
+                                )}
+                                {req.old_value?.keterangan !== req.new_value?.keterangan && (
+                                  <div>
+                                    Keterangan: <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{req.old_value?.keterangan || '-'}</span> &rarr; <strong style={{ color: 'var(--accent-success)' }}>{req.new_value?.keterangan || '-'}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell data-label="Aksi" className="no-print">
+                            {req.status === 'PENDING' ? (
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button 
+                                  className="btn-shadcn-success" 
+                                  onClick={() => handleApproveRequest(req)}
+                                >
+                                  Setujui
+                                </button>
+                                <button 
+                                  className="btn-shadcn-destructive" 
+                                  onClick={() => handleRejectRequest(req)}
+                                >
+                                  Tolak
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Selesai</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </MobileTableViewport>
+          )}
+
+          <MobileFilterSheet
+            open={isMobileFilterOpen}
+            onOpenChange={setIsMobileFilterOpen}
+            title="Filter Log Absensi"
+            activeCount={activeFilterCount}
+            onReset={() => {
+              setFilterKebun('');
+              setFilterAfdeling('');
+              setDateRange({ start: null, end: null });
+            }}
+          >
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Rentang Tanggal
+              </label>
+              <DateRangePicker dateRange={dateRange} setDateRange={setDateRange} />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Kebun
+              </label>
+              <select
+                value={filterKebun}
+                onChange={(e) => setFilterKebun(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Filter Kebun (Semua)</option>
+                {uniqueKebuns.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Afdeling
+              </label>
+              <select
+                value={filterAfdeling}
+                onChange={(e) => setFilterAfdeling(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Filter Afdeling (Semua)</option>
+                {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+          </MobileFilterSheet>
+        </MobileDataPage>
+      ) : (
+        <div className="page-layout">
 
         {/* Page Header */}
         <div className="page-layout-header no-print">
@@ -1309,6 +1769,7 @@ export default function TabAttendanceLogs({
 
         </div>
       </div>
+      )}
 
       {/* EDIT MODAL */}
       {isEditModalOpen && editData && (() => {

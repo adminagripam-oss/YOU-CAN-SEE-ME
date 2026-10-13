@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera, ChevronLeftIcon, ChevronRightIcon, Filter, Search, ArrowRightLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -24,6 +24,10 @@ import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from
 import { useScanViewport } from '../hooks/useScanViewport';
 import FullscreenScanShell from '../components/FullscreenScanShell';
 import FaceScanSurface from '../components/FaceScanSurface';
+import { useIsMobileLayout } from '../hooks/useIsMobileLayout';
+import MobileDataPage from '../components/mobile/MobileDataPage';
+import MobileFilterSheet from '../components/mobile/MobileFilterSheet';
+import MobileTableViewport from '../components/mobile/MobileTableViewport';
 
 export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
@@ -47,6 +51,22 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [filterAfdeling, setFilterAfdeling] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
+
+  const isMobile = useIsMobileLayout();
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const activeFilterCount =
+    (filterKebun ? 1 : 0) +
+    (filterAfdeling ? 1 : 0) +
+    (filterStatusTk ? 1 : 0) +
+    (filterStatusPerkawinan ? 1 : 0);
+
+  const handleResetFilters = () => {
+    setFilterKebun('');
+    setFilterAfdeling('');
+    setFilterStatusTk('');
+    setFilterStatusPerkawinan('');
+    setCurrentPage(1);
+  };
 
   React.useEffect(() => {
     setCurrentPage(1);
@@ -1329,89 +1349,132 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         }
       `}</style>
 
-      <div className="print-area page-layout">
-
-        {/* Card 1: Toolbar */}
-        <div className="toolbar-card no-print">
-          {/* Row 1: Title + Riwayat Mutasi */}
-          <div className="toolbar-card-row">
-            <h1 className="page-layout-h1">Data Master Karyawan</h1>
-            <button
-              onClick={() => navigate('/daftar-karyawan/mutasi')}
-              className="btn-outline-action"
-            >
-              Riwayat Mutasi <ChevronRightIcon size={15} />
-            </button>
-          </div>
-
-          {/* Row 2: Action buttons */}
-          <div className="toolbar-card-row">
-            <div className="toolbar-action-group">
-              <button type="button" className="btn-primary-green" onClick={() => navigate('/karyawan')}>
-                <Plus size={16} /> Tambah Karyawan
+      {isMobile ? (
+        <MobileDataPage
+          title="Daftar Karyawan"
+          actions={
+            <>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={() => navigate('/daftar-karyawan/mutasi')}
+                title="Riwayat Mutasi"
+                aria-label="Riwayat Mutasi"
+              >
+                <ArrowRightLeft size={15} />
               </button>
-            </div>
-            <div className="toolbar-action-group">
-              <button type="button" className="btn-outline-action" onClick={() => refreshEmployees(true)} title="Tarik ulang data dari server">
-                <RefreshCw size={15} /> Sync
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={() => refreshEmployees(true)}
+                title="Sync Data"
+                aria-label="Sync Data"
+              >
+                <RefreshCw size={15} />
               </button>
-              <button type="button" className="btn-outline-action" onClick={exportToCSV}>
-                <FileSpreadsheet size={15} color="#107C41" /> Excel
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToCSV}
+                title="Export Excel"
+                aria-label="Export Excel"
+              >
+                <FileSpreadsheet size={15} color="#107C41" />
               </button>
-              <button type="button" className="btn-outline-action" onClick={exportToPDF}>
-                <FileDown size={15} color="#E81123" /> PDF
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToPDF}
+                title="Export PDF"
+                aria-label="Export PDF"
+              >
+                <FileDown size={15} color="#E81123" />
               </button>
-              <button type="button" className="btn-outline-action" onClick={() => setImportModalOpen(true)}>
-                <Upload size={15} /> Import CSV + Foto
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={() => setImportModalOpen(true)}
+                title="Import CSV + Foto"
+                aria-label="Import CSV + Foto"
+              >
+                <Upload size={15} />
               </button>
-            </div>
-          </div>
-
-          {/* Row 3: Filter bar */}
-          <div className="filter-bar">
-            <div className="filter-bar-search">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input
-                type="text"
-                placeholder="Cari NIK / Nama..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            {user?.role !== 'estate_admin' && (
-              <select value={filterKebun} onChange={(e) => setFilterKebun(e.target.value)}>
-                <option value="">Afdeling (Semua)</option>
-                {availableKebuns.map(k => <option key={k} value={k}>{k}</option>)}
-              </select>
-            )}
-            <select value={filterAfdeling} onChange={(e) => setFilterAfdeling(e.target.value)}>
-              <option value="">Afdeling (Semua)</option>
-              {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <select value={filterStatusTk} onChange={(e) => setFilterStatusTk(e.target.value)}>
-              <option value="">Status TK (Semua)</option>
-              <option value="BHL">BHL</option>
-              <option value="Karyawan Tetap (PKWTT)">PKWTT</option>
-              <option value="Karyawan Kontrak (PKWT)">PKWT</option>
-            </select>
-            <select value={filterStatusPerkawinan} onChange={(e) => setFilterStatusPerkawinan(e.target.value)}>
-              <option value="">Perkawinan (Semua)</option>
-              <option value="Lajang">Lajang</option>
-              <option value="Menikah">Menikah</option>
-              <option value="Duda/Janda">Duda/Janda</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Card 2: Table */}
-        <div className="table-card">
-          <div className="table-container" style={{ maxHeight: '60vh', overflowY: 'auto', position: 'relative' }}>
+            </>
+          }
+          toolbar={
+            <>
+              <div className="mobile-data-search">
+                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Cari NIK / Nama..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mobile-chip-remove"
+                    style={{ position: 'absolute', right: '10px' }}
+                    aria-label="Hapus Pencarian"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mobile-filter-btn"
+                onClick={() => setIsMobileFilterOpen(true)}
+                aria-label="Buka Filter"
+              >
+                <Filter size={15} />
+                <span>Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="mobile-filter-badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </>
+          }
+          chips={
+            activeFilterCount > 0 ? (
+              <>
+                {Boolean(filterKebun) && (
+                  <span className="mobile-chip">
+                    <span>Kebun: {filterKebun}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterKebun('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterAfdeling) && (
+                  <span className="mobile-chip">
+                    <span>Afd: {filterAfdeling}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterAfdeling('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterStatusTk) && (
+                  <span className="mobile-chip">
+                    <span>TK: {filterStatusTk}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterStatusTk('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterStatusPerkawinan) && (
+                  <span className="mobile-chip">
+                    <span>Kawin: {filterStatusPerkawinan}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterStatusPerkawinan('')}>×</button>
+                  </span>
+                )}
+              </>
+            ) : null
+          }
+        >
+          <MobileTableViewport>
             <Table className="enterprise-table compact-mobile-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead style={{ width: '48px', textAlign: 'center' }}>No.</TableHead>
+                  <TableHead style={{ width: '40px', textAlign: 'center' }}>No.</TableHead>
                   <TableHead>NIK</TableHead>
-                  <TableHead>Nama</TableHead>
+                  <TableHead className="col-sticky">Nama</TableHead>
                   <TableHead>Afdeling</TableHead>
                   <TableHead>Nama Kebun</TableHead>
                   <TableHead>Status TK</TableHead>
@@ -1435,7 +1498,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                       <TableRow key={emp.id}>
                         <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
                         <TableCell data-label="NIK" style={{ fontWeight: 600 }}>{emp.nik}</TableCell>
-                        <TableCell data-label="Nama" style={{ fontWeight: 600 }}>{emp.name}</TableCell>
+                        <TableCell data-label="Nama" className="col-sticky" style={{ fontWeight: 600 }}>{emp.name}</TableCell>
                         <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
                         <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{emp.nama_kebun || '-'}</TableCell>
                         <TableCell data-label="Status TK">
@@ -1481,43 +1544,287 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 )}
               </TableBody>
             </Table>
-          </div>
+          </MobileTableViewport>
 
-          {filteredEmployees.length > 0 && (
-            <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === 1 ? 0.4 : 1 }}
+          {filteredEmployees.length > 0 && totalPages > 1 && (
+            <div style={{ flex: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 12px', gap: '8px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Sebelumnya"
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)', padding: '0 8px' }}>
+                Halaman {currentPage} dari {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Selanjutnya"
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
+          )}
+
+          <MobileFilterSheet
+            open={isMobileFilterOpen}
+            onOpenChange={setIsMobileFilterOpen}
+            title="Filter Data Karyawan"
+            activeCount={activeFilterCount}
+            onReset={handleResetFilters}
+          >
+            {user?.role !== 'estate_admin' && (
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Kebun
+                </label>
+                <select
+                  value={filterKebun}
+                  onChange={(e) => setFilterKebun(e.target.value)}
+                  style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
                 >
-                  <ChevronLeftIcon size={16} />
+                  <option value="">Afdeling (Semua)</option>
+                  {availableKebuns.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Afdeling
+              </label>
+              <select
+                value={filterAfdeling}
+                onChange={(e) => setFilterAfdeling(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Afdeling (Semua)</option>
+                {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Status TK
+              </label>
+              <select
+                value={filterStatusTk}
+                onChange={(e) => setFilterStatusTk(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Status TK (Semua)</option>
+                <option value="BHL">BHL</option>
+                <option value="Karyawan Tetap (PKWTT)">PKWTT</option>
+                <option value="Karyawan Kontrak (PKWT)">PKWT</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Status Perkawinan
+              </label>
+              <select
+                value={filterStatusPerkawinan}
+                onChange={(e) => setFilterStatusPerkawinan(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Perkawinan (Semua)</option>
+                <option value="Lajang">Lajang</option>
+                <option value="Menikah">Menikah</option>
+                <option value="Duda/Janda">Duda/Janda</option>
+              </select>
+            </div>
+          </MobileFilterSheet>
+        </MobileDataPage>
+      ) : (
+        <div className="print-area page-layout">
+
+          {/* Card 1: Toolbar */}
+          <div className="toolbar-card no-print">
+            {/* Row 1: Title + Riwayat Mutasi */}
+            <div className="toolbar-card-row">
+              <h1 className="page-layout-h1">Data Master Karyawan</h1>
+              <button
+                onClick={() => navigate('/daftar-karyawan/mutasi')}
+                className="btn-outline-action"
+              >
+                Riwayat Mutasi <ChevronRightIcon size={15} />
+              </button>
+            </div>
+
+            {/* Row 2: Action buttons */}
+            <div className="toolbar-card-row">
+              <div className="toolbar-action-group">
+                <button type="button" className="btn-outline-action" onClick={() => refreshEmployees(true)} title="Tarik ulang data dari server">
+                  <RefreshCw size={15} /> Sync
                 </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
-                  if (totalPages > 7 && page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
-                    if (page === currentPage - 2 || page === currentPage + 2) return <span key={`e-${page}`} style={{ color: 'var(--text-muted)' }}>...</span>;
-                    return null;
-                  }
-                  return (
-                    <button key={page} onClick={() => setCurrentPage(page)}
-                      style={{ minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: page === currentPage ? 'var(--accent-primary)' : 'transparent', color: page === currentPage ? '#fff' : 'var(--text-main)', fontWeight: page === currentPage ? 700 : 500, fontSize: '0.85rem' }}>
-                      {page}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === totalPages ? 0.4 : 1 }}
-                >
-                  <ChevronRightIcon size={16} />
+                <button type="button" className="btn-outline-action" onClick={exportToCSV}>
+                  <FileSpreadsheet size={15} color="#107C41" /> Excel
+                </button>
+                <button type="button" className="btn-outline-action" onClick={exportToPDF}>
+                  <FileDown size={15} color="#E81123" /> PDF
+                </button>
+                <button type="button" className="btn-outline-action" onClick={() => setImportModalOpen(true)}>
+                  <Upload size={15} /> Import CSV + Foto
                 </button>
               </div>
             </div>
-          )}
-        </div>
 
-      </div>
+            {/* Row 3: Filter bar */}
+            <div className="filter-bar">
+              <div className="filter-bar-search">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input
+                  type="text"
+                  placeholder="Cari NIK / Nama..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              {user?.role !== 'estate_admin' && (
+                <select value={filterKebun} onChange={(e) => setFilterKebun(e.target.value)}>
+                  <option value="">Afdeling (Semua)</option>
+                  {availableKebuns.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              )}
+              <select value={filterAfdeling} onChange={(e) => setFilterAfdeling(e.target.value)}>
+                <option value="">Afdeling (Semua)</option>
+                {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <select value={filterStatusTk} onChange={(e) => setFilterStatusTk(e.target.value)}>
+                <option value="">Status TK (Semua)</option>
+                <option value="BHL">BHL</option>
+                <option value="Karyawan Tetap (PKWTT)">PKWTT</option>
+                <option value="Karyawan Kontrak (PKWT)">PKWT</option>
+              </select>
+              <select value={filterStatusPerkawinan} onChange={(e) => setFilterStatusPerkawinan(e.target.value)}>
+                <option value="">Perkawinan (Semua)</option>
+                <option value="Lajang">Lajang</option>
+                <option value="Menikah">Menikah</option>
+                <option value="Duda/Janda">Duda/Janda</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Card 2: Table */}
+          <div className="table-card">
+            <div className="table-container" style={{ maxHeight: '60vh', overflowY: 'auto', position: 'relative' }}>
+              <Table className="enterprise-table compact-mobile-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead style={{ width: '48px', textAlign: 'center' }}>No.</TableHead>
+                    <TableHead>NIK</TableHead>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>Afdeling</TableHead>
+                    <TableHead>Nama Kebun</TableHead>
+                    <TableHead>Status TK</TableHead>
+                    <TableHead>Perkawinan</TableHead>
+                    <TableHead className="no-print">Biometrik</TableHead>
+                    <TableHead className="no-print">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredEmployees.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                        Tidak ada data yang cocok.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    paginatedEmployees.map((emp, index) => {
+                      const isBiometrikReady = emp.has_master_biometric === true || emp.has_master_biometric === 1 || emp.has_master_biometric === '1' || emp.has_master_biometric === 'true';
+                      const isAktif = emp.status_tk && emp.status_tk !== 'Non-Aktif' && emp.status_tk !== 'OFFBOARDING';
+                      return (
+                        <TableRow key={emp.id}>
+                          <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                          <TableCell data-label="NIK" style={{ fontWeight: 600 }}>{emp.nik}</TableCell>
+                          <TableCell data-label="Nama" style={{ fontWeight: 600 }}>{emp.name}</TableCell>
+                          <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
+                          <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{emp.nama_kebun || '-'}</TableCell>
+                          <TableCell data-label="Status TK">
+                            {emp.status_tk ? (
+                              <span className={isAktif ? 'badge-aktif' : 'badge-nonaktif'}>
+                                {emp.status_tk}
+                              </span>
+                            ) : '-'}
+                          </TableCell>
+                          <TableCell data-label="Perkawinan">{emp.status_perkawinan || '-'}</TableCell>
+                          <TableCell data-label="Biometrik" className="no-print">
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                              {isBiometrikReady ? (
+                                <span className="status-badge success">Siap</span>
+                              ) : (
+                                <span className="status-badge fail">Belum</span>
+                              )}
+                              {(emp.is_synced === false || String(emp.id).startsWith('off_')) && (
+                                <span className="status-badge warning" style={{ background: '#f59e0b', color: '#000', fontSize: '0.7rem', padding: '2px 6px', fontWeight: 'bold' }} title="Tersimpan lokal, akan diunggah saat online">
+                                  Pending Sync
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell data-label="Aksi" className="no-print">
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              {!isBiometrikReady && (
+                                <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Scan Wajah">
+                                  <Camera size={17} color="var(--accent-primary)" />
+                                </button>
+                              )}
+                              <button type="button" onClick={() => openEditModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Edit">
+                                <Edit2 size={17} color="var(--accent-cyan)" />
+                              </button>
+                              <button type="button" onClick={() => handleDeleteClick(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Hapus">
+                                <Trash2 size={17} color="var(--accent-error)" />
+                              </button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {filteredEmployees.length > 0 && (
+              <div style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === 1 ? 0.4 : 1 }}
+                  >
+                    <ChevronLeftIcon size={16} />
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    if (totalPages > 7 && page !== 1 && page !== totalPages && Math.abs(page - currentPage) > 1) {
+                      if (page === currentPage - 2 || page === currentPage + 2) return <span key={`e-${page}`} style={{ color: 'var(--text-muted)' }}>...</span>;
+                      return null;
+                    }
+                    return (
+                      <button key={page} onClick={() => setCurrentPage(page)}
+                        style={{ minWidth: '32px', height: '32px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: page === currentPage ? 'var(--accent-primary)' : 'transparent', color: page === currentPage ? '#fff' : 'var(--text-main)', fontWeight: page === currentPage ? 700 : 500, fontSize: '0.85rem' }}>
+                        {page}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: 'var(--text-main)', opacity: currentPage === totalPages ? 0.4 : 1 }}
+                  >
+                    <ChevronRightIcon size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
 
       {/* Modal Scan Wajah (Desktop) */}
       {scanModalOpen && scanEmp && !useFullscreen && (

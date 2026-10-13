@@ -43,7 +43,7 @@ export default function DashboardLayout() {
           hasOTAUpdate={hasOTAUpdate}
         />
 
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowX: 'clip' }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

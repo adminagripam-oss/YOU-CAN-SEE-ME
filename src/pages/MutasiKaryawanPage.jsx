@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table';
 import {
-  Plus, FileSpreadsheet, FileDown, Trash2, RefreshCw, ChevronLeftIcon, ChevronRightIcon, Search, X, ArrowLeft
+  Plus, FileSpreadsheet, FileDown, Trash2, RefreshCw, ChevronLeftIcon, ChevronRightIcon, Search, X, ArrowLeft, Filter
 } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -14,6 +14,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
 } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
+import { useIsMobileLayout } from '../hooks/useIsMobileLayout';
+import MobileDataPage from '../components/mobile/MobileDataPage';
+import MobileFilterSheet from '../components/mobile/MobileFilterSheet';
+import MobileTableViewport from '../components/mobile/MobileTableViewport';
 
 const MUTATION_LABELS = {
   ONBOARDING: 'Onboarding',
@@ -59,6 +63,19 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
   const [filterKebun, setFilterKebun] = useState('');
   const [filterAfdeling, setFilterAfdeling] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const isMobile = useIsMobileLayout();
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const activeFilterCount =
+    (filterType ? 1 : 0) +
+    (filterKebun ? 1 : 0) +
+    (filterAfdeling ? 1 : 0);
+
+  const handleResetFilters = () => {
+    setFilterType('');
+    setFilterKebun('');
+    setFilterAfdeling('');
+    setCurrentPage(1);
+  };
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mutationToDelete, setMutationToDelete] = useState(null);
@@ -277,7 +294,246 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
   return (
     <div style={{ width: '100%', padding: 0, boxSizing: 'border-box' }}>
 
-      <div className="page-layout">
+      {isMobile ? (
+        <MobileDataPage
+          title="Riwayat Mutasi"
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn-primary-green"
+                onClick={() => setIsModalOpen(true)}
+                style={{ height: '36px', padding: '0 10px', fontSize: '0.78rem', fontWeight: 700, borderRadius: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}
+              >
+                <Plus size={15} />
+                <span>Tambah</span>
+              </button>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToExcel}
+                title="Export Excel"
+                aria-label="Export Excel"
+              >
+                <FileSpreadsheet size={15} color="#107C41" />
+              </button>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={exportToPDF}
+                title="Export PDF"
+                aria-label="Export PDF"
+              >
+                <FileDown size={15} color="#E81123" />
+              </button>
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={fetchMutations}
+                title="Refresh Data"
+                aria-label="Refresh Data"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </>
+          }
+          toolbar={
+            <>
+              <div className="mobile-data-search">
+                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Cari nama / NIK..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mobile-chip-remove"
+                    style={{ position: 'absolute', right: '10px' }}
+                    aria-label="Hapus Pencarian"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mobile-filter-btn"
+                onClick={() => setIsMobileFilterOpen(true)}
+                aria-label="Buka Filter"
+              >
+                <Filter size={15} />
+                <span>Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="mobile-filter-badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </>
+          }
+          chips={
+            activeFilterCount > 0 ? (
+              <>
+                {Boolean(filterType) && (
+                  <span className="mobile-chip">
+                    <span>Jenis: {MUTATION_LABELS[filterType] || filterType}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterType('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterKebun) && (
+                  <span className="mobile-chip">
+                    <span>Kebun: {filterKebun}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterKebun('')}>×</button>
+                  </span>
+                )}
+                {Boolean(filterAfdeling) && (
+                  <span className="mobile-chip">
+                    <span>Afd: {filterAfdeling}</span>
+                    <button type="button" className="mobile-chip-remove" onClick={() => setFilterAfdeling('')}>×</button>
+                  </span>
+                )}
+              </>
+            ) : null
+          }
+        >
+          <MobileTableViewport>
+            <Table className="enterprise-table compact-mobile-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead style={{ width: '40px', textAlign: 'center' }}>No.</TableHead>
+                  <TableHead>Tanggal</TableHead>
+                  <TableHead className="col-sticky">Nama</TableHead>
+                  <TableHead>NIK</TableHead>
+                  <TableHead>Jenis Mutasi</TableHead>
+                  <TableHead>Nama Kebun</TableHead>
+                  <TableHead>Dari</TableHead>
+                  <TableHead>Ke</TableHead>
+                  {user?.role === 'headoffice_admin' && <TableHead className="no-print">Aksi</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                      Memuat data mutasi...
+                    </TableCell>
+                  </TableRow>
+                ) : filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                      Belum ada data mutasi yang tercatat.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginated.map((m, idx) => {
+                    const dari = [m.kebun_asal, m.afdeling_asal].filter(Boolean).join(' / ') || '-';
+                    const ke = [m.kebun_tujuan, m.afdeling_tujuan].filter(Boolean).join(' / ') || '-';
+                    const namaKebun = m.kebun_tujuan || m.kebun_asal || '-';
+                    return (
+                      <TableRow key={m.id}>
+                        <TableCell style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{(currentPage - 1) * ITEMS_PER_PAGE + idx + 1}</TableCell>
+                        <TableCell style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{formatTanggal(m.effective_date)}</TableCell>
+                        <TableCell className="col-sticky" style={{ fontWeight: 600 }}>{m.name}</TableCell>
+                        <TableCell style={{ color: 'var(--text-muted)' }}>{m.nik}</TableCell>
+                        <TableCell><MutasiBadge type={m.mutation_type} /></TableCell>
+                        <TableCell style={{ color: 'var(--text-muted)' }}>{namaKebun}</TableCell>
+                        <TableCell style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{dari}</TableCell>
+                        <TableCell style={{ fontSize: '0.82rem' }}>{ke}</TableCell>
+                        {user?.role === 'headoffice_admin' && (
+                          <TableCell className="no-print">
+                            <button className="btn-action delete" style={{ padding: '5px', minWidth: 'auto' }} onClick={() => handleDeleteClick(m)} title="Hapus">
+                              <Trash2 size={14} />
+                            </button>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </MobileTableViewport>
+
+          {filtered.length > 0 && totalPages > 1 && (
+            <div style={{ flex: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 12px', gap: '8px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Sebelumnya"
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)', padding: '0 8px' }}>
+                Halaman {currentPage} dari {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Selanjutnya"
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
+          )}
+
+          <MobileFilterSheet
+            open={isMobileFilterOpen}
+            onOpenChange={setIsMobileFilterOpen}
+            title="Filter Riwayat Mutasi"
+            activeCount={activeFilterCount}
+            onReset={handleResetFilters}
+          >
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Jenis Mutasi
+              </label>
+              <select
+                value={filterType}
+                onChange={e => setFilterType(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Semua Jenis</option>
+                {Object.entries(MUTATION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            {showKebunFilter && (
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Kebun
+                </label>
+                <select
+                  value={filterKebun}
+                  onChange={e => setFilterKebun(e.target.value)}
+                  style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                >
+                  <option value="">Semua Kebun</option>
+                  {(availableKebuns || []).map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Afdeling
+              </label>
+              <select
+                value={filterAfdeling}
+                onChange={e => setFilterAfdeling(e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Semua Afdeling</option>
+                {uniqueAfdelings.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+          </MobileFilterSheet>
+        </MobileDataPage>
+      ) : (
+        <div className="page-layout">
 
         {/* Card 1: Toolbar */}
         <div className="toolbar-card no-print">
@@ -419,6 +675,7 @@ export default function MutasiKaryawanPage({ employees, showToast }) {
         </div>
 
       </div>
+    )}
 
       {/* Modal Tambah Mutasi */}
       {isModalOpen && (

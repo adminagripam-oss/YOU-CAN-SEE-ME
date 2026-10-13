@@ -2,7 +2,7 @@
 ## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Versi Dokumen & Proyek**: 3.1.3-ota-patch
+- **Versi Dokumen & Proyek**: 3.2.0-major-release
 - **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js (Web IndexedDB), `@capacitor-community/sqlite` (Android Native SQLite)
 - **Biometric Engine**: `@vladmandic/human` (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh + EAR Liveness Engine + Cosine Similarity
 - **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine
@@ -12,12 +12,16 @@
 
 ## 1. Pendahuluan & Latar Belakang
 
-> **Patch Note (v3.1.3-ota-patch)**: Pembaruan presentasi visual pada Executive Dashboard.
-> 1) Memperbaiki *bug* *infinite re-render* animasi angka (count-up) pada kartu KPI dan chart Donut. Animasi kini menggunakan state terisolasi (`AnimatedNumber`) agar tidak memicu render berulang pada *parent*.
-> 2) Koreksi rumusan pembagi persentase *TK Hadir* pada *Donut Chart* untuk rentang tanggal > 1 hari (menggunakan total hari-orang aktual pada rentang tersebut, sehingga tidak melebihi 100%).
-> 3) Penggantian grafik "Ringkasan HK Per Kebun" Mingguan dan Bulanan menjadi `ComboBarLineChart` (Realisasi HK, Garis Tren, Garis Target HK) untuk memudahkan analisis pencapaian secara visual.
+> **Major Release Note (v3.2.0)**: Major update arsitektur Full-Bleed Mobile Data Tables, Eliminasi Gutter Layout, Pembersihan Hierarki Tag Semantic Main, Smooth Stacking Context Sliding Header, Anti-Distortion Biometric Canvas, dan Dual-Camera Scanner.
+> 1) **Full-Bleed Mobile Data Tables (100% Viewport)**: Transformasi menyeluruh antarmuka tabel data pada 4 modul utama (Log Absensi, Monitoring Absensi, Daftar Karyawan, dan Mutasi Karyawan) untuk layar ponsel ($\le 768\text{px}$). Menggunakan arsitektur `MobileDataPage`, `MobileFilterSheet`, `MobileTableViewport`, dan hook `useIsMobileLayout` dengan pemenuhan standar metrik UX: eliminasi total margin/gutter ancestor, lebar 100% sejajar topbar, tinggi header $\le 200\text{px}$, area tabel $\ge 65\%$ tinggi layar, baris tampak $\ge 12$ baris, dan nol horizontal scroll pada `body`.
+> 2) **Smooth Stacking Context & Zero Collision Sliding Header**: Perbaikan stacking context z-index berjenjang pada tabel Monitoring Absensi mobile (`th.col-sticky-nama` z-index: 35 dengan solid background & box-shadow; kolom NIK/Kebun/Afdeling z-index: 6) sehingga saat digeser horizontal ke kanan seluruh kolom identitas lain meluncur mulus (*smooth glide*) di bawah kolom Nama Karyawan tanpa tabrakan.
+> 3) **Pembersihan Toolbar & Penghapusan Tombol "Tambah" di Daftar Karyawan**: Tombol "Tambah" dihapus dari halaman Daftar Karyawan (baik Mobile maupun Desktop) untuk seluruh akun karena pendaftaran karyawan terpusat di menu mandiri "Registrasi Wajah" (`/karyawan`), sekaligus mencegah tabrakan/tumpang tindih dengan judul "Daftar Karyawan" pada tampilan mobile.
+> 4) **Anti-Distortion Canvas & Mesh Gepeng Fix**: Sinkronisasi dimensi fisik display box canvas dengan resolusi internal detektor AI via `ResizeObserver` berbasis $\min(\text{stageW}/\text{targetW}, \text{stageH}/\text{targetH})$ untuk mengeliminasi distorsi non-uniform ("mesh gepeng") pada perangkat mobile.
+> 5) **Dual-Camera Rolling & Default Back Camera**: Penambahan kontrol tukar kamera (*front/environment*) di seluruh modal pemindai biometrik (Absensi, Pendaftaran, Rescan Wajah) dengan *default facingMode* kamera belakang (*environment*) untuk perangkat bergerak demi kepraktisan operasional mandor di kebun.
 > 
-> *(Catatan V3.1.2)*: Penambahan *Safe SQLite Migration*, pembaruan *cache sync*, dan validasi ketat Array Kosong/NaN pada biometrik.
+> *(Catatan Patch Sebelumnya: v3.1.4–v3.1.8)*: Implementasi `FullscreenScanShell`, Face Frame Guidance (`FaceFrameTemplate`), carousel fix, serta peningkatan toleransi liveness biometrik.
+> *(Catatan V3.1.3)*: Pembaruan visual Executive Dashboard (isolasi `AnimatedNumber`, koreksi formula TK Hadir, dan `ComboBarLineChart`).
+> *(Catatan V3.1.2)*: Safe SQLite Migration, pembaruan cache sync, dan validasi ketat Array Kosong/NaN pada biometrik.
 
 
 Sistem absensi biometrik wajah konvensional umumnya mengabaikan efisiensi dengan menggunakan pendekatan **1-to-N (Verifikasi 1-ke-Banyak)**. Skema $O(N)$ ini menimbulkan kendala fatal saat jumlah karyawan membengkak, termasuk lonjakan latensi server dan tingkat *false positive* yang tinggi.
@@ -57,6 +61,8 @@ Sistem AgriFace menerapkan arsitektur **1-to-1 Direct Lookup ($O(1)$)**, **Offli
 
 ### 2.1 Frontend (Client-Side SPA, PWA & Native Android Shell)
 - **Framework & UI Engine**: React v19.2.8 & Vite v8.1.5.
+- **Mobile UI & Full-Bleed Table Architecture**: Modul tabel data mobile diisolasi secara kondisional melalui hook `useIsMobileLayout` ($\le 768\text{px}$) menggunakan komponen `MobileDataPage`, `MobileFilterSheet` (bottom sheet dialog), dan `MobileTableViewport` dengan *zero-regression* terhadap tata letak desktop.
+- **Biometric Viewport & Camera Controller**: Hook `useScanViewport` dan komponen `FaceScanSurface` mengintegrasikan kalkulasi aspek rasio dinamis berbasis `ResizeObserver` serta kontrol pergantian stream kamera (depan/belakang).
 - **OTA Update Engine**: `@capgo/capacitor-updater` terintegrasi dengan bucket Supabase `ota-updates` (menggunakan POSIX-compliant zip) dan modal *blocking* pembaruan.
 - **Service Worker & Caching**: Bypass caching eksplisit (`cache: 'no-store'`) untuk domain `*.supabase.co` di `sw.js` agar data dari server selalu segar tanpa fenomena data stagnan (*stale data*).
 - **Biometric Processing**: Pustaka AI dijalankan secara lokal di klien dengan paksaan *FP16 WebGL Precision* untuk menjamin standar nilai desimal 1024-dimensi yang identik secara universal melintasi HP, Tablet, maupun Laptop.
@@ -101,6 +107,22 @@ Sistem menggunakan model `@vladmandic/human` (`blazeface` + `facemesh` + `facere
 - **Delta Sync**: Penarikan data (karyawan & log) hanya memuat perubahan baris baru (*Delta*) via `.gt('created_at', lastSyncTime)`, menghemat bandwidth dan memori secara masif.
 - **Multi-Account Shared Device Handling**: Pada perangkat tablet bersama (*Shared Device*), mekanisme *Logout Guard* mencegah keluarnya sesi jika ada absensi admin yang belum ter-*push* ke awan. Database lokal tidak lagi dihancurkan asal-asalan, mengamankan data admin lain.
 
+### 3.4 Arsitektur Full-Bleed Mobile Data Table & Adaptive Bottom Sheet Filters
+Untuk memaksimalkan produktivitas operasional di lapangan melalui smartphone dengan layar terbatas:
+1. **Pemisahan Layout Responsif Tanpa Regresi Desktop**: Sistem memisahkan rendering halaman data antara Desktop Layout dan Mobile Layout secara bersih melalui conditional branch `isMobile ? <MobileDataPage> : <DesktopLayout>`.
+2. **Ergonomic Header Isolation**: Seluruh kontrol filter sekunder yang kompleks (Kebun, Afdeling, Status TK, Rentang Tanggal) dipindahkan dari header layar ke dalam drawer **Bottom Sheet** (`MobileFilterSheet`) yang dibuka via tombol Filter dengan badge counter filter aktif.
+3. **Independent Viewport Scrolling**: Tabel dibungkus di dalam `MobileTableViewport` dengan properti `overscroll-behavior: contain` dan momentum scrolling iOS, memastikan gestur horizontal pada tabel tidak memicu scroll horizontal pada kontainer aplikasi utama (`body`).
+4. **Column Freezing Strategis**: Kolom identitas utama (seperti *Nama Karyawan*) dikunci (*sticky*) pada sisi kiri tabel mobile, sementara kolom pelengkap diizinkan scroll horizontal untuk menghemat ruang pandang.
+
+### 3.5 Dual-Camera Rolling & Biometric Canvas Aspect Ratio Synchronization
+Menjawab tantangan operasional absensi di lapangan perkebunan:
+1. **Dynamic Camera Switching**: Komponen `FaceScanSurface` dan `FullscreenScanShell` menyediakan tombol toggle kamera instan (`user` vs `environment`) dengan touch target $\ge 44\times 44\text{px}$. Efek mirror CSS (`transform: scaleX(-1)`) hanya diterapkan saat kamera depan aktif.
+2. **Default Facing Mode Lapangan**: Mode kamera *default* untuk perangkat bergerak diarahkan ke kamera belakang (`environment`), memudahkan mandor/admin mengarahkan lensa ke wajah pekerja panen tanpa memutar gawai.
+3. **Anti-Distortion Canvas Resizing**: Mengatasi masalah "mesh gepeng" akibat kontainer flex 100% height, sistem menggunakan kalkulasi penyesuaian berbasis `ResizeObserver`:
+   $$\text{scale} = \min\left(\frac{\text{stageW}}{\text{targetW}}, \frac{\text{stageH}}{\text{targetH}}\right)$$
+   $$\text{boxW} = \text{round}(\text{targetW} \times \text{scale}), \quad \text{boxH} = \text{round}(\text{targetH} \times \text{scale})$$
+   Kalkulasi ini menjamin deviasi aspek rasio canvas internal terhadap display box $< 0.1\%$, sehingga titik mesh wajah 468 node tidak terdistorsi secara aksial.
+
 ---
 
 ## 4. Peran Pengguna & Proses Bisnis
@@ -141,6 +163,19 @@ Sistem menggunakan model `@vladmandic/human` (`blazeface` + `facemesh` + `facere
 ### FR-5: Live Dynamic Unsynced Badge Counter
 - *Topbar* aplikasi memuat angka dinamis merah indikator total absensi/karyawan luring (Offline) yang belum terkirim.
 - Badge diperbarui seketika (*real-time* interval 2.5 detik) dengan membaca status antrean SQLite lokal perangkat.
+
+### FR-6: Full-Bleed Mobile Data Tables & Bottom Sheet Filters
+- Seluruh 4 modul data tabular (Log Absensi, Monitoring Absensi, Daftar Karyawan, Mutasi Karyawan) wajib menyediakan tampilan layar penuh (*full-bleed*) pada perangkat $\le 768\text{px}$.
+- Filter sekunder dikelompokkan ke dalam modal Bottom Sheet dengan touch target minimal $44\text{px}$ dan badge counter filter aktif.
+- Area tampilan tabel mobile wajib mendominasi $\ge 65\%$ tinggi layar dengan kapasitas minimal 12 baris data tampak tanpa scroll vertikal.
+
+### FR-7: Dual-Camera Switching & Native Aspect-Ratio Scaling
+- Seluruh antarmuka pemindai wajah (Absensi Check-In/Out, Registrasi Wajah, Rescan Biometrik) wajib mendukung pergantian kamera depan dan belakang dengan transisi mulus tanpa kebocoran memori pada MediaStream.
+- Kanvas overlay biometrik wajib mempertahankan aspek rasio sensor video tanpa distorsi peregangan bitmap ("mesh gepeng").
+
+### FR-8: Penataan Akses Toolbar & Pemisahan Registrasi Karyawan
+- Halaman Daftar Karyawan (`/daftar-karyawan`) berfokus penuh pada penyajian dan penelusuran data master karyawan. Tombol "Tambah Karyawan" ditiadakan dari toolbar tabel guna menjaga kelapangan baris judul dan mencegah tumpang tindih UI pada perangkat mobile.
+- Hak akses penambahan/registrasi biometrik karyawan baru tetap terisolasi secara aman pada rute mandiri `/karyawan` ("Registrasi Wajah") khusus untuk peran `estate_admin`.
 
 ---
 
@@ -228,3 +263,4 @@ db.version(7).stores({
 1. **Performa Edge (Kecepatan Pemindaian)**: Pencocokan Euclidean Distance diselesaikan di bawah $<15\text{ ms}$. Respons kamera tetap berada pada ambang stabil $>15\text{ FPS}$ di HP menengah-bawah.
 2. **Offline-First PWA Standard**: Aplikasi 100% fungsional saat sinyal seluler mati total (Blank Spot). Asset statis Web Bundle dikontrol lewat `sw.js`, dan sinkronisasi dijadwalkan secara aman ke *Write-Ahead Log* luring perangkat Android.
 3. **Privasi Absolut (No Raw Imaging)**: Tidak satupun berkas foto `JPG/PNG` mentah diunggah ke server operasional absensi. Semua wajah diurai menjadi larik Array (Float32) seketika langsung di dalam memori browser pengguna.
+4. **Ergonomi & Utilisasi Layar Mobile**: Ketinggian total header pada tampilan tabel mobile dibatasi maksimal $\le 200\text{px}$ dari tepi atas layar. Area pandang tabel wajib mendominasi $\ge 65\%$ tinggi layar dengan kapasitas minimal 12 baris tampak. Ukuran font sel tabel dijaga minimal $12\text{px}$ ($0.75\text{rem}$) dan header kolom minimal $11\text{px}$ ($0.68\text{rem}$) untuk keterbacaan optimal di bawah terik matahari kebun. Zero-scroll horizontal pada dokumen root (`body`).

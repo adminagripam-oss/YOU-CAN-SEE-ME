@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, ChevronDown, Calendar } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -10,6 +10,10 @@ import {
 } from "../components/ui/table";
 import { PeriodePicker } from "../components/PeriodePicker";
 import { STATUS, STATUS_ORDER, getStatus, resolveLogStatus, mergeStatus } from '../utils/attendanceStatus';
+import { useIsMobileLayout } from '../hooks/useIsMobileLayout';
+import MobileDataPage from '../components/mobile/MobileDataPage';
+import MobileFilterSheet from '../components/mobile/MobileFilterSheet';
+import MobileTableViewport from '../components/mobile/MobileTableViewport';
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -29,7 +33,7 @@ const getLogDateInfo = (ts) => {
 
 function StatusLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)]">
+    <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-5 gap-y-1.5 sm:gap-y-2 px-3 sm:px-4 py-2 sm:py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)]">
       <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Keterangan</span>
       {STATUS_ORDER.map((k) => {
         const s = STATUS[k];
@@ -100,6 +104,11 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
   // Periode state — single source of truth: { month: 0-11, year: number }
   const today = new Date();
   const [periode, setPeriode] = useState({ month: today.getMonth(), year: today.getFullYear() });
+
+  const isMobile = useIsMobileLayout();
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const isPeriodeFiltered = periode.month !== today.getMonth() || periode.year !== today.getFullYear();
+  const activeFilterCount = (isPeriodeFiltered ? 1 : 0) + (filterKebun ? 1 : 0) + (filterAfdeling ? 1 : 0);
 
   // Derive selectedMonth string (YYYY-MM) from periode for table logic
   const selectedMonth = `${periode.year}-${String(periode.month + 1).padStart(2, '0')}`;
@@ -283,14 +292,73 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           .col-sticky-nama { position: sticky; left: 140px; width: 180px; min-width: 180px; }
           .col-sticky-kebun { position: sticky; left: 320px; width: 140px; min-width: 140px; }
           .col-sticky-afdeling { position: sticky; left: 460px; width: 100px; min-width: 100px; box-shadow: 4px 0 8px -2px rgba(0,0,0,0.12); }
+
+          .monitoring-table-grid th.sticky-col {
+            background-color: var(--bg-card-solid) !important;
+            z-index: 30 !important;
+          }
+
+          .monitoring-table-grid td.sticky-col {
+            background-color: var(--bg-card-solid) !important;
+            z-index: 20 !important;
+          }
         }
 
-        /* Mobile Layout (< 768px): Reflow sticky columns so only NAMA KARYAWAN is sticky, freeing up 80% screen width for date matrix! */
+        /* Mobile Layout (< 768px): Reflow sticky columns so ONLY NAMA KARYAWAN is sticky, smoothly gliding over other columns */
         @media (max-width: 767px) {
-          .col-sticky-nik { position: static !important; width: 110px !important; min-width: 110px !important; }
-          .col-sticky-nama { position: sticky !important; left: 0 !important; width: 140px !important; min-width: 140px !important; box-shadow: 4px 0 8px -2px rgba(0,0,0,0.12) !important; }
-          .col-sticky-kebun { position: static !important; width: 110px !important; min-width: 110px !important; }
-          .col-sticky-afdeling { position: static !important; width: 85px !important; min-width: 85px !important; box-shadow: none !important; }
+          .monitoring-table-grid th.col-sticky-nik,
+          .monitoring-table-grid th.col-sticky-kebun,
+          .monitoring-table-grid th.col-sticky-afdeling {
+            position: static !important;
+            width: 110px !important;
+            min-width: 110px !important;
+            z-index: 6 !important;
+            box-shadow: none !important;
+          }
+
+          .monitoring-table-grid td.col-sticky-nik,
+          .monitoring-table-grid td.col-sticky-kebun,
+          .monitoring-table-grid td.col-sticky-afdeling {
+            position: static !important;
+            width: 110px !important;
+            min-width: 110px !important;
+            z-index: 1 !important;
+            box-shadow: none !important;
+          }
+
+          .monitoring-table-grid th.col-sticky-afdeling,
+          .monitoring-table-grid td.col-sticky-afdeling {
+            width: 85px !important;
+            min-width: 85px !important;
+          }
+
+          .monitoring-table-grid th.col-sticky-nama {
+            position: sticky !important;
+            left: 0 !important;
+            width: 140px !important;
+            min-width: 140px !important;
+            max-width: 140px !important;
+            z-index: 35 !important;
+            background-color: var(--bg-card-solid) !important;
+            box-shadow: 4px 0 10px -2px rgba(0,0,0,0.18) !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+          }
+
+          .monitoring-table-grid td.col-sticky-nama {
+            position: sticky !important;
+            left: 0 !important;
+            width: 140px !important;
+            min-width: 140px !important;
+            max-width: 140px !important;
+            z-index: 25 !important;
+            background-color: var(--bg-card-solid) !important;
+            box-shadow: 4px 0 10px -2px rgba(0,0,0,0.18) !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+          }
 
           .filter-input-wrapper-mobile-full {
             width: 100% !important;
@@ -302,16 +370,6 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
           }
         }
 
-        .monitoring-table-grid th.sticky-col {
-          background-color: var(--bg-card-solid) !important;
-          z-index: 30 !important;
-        }
-
-        .monitoring-table-grid td.sticky-col {
-          background-color: var(--bg-card-solid) !important;
-          z-index: 20 !important;
-        }
-
         .monitoring-table-grid tr:hover td {
           background-color: var(--bg-hover-solid) !important;
         }
@@ -321,204 +379,478 @@ export default function MonitoringAbsensiPage({ employees = [], logs = [] }) {
         }
       `}</style>
 
-      {/* PAGE HEADER: OUTSIDE CARD, NO BORDER */}
-      <div className="no-print mb-4 sm:mb-5 px-1">
-        <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase block mb-1">KEHADIRAN</span>
-        <h2 className="text-xl sm:text-2xl font-black text-[var(--text-main)] m-0 leading-tight">
-          Monitoring Perhari Absensi
-        </h2>
-      </div>
-
-      {/* UNIFIED MAIN CARD: TOOLBAR + TABLE MATRIX + LEGEND */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] sm:rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col" style={{ padding: 0 }}>
-        {/* Top Filter Toolbar Header inside Unified Card */}
-        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-card-solid)] flex flex-wrap items-center gap-3 no-print">
-
-          {/* 1. PeriodePicker — Dialog + native select Bulan & Tahun */}
-          <PeriodePicker value={periode} onApply={handleApplyPeriode} />
-
-          {/* 2. Search Input */}
-          <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-1 min-w-[200px]">
-            <Search className="filter-input-icon-left w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Cari NIK, Nama..."
-              value={searchQuery}
-              onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
-              className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
-            />
-          </div>
-
-          {/* 3. Kebun Filter Dropdown */}
-          <div className="filter-input-wrapper filter-input-wrapper-mobile-half flex-none min-w-[150px]">
-            <Filter className="filter-input-icon-left w-4 h-4" />
-            <select
-              value={filterKebun}
-              onChange={(e) => handleFilterChange(setFilterKebun, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+      {isMobile ? (
+        <MobileDataPage
+          title="Monitoring Absensi"
+          actions={
+            <button
+              type="button"
+              onClick={() => setIsMobileFilterOpen(true)}
+              className="mobile-icon-btn"
+              style={{ width: 'auto', padding: '0 10px', fontSize: '0.78rem', fontWeight: 700, gap: '4px' }}
+              aria-label="Pilih Periode"
             >
-              <option value="">Semua Kebun</option>
-              {uniqueKebuns.map(k => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-            <ChevronDown className="filter-input-icon-right w-4 h-4" />
-          </div>
-
-          {/* 4. Afdeling Filter Dropdown */}
-          <div className="filter-input-wrapper filter-input-wrapper-mobile-half flex-none min-w-[150px]">
-            <Filter className="filter-input-icon-left w-4 h-4" />
-            <select
-              value={filterAfdeling}
-              onChange={(e) => handleFilterChange(setFilterAfdeling, e.target.value)}
-              className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
-            >
-              <option value="">Semua Afdeling</option>
-              {uniqueAfdelings.map(a => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-            <ChevronDown className="filter-input-icon-right w-4 h-4" />
-          </div>
-
-        </div>
-
-        <div className="w-full overflow-x-auto relative flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
-          <Table className="monitoring-table-grid compact-mobile-table">
-            <TableHeader>
-              <TableRow className="border-b border-[var(--border-color)] bg-[var(--bg-card-solid)]">
-                {/* COLUMN 1: NIK */}
-                <TableHead className="sticky-col col-sticky-nik text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
-                  NIK
-                </TableHead>
-
-                {/* COLUMN 2: NAMA KARYAWAN */}
-                <TableHead className="sticky-col col-sticky-nama text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)]">
-                  NAMA KARYAWAN
-                </TableHead>
-
-                {/* COLUMN 3: KEBUN */}
-                <TableHead className="sticky-col col-sticky-kebun text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
-                  KEBUN
-                </TableHead>
-
-                {/* COLUMN 4: AFDELING */}
-                <TableHead className="sticky-col col-sticky-afdeling text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)]">
-                  AFDELING
-                </TableHead>
-
-                {daysInMonth.map(day => {
-                  const isSun = new Date(periode.year, periode.month, day).getDay() === 0;
-                  return (
-                    <TableHead
-                      key={day}
-                      className={`w-[36px] min-w-[36px] text-center px-[2px] py-3 text-[11px] font-bold ${isSun ? 'text-[var(--text-muted)] opacity-40' : 'text-[var(--text-muted)]'}`}
-                    >
-                      {day}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {paginatedData.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={4 + daysInMonth.length}
-                    className="text-center py-12 text-[var(--text-muted)] font-medium"
+              <Calendar size={14} />
+              <span>{MONTH_NAMES[periode.month].slice(0, 3)} {periode.year}</span>
+            </button>
+          }
+          toolbar={
+            <>
+              <div className="mobile-data-search">
+                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Cari NIK, Nama..."
+                  value={searchQuery}
+                  onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => handleFilterChange(setSearchQuery, '')}
+                    className="mobile-chip-remove"
+                    style={{ position: 'absolute', right: '10px' }}
+                    aria-label="Hapus Pencarian"
                   >
-                    Tidak ada data absensi untuk filter yang dipilih.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedData.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    className="border-b border-[var(--border-color)] transition-colors group"
-                  >
-                    {/* CELL 1: NIK */}
-                    <TableCell className="sticky-col col-sticky-nik font-mono text-xs font-bold text-[var(--accent-success)] py-3 px-3 truncate">
-                      {row.nik}
-                    </TableCell>
-
-                    {/* CELL 2: NAMA KARYAWAN */}
-                    <TableCell className="sticky-col col-sticky-nama text-sm font-bold text-[var(--text-main)] py-3 px-3 border-r border-[var(--border-color)] truncate">
-                      {row.name}
-                    </TableCell>
-
-                    {/* CELL 3: KEBUN */}
-                    <TableCell className="sticky-col col-sticky-kebun text-xs text-[var(--text-muted)] font-medium py-3 px-3 truncate">
-                      {row.nama_kebun}
-                    </TableCell>
-
-                    {/* CELL 4: AFDELING */}
-                    <TableCell className="sticky-col col-sticky-afdeling text-xs text-[var(--text-muted)] font-medium py-3 px-3 border-r border-[var(--border-color)] truncate">
-                      {row.afdeling}
-                    </TableCell>
-
-                    {daysInMonth.map(day => (
-                      <TableCell
-                        key={day}
-                        className="p-[2px]"
-                        style={{ width: '36px', minWidth: '36px', textAlign: 'center' }}
-                      >
-                        <AttendanceCell
-                          code={row[day]}
-                          dateLabel={`${day} ${MONTH_NAMES[periode.month]} ${periode.year}`}
-                          nama={row.name}
-                        />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        <StatusLegend />
-
-        {/* Standard UI Data Pagination */}
-        {totalPages > 1 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)] gap-3">
-            <span className="text-xs text-[var(--text-muted)]">
-              Menampilkan {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, sortedData.length)} dari {sortedData.length} entri
-            </span>
-            <div className="flex items-center gap-1.5" style={{ display: 'flex', gap: '6px' }}>
+                    ×
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
-                className="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)] disabled:opacity-40 cursor-pointer"
+                className="mobile-filter-btn"
+                onClick={() => setIsMobileFilterOpen(true)}
+                aria-label="Buka Filter"
+              >
+                <Filter size={15} />
+                <span>Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="mobile-filter-badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </>
+          }
+          chips={
+            (activeFilterCount > 0 || isPeriodeFiltered) ? (
+              <>
+                <span className="mobile-chip">
+                  <span>Bulan: {MONTH_NAMES[periode.month].slice(0, 3)} {periode.year}</span>
+                  {isPeriodeFiltered && (
+                    <button
+                      type="button"
+                      className="mobile-chip-remove"
+                      onClick={() => handleApplyPeriode({ month: today.getMonth(), year: today.getFullYear() })}
+                      aria-label="Reset Bulan"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+                {Boolean(filterKebun) && (
+                  <span className="mobile-chip">
+                    <span>Kebun: {filterKebun}</span>
+                    <button
+                      type="button"
+                      className="mobile-chip-remove"
+                      onClick={() => handleFilterChange(setFilterKebun, '')}
+                      aria-label="Hapus Filter Kebun"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                {Boolean(filterAfdeling) && (
+                  <span className="mobile-chip">
+                    <span>Afd: {filterAfdeling}</span>
+                    <button
+                      type="button"
+                      className="mobile-chip-remove"
+                      onClick={() => handleFilterChange(setFilterAfdeling, '')}
+                      aria-label="Hapus Filter Afdeling"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+              </>
+            ) : null
+          }
+        >
+          <MobileTableViewport>
+            <Table className="monitoring-table-grid compact-mobile-table">
+              <TableHeader>
+                <TableRow className="border-b border-[var(--border-color)] bg-[var(--bg-card-solid)]">
+                  <TableHead className="sticky-col col-sticky-nik text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
+                    NIK
+                  </TableHead>
+                  <TableHead className="sticky-col col-sticky-nama text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)] truncate">
+                    NAMA KARYAWAN
+                  </TableHead>
+                  <TableHead className="sticky-col col-sticky-kebun text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
+                    KEBUN
+                  </TableHead>
+                  <TableHead className="sticky-col col-sticky-afdeling text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)]">
+                    AFDELING
+                  </TableHead>
+                  {daysInMonth.map(day => {
+                    const isSun = new Date(periode.year, periode.month, day).getDay() === 0;
+                    return (
+                      <TableHead
+                        key={day}
+                        className={`matrix-day-header w-[34px] min-w-[34px] text-center px-[2px] py-2 text-[11px] font-bold ${isSun ? 'text-[var(--text-muted)] opacity-40' : 'text-[var(--text-muted)]'}`}
+                      >
+                        {day}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedData.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={4 + daysInMonth.length}
+                      className="text-center py-12 text-[var(--text-muted)] font-medium"
+                    >
+                      Tidak ada data absensi untuk filter yang dipilih.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedData.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      className="border-b border-[var(--border-color)] transition-colors group"
+                    >
+                      <TableCell className="sticky-col col-sticky-nik font-mono text-xs font-bold text-[var(--accent-success)] py-3 px-3 truncate">
+                        {row.nik}
+                      </TableCell>
+                      <TableCell className="sticky-col col-sticky-nama text-sm font-bold text-[var(--text-main)] py-3 px-3 border-r border-[var(--border-color)] truncate">
+                        {row.name}
+                      </TableCell>
+                      <TableCell className="sticky-col col-sticky-kebun text-xs text-[var(--text-muted)] font-medium py-3 px-3 truncate">
+                        {row.nama_kebun}
+                      </TableCell>
+                      <TableCell className="sticky-col col-sticky-afdeling text-xs text-[var(--text-muted)] font-medium py-3 px-3 border-r border-[var(--border-color)] truncate">
+                        {row.afdeling}
+                      </TableCell>
+                      {daysInMonth.map(day => (
+                        <TableCell
+                          key={day}
+                          className="matrix-cell p-[2px]"
+                          style={{ width: '34px', minWidth: '34px', textAlign: 'center' }}
+                        >
+                          <AttendanceCell
+                            code={row[day]}
+                            dateLabel={`${day} ${MONTH_NAMES[periode.month]} ${periode.year}`}
+                            nama={row.name}
+                          />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </MobileTableViewport>
+
+          <StatusLegend />
+
+          {totalPages > 1 && (
+            <div style={{ flex: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 12px', gap: '8px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                onClick={() => setCurrentPage(p => p - 1)}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Sebelumnya"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              {Array.from({ length: totalPages }).map((_, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${currentPage === idx + 1
-                      ? 'bg-[var(--accent-primary)] text-white shadow-xs'
-                      : 'border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)]'
-                    }`}
-                  onClick={() => setCurrentPage(idx + 1)}
-                >
-                  {idx + 1}
-                </button>
-              ))}
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)', padding: '0 8px' }}>
+                Halaman {currentPage} dari {totalPages}
+              </span>
               <button
                 type="button"
-                className="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)] disabled:opacity-40 cursor-pointer"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage(p => p + 1)}
+                style={{ width: '34px', height: '34px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)' }}
+                aria-label="Halaman Selanjutnya"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+          )}
+
+          <MobileFilterSheet
+            open={isMobileFilterOpen}
+            onOpenChange={setIsMobileFilterOpen}
+            title="Filter Monitoring Absensi"
+            activeCount={activeFilterCount}
+            onReset={() => {
+              setFilterKebun('');
+              setFilterAfdeling('');
+              handleApplyPeriode({ month: today.getMonth(), year: today.getFullYear() });
+            }}
+          >
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Periode Bulan & Tahun
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <select
+                  value={periode.month}
+                  onChange={(e) => handleApplyPeriode({ ...periode, month: Number(e.target.value) })}
+                  style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                >
+                  {MONTH_NAMES.map((m, idx) => (
+                    <option key={m} value={idx}>{m}</option>
+                  ))}
+                </select>
+                <select
+                  value={periode.year}
+                  onChange={(e) => handleApplyPeriode({ ...periode, year: Number(e.target.value) })}
+                  style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                >
+                  {Array.from({ length: 7 }, (_, i) => today.getFullYear() - 5 + i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Kebun
+              </label>
+              <select
+                value={filterKebun}
+                onChange={(e) => handleFilterChange(setFilterKebun, e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Semua Kebun</option>
+                {uniqueKebuns.map(k => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Afdeling
+              </label>
+              <select
+                value={filterAfdeling}
+                onChange={(e) => handleFilterChange(setFilterAfdeling, e.target.value)}
+                style={{ width: '100%', minHeight: '44px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+              >
+                <option value="">Semua Afdeling</option>
+                {uniqueAfdelings.map(a => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+          </MobileFilterSheet>
+        </MobileDataPage>
+      ) : (
+        <>
+          {/* PAGE HEADER: OUTSIDE CARD, NO BORDER */}
+          <div className="no-print mb-4 sm:mb-5 px-1">
+            <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] uppercase block mb-1">KEHADIRAN</span>
+            <h2 className="text-xl sm:text-2xl font-black text-[var(--text-main)] m-0 leading-tight">
+              Monitoring Perhari Absensi
+            </h2>
           </div>
-        )}
-      </div>
+
+          {/* UNIFIED MAIN CARD: TOOLBAR + TABLE MATRIX + LEGEND */}
+          <div className="bg-[var(--bg-card)] border border-[var(--border-color)] sm:rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col" style={{ padding: 0 }}>
+            {/* Top Filter Toolbar Header inside Unified Card */}
+            <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-card-solid)] flex flex-wrap items-center gap-3 no-print">
+
+              {/* 1. PeriodePicker — Dialog + native select Bulan & Tahun */}
+              <PeriodePicker value={periode} onApply={handleApplyPeriode} />
+
+              {/* 2. Search Input */}
+              <div className="filter-input-wrapper filter-input-wrapper-mobile-full flex-1 min-w-[200px]">
+                <Search className="filter-input-icon-left w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="Cari NIK, Nama..."
+                  value={searchQuery}
+                  onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
+                  className="filter-input-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] shadow-xs"
+                />
+              </div>
+
+              {/* 3. Kebun Filter Dropdown */}
+              <div className="filter-input-wrapper filter-input-wrapper-mobile-half flex-none min-w-[150px]">
+                <Filter className="filter-input-icon-left w-4 h-4" />
+                <select
+                  value={filterKebun}
+                  onChange={(e) => handleFilterChange(setFilterKebun, e.target.value)}
+                  className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+                >
+                  <option value="">Semua Kebun</option>
+                  {uniqueKebuns.map(k => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+                <ChevronDown className="filter-input-icon-right w-4 h-4" />
+              </div>
+
+              {/* 4. Afdeling Filter Dropdown */}
+              <div className="filter-input-wrapper filter-input-wrapper-mobile-half flex-none min-w-[150px]">
+                <Filter className="filter-input-icon-left w-4 h-4" />
+                <select
+                  value={filterAfdeling}
+                  onChange={(e) => handleFilterChange(setFilterAfdeling, e.target.value)}
+                  className="filter-select-field w-full py-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg text-[var(--text-main)] text-sm font-medium appearance-none focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] cursor-pointer shadow-xs"
+                >
+                  <option value="">Semua Afdeling</option>
+                  {uniqueAfdelings.map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+                <ChevronDown className="filter-input-icon-right w-4 h-4" />
+              </div>
+
+            </div>
+
+            <div className="w-full overflow-x-auto relative flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <Table className="monitoring-table-grid compact-mobile-table">
+                <TableHeader>
+                  <TableRow className="border-b border-[var(--border-color)] bg-[var(--bg-card-solid)]">
+                    {/* COLUMN 1: NIK */}
+                    <TableHead className="sticky-col col-sticky-nik text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
+                      NIK
+                    </TableHead>
+
+                    {/* COLUMN 2: NAMA KARYAWAN */}
+                    <TableHead className="sticky-col col-sticky-nama text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)]">
+                      NAMA KARYAWAN
+                    </TableHead>
+
+                    {/* COLUMN 3: KEBUN */}
+                    <TableHead className="sticky-col col-sticky-kebun text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3">
+                      KEBUN
+                    </TableHead>
+
+                    {/* COLUMN 4: AFDELING */}
+                    <TableHead className="sticky-col col-sticky-afdeling text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] py-3 px-3 border-r border-[var(--border-color)]">
+                      AFDELING
+                    </TableHead>
+
+                    {daysInMonth.map(day => {
+                      const isSun = new Date(periode.year, periode.month, day).getDay() === 0;
+                      return (
+                        <TableHead
+                          key={day}
+                          className={`w-[36px] min-w-[36px] text-center px-[2px] py-3 text-[11px] font-bold ${isSun ? 'text-[var(--text-muted)] opacity-40' : 'text-[var(--text-muted)]'}`}
+                        >
+                          {day}
+                        </TableHead>
+                      );
+                    })}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {paginatedData.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4 + daysInMonth.length}
+                        className="text-center py-12 text-[var(--text-muted)] font-medium"
+                      >
+                        Tidak ada data absensi untuk filter yang dipilih.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    paginatedData.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        className="border-b border-[var(--border-color)] transition-colors group"
+                      >
+                        {/* CELL 1: NIK */}
+                        <TableCell className="sticky-col col-sticky-nik font-mono text-xs font-bold text-[var(--accent-success)] py-3 px-3 truncate">
+                          {row.nik}
+                        </TableCell>
+
+                        {/* CELL 2: NAMA KARYAWAN */}
+                        <TableCell className="sticky-col col-sticky-nama text-sm font-bold text-[var(--text-main)] py-3 px-3 border-r border-[var(--border-color)] truncate">
+                          {row.name}
+                        </TableCell>
+
+                        {/* CELL 3: KEBUN */}
+                        <TableCell className="sticky-col col-sticky-kebun text-xs text-[var(--text-muted)] font-medium py-3 px-3 truncate">
+                          {row.nama_kebun}
+                        </TableCell>
+
+                        {/* CELL 4: AFDELING */}
+                        <TableCell className="sticky-col col-sticky-afdeling text-xs text-[var(--text-muted)] font-medium py-3 px-3 border-r border-[var(--border-color)] truncate">
+                          {row.afdeling}
+                        </TableCell>
+
+                        {daysInMonth.map(day => (
+                          <TableCell
+                            key={day}
+                            className="p-[2px]"
+                            style={{ width: '36px', minWidth: '36px', textAlign: 'center' }}
+                          >
+                            <AttendanceCell
+                              code={row[day]}
+                              dateLabel={`${day} ${MONTH_NAMES[periode.month]} ${periode.year}`}
+                              nama={row.name}
+                            />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <StatusLegend />
+
+            {/* Standard UI Data Pagination */}
+            {totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-card-solid)] gap-3">
+                <span className="text-xs text-[var(--text-muted)]">
+                  Menampilkan {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, sortedData.length)} dari {sortedData.length} entri
+                </span>
+                <div className="flex items-center gap-1.5" style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)] disabled:opacity-40 cursor-pointer"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => p - 1)}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  {Array.from({ length: totalPages }).map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={`w-8 h-8 flex items-center justify-center rounded-md text-xs font-bold transition-all cursor-pointer ${currentPage === idx + 1
+                          ? 'bg-[var(--accent-primary)] text-white shadow-xs'
+                          : 'border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)]'
+                        }`}
+                      onClick={() => setCurrentPage(idx + 1)}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] hover:bg-[var(--border-color)] disabled:opacity-40 cursor-pointer"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => p + 1)}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
