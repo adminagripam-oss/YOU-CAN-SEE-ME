@@ -893,7 +893,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               const thumbItem = await dexieDb.employee_face_thumbs.get(tempIdStr);
               if (thumbItem) {
                 await dexieDb.employee_face_thumbs.delete(tempIdStr);
-                await dexieDb.employee_face_thumbs.put({ ...thumbItem, employee_id: realEmpId });
+                await dexieDb.employee_face_thumbs.put({ ...thumbItem, employee_id: String(realEmpId) });
               }
             }
           }
@@ -982,6 +982,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
     const syncResults = await Promise.all(employeePromises);
     const syncedCount = syncResults.filter(Boolean).length;
+
+    // Langkah Foto: Unggah foto master wajah untuk karyawan yang telah memiliki ID server
+    // Dibungkus dalam try/catch terpisah sehingga kegagalan langkah foto tidak menggagalkan langkah inti
+    try {
+      await syncPendingEmployeeFaceThumbs();
+    } catch (photoErr) {
+      console.warn('[Sync Employee Photos Non-blocking Error]:', photoErr);
+    }
 
     // Dispatch reactive events so all open UI views update immediately
     if (typeof window !== 'undefined') {
@@ -1099,20 +1107,76 @@ export async function syncPendingEmployeeFaceThumbs() {
   if (!isOnline) return { count: 0 };
 
   try {
-    const { getUnsyncedEmployeeFaceThumbs, markSyncedEmployeeFaceThumbs } = await import('./db');
+    const { getUnsyncedEmployeeFaceThumbs, markSyncedEmployeeFaceThumbs, db } = await import('./db');
+    const isNative = Capacitor.isNativePlatform();
     const pendingThumbs = await getUnsyncedEmployeeFaceThumbs();
     if (!pendingThumbs || pendingThumbs.length === 0) return { count: 0 };
 
     console.log(`[Auto-Sync] Syncing ${pendingThumbs.length} employee face thumbnails...`);
     const syncedEmpIds = [];
 
-    for (const item of pendingThumbs) {
-      const empId = item.employee_id;
-      if (String(empId).startsWith('off_') || String(empId).startsWith('tmp_')) continue;
+    // Cache pre-fetch untuk rekonsiliasi NIK presisi
+    let cachedEmps = [];
+    try {
+      cachedEmps = await db.employees_cache.toArray();
+    } catch (_) {}
 
-      const failCount = photoUploadFailures.get(String(empId)) || 0;
-      if (failCount >= 3) {
-        console.warn(`[Sync Face Thumb] Skipping ${empId} due to ${failCount} consecutive failures. Will retry on next sync.`);
+    for (const item of pendingThumbs) {
+      let empId = item.employee_id;
+
+      // ─── REKONSILIASI NIK (Hanya Bila Tepat Satu Kecocokan) ───
+      if (String(empId).startsWith('off_') || String(empId).startsWith('tmp_')) {
+        try {
+          // Cari karyawan di cache yang mungkin sudah terunggah dan memiliki ID resmi
+          let matched = [];
+          if (item.nik) {
+            matched = (cachedEmps || []).filter(e => e.nik && String(e.nik).trim() === String(item.nik).trim());
+          }
+          if (matched.length !== 1) {
+            // Coba cari kecocokan offline_id
+            matched = (cachedEmps || []).filter(e => String(e.offline_id) === String(empId) || String(e.id) === String(empId));
+          }
+
+          // REKONSILIASI HANYA BILA TEPAT SATU KECOCOKAN DAN SUDAH PUNYA ID SERVER
+          if (matched.length === 1 && matched[0].id && !String(matched[0].id).startsWith('off_') && !String(matched[0].id).startsWith('tmp_')) {
+            const newRealId = String(matched[0].id);
+            console.log(`[Sync Face Thumb] Rekonsiliasi NIK berhasil: ${empId} -> ${newRealId}`);
+            if (isNative) {
+              const { waitForConnection } = await import('./services/sqliteService');
+              const nativeDb = await waitForConnection();
+              if (nativeDb) {
+                await nativeDb.run(
+                  `UPDATE local_employee_face_thumbs SET employee_id = ? WHERE employee_id = ?`,
+                  [newRealId, String(empId)]
+                );
+              }
+            } else {
+              const { dexieDb } = await import('./db');
+              if (dexieDb?.employee_face_thumbs) {
+                await dexieDb.employee_face_thumbs.delete(String(empId));
+                await dexieDb.employee_face_thumbs.put({ ...item, employee_id: newRealId });
+              }
+            }
+            empId = newRealId;
+            item.employee_id = newRealId;
+          } else {
+            // Belum ada ID server resmi atau kecocokan ambigu, tunda sampai karyawan inti terunggah
+            continue;
+          }
+        } catch (recErr) {
+          console.warn('[Sync Face Thumb Reconciliation Error]:', recErr);
+          continue;
+        }
+      }
+
+      // Retry backoff bertingkat (5s, 10s, 20s, max 60s)
+      const prevFail = photoUploadFailures.get(String(empId));
+      const failCount = prevFail?.count || 0;
+      const lastAttempt = prevFail?.timestamp || 0;
+      const backoffMs = Math.min(60000, 5000 * Math.pow(2, failCount));
+
+      if (failCount > 0 && (Date.now() - lastAttempt) < backoffMs) {
+        console.warn(`[Sync Face Thumb] Skipping ${empId} during backoff (${Math.round((backoffMs - (Date.now() - lastAttempt)) / 1000)}s remaining)`);
         continue;
       }
 
@@ -1129,6 +1193,8 @@ export async function syncPendingEmployeeFaceThumbs() {
         const blob = new Blob([byteArray], { type: 'image/jpeg' });
 
         const storagePath = `faces/${empId}/master.jpg`;
+        let storageUploadSuccess = false;
+
         const { error: uploadErr } = await supabase.storage
           .from('attendance-photos')
           .upload(storagePath, blob, {
@@ -1138,13 +1204,27 @@ export async function syncPendingEmployeeFaceThumbs() {
 
         if (uploadErr) {
           console.warn(`[Sync Face Thumb] Storage upload failed for ${empId}:`, uploadErr.message);
-          photoUploadFailures.set(String(empId), failCount + 1);
-          continue;
+          photoUploadFailures.set(String(empId), { count: failCount + 1, timestamp: Date.now() });
+
+          // Catat error ke antrean jika karyawan masih berada di employee_sync_queue (misal rescan)
+          try {
+            const qItem = await db.employee_sync_queue.get(String(empId));
+            if (qItem) {
+              await db.employee_sync_queue.updateError(empId, {
+                last_error_code: uploadErr.statusCode || uploadErr.code || 'STORAGE_ERR',
+                last_error_message: uploadErr.message || 'Gagal mengunggah foto ke storage',
+                last_error_step: 'photo'
+              });
+            }
+          } catch (_) {}
+        } else {
+          storageUploadSuccess = true;
         }
 
-        await supabase.from('employee_face_photos').upsert({
+        // Upsert metadata dan thumbnail base64 ke tabel employee_face_photos
+        const { error: upsertErr } = await supabase.from('employee_face_photos').upsert({
           employee_id: Number(empId),
-          storage_path: storagePath,
+          storage_path: storageUploadSuccess ? storagePath : null,
           thumbnail_base64: item.thumb_base64,
           captured_at: item.captured_at || new Date().toISOString(),
           is_primary: true,
@@ -1153,11 +1233,40 @@ export async function syncPendingEmployeeFaceThumbs() {
           updated_at: new Date().toISOString()
         }, { onConflict: 'employee_id' });
 
+        if (upsertErr) {
+          console.warn(`[Sync Face Thumb] Upsert employee_face_photos failed for ${empId}:`, upsertErr.message);
+          photoUploadFailures.set(String(empId), { count: failCount + 1, timestamp: Date.now() });
+
+          try {
+            const qItem = await db.employee_sync_queue.get(String(empId));
+            if (qItem) {
+              await db.employee_sync_queue.updateError(empId, {
+                last_error_code: upsertErr.code || 'DB_UPSERT_ERR',
+                last_error_message: upsertErr.message || 'Gagal menyimpan metadata foto di database',
+                last_error_step: 'photo'
+              });
+            }
+          } catch (_) {}
+          continue;
+        }
+
+        // Berhasil: tandai tersinkron dan bersihkan catatan kegagalan
         syncedEmpIds.push(empId);
         photoUploadFailures.delete(String(empId));
       } catch (thumbErr) {
         console.warn(`[Sync Face Thumb Exception for ${item.employee_id}]:`, thumbErr);
-        photoUploadFailures.set(String(empId), failCount + 1);
+        photoUploadFailures.set(String(empId), { count: failCount + 1, timestamp: Date.now() });
+
+        try {
+          const qItem = await db.employee_sync_queue.get(String(empId));
+          if (qItem) {
+            await db.employee_sync_queue.updateError(empId, {
+              last_error_code: thumbErr.code || 'PHOTO_EXCEPTION',
+              last_error_message: thumbErr.message || String(thumbErr),
+              last_error_step: 'photo'
+            });
+          }
+        } catch (_) {}
       }
     }
 
@@ -1218,15 +1327,23 @@ export async function syncPullEmployeeFacePhotos(targetEmployeeIds = null) {
             // Check if local cache already has this exact or newer version
             const localInfo = await getEmployeeFaceThumbInfo(rp.employee_id);
             if (localInfo) {
+              // PENGAMAN DATA LOKAL (WAJIB):
+              // Unduhan foto dari server tidak boleh menimpa thumbnail lokal yang berstatus belum terunggah (pending).
+              // Item lokal yang pending selalu menang sampai terunggah.
+              if (localInfo.is_synced === false || localInfo.is_synced === 0) {
+                continue;
+              }
+
               const localVer = localInfo.photo_version || 1;
               const remoteVer = rp.photo_version || 1;
+              // Bandingkan photo_version / photo_checksum memakai ketidaksamaan (bukan jam perangkat)
               if (localVer >= remoteVer && localInfo.photo_checksum && localInfo.photo_checksum === rp.photo_checksum) {
                 continue; // Up-to-date
               }
             }
 
             thumbsToSave.push({
-              employee_id: rp.employee_id,
+              employee_id: String(rp.employee_id),
               thumb_base64: rp.thumbnail_base64,
               photo_version: rp.photo_version || 1,
               photo_checksum: rp.photo_checksum || null,

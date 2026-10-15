@@ -71,7 +71,11 @@ describe('Tugas Regresi: syncPendingEmployees Full Vector Formats & Error Isolat
     dexieDb.employee_face_thumbs = {
       get: async () => null,
       put: async () => {},
-      delete: async () => {}
+      delete: async () => {},
+      toArray: async () => [],
+      bulkPut: async () => {},
+      update: async () => {},
+      filter: () => ({ toArray: async () => [] })
     };
   });
 

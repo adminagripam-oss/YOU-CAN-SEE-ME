@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle, ChevronDown, Building2, WifiOff } from 'lucide-react';
+import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle, ChevronDown, Building2, WifiOff, Camera } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
@@ -75,11 +75,33 @@ export default function SinkronisasiPage() {
     }
     setSyncingEmployees(true);
     try {
-      const { syncPendingEmployees } = await import('../syncEngine');
+      const { syncPendingEmployees, syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
       await syncPendingEmployees();
+      await syncPendingEmployeeFaceThumbs();
       await loadData();
     } catch (err) {
       console.error('[SinkronisasiPage] Gagal sinkronisasi pendaftaran:', err);
+    } finally {
+      setSyncingEmployees(false);
+    }
+  };
+
+  const handleRetryPhotoSync = async () => {
+    if (!navigator.onLine) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('agriface-toast', {
+          detail: { title: 'Mode Offline', message: 'Perangkat sedang luring. Hubungkan ke internet untuk mengunggah foto.', type: 'error' }
+        }));
+      }
+      return;
+    }
+    setSyncingEmployees(true);
+    try {
+      const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
+      await syncPendingEmployeeFaceThumbs();
+      await loadData();
+    } catch (err) {
+      console.error('[SinkronisasiPage] Gagal sinkronisasi foto master:', err);
     } finally {
       setSyncingEmployees(false);
     }
@@ -264,6 +286,30 @@ export default function SinkronisasiPage() {
       });
       setAvailableKebunList(Array.from(kebunSet).filter(Boolean).sort((a, b) => a.localeCompare(b)));
 
+      // Check remote photo counts & check 1 sample in storage
+      let remotePhotoCount = 0;
+      let samplePhotoFound = null;
+      let sampleEmpId = null;
+      try {
+        const { count, error: photoCntErr } = await supabase
+          .from('employee_face_photos')
+          .select('*', { count: 'exact', head: true });
+        if (!photoCntErr && typeof count === 'number') {
+          remotePhotoCount = count;
+        }
+
+        if (remoteData && remoteData.length > 0) {
+          sampleEmpId = remoteData[0].employee_id;
+          const { data: storageList } = await supabase
+            .storage
+            .from('attendance-photos')
+            .list(`faces/${sampleEmpId}`);
+          samplePhotoFound = !!(storageList && storageList.some(f => f.name === 'master.jpg'));
+        }
+      } catch (photoDiagErr) {
+        console.warn('[VectorIntegrity] Photo diagnostic check error:', photoDiagErr);
+      }
+
       const remoteMap = new Map((remoteData || []).map(r => [String(r.employee_id), r]));
       const allIds = new Set([...localMap.keys(), ...remoteMap.keys()]);
 
@@ -329,6 +375,10 @@ export default function SinkronisasiPage() {
         remoteOnlyCount,
         uncomputedCount,
         invalidFormatCount,
+        remotePhotoCount,
+        remoteMissingPhotos: Math.max(0, (remoteData || []).length - remotePhotoCount),
+        sampleEmpId,
+        samplePhotoFound,
         details: details.sort((a, b) => {
           if (a.status === 'INVALID_FORMAT') return -1;
           if (b.status === 'INVALID_FORMAT') return 1;
@@ -375,6 +425,11 @@ export default function SinkronisasiPage() {
         vector_checksum: calculatedChecksum,
         updated_at: data.updated_at
       });
+
+      try {
+        const { syncPullEmployeeFacePhotos } = await import('../syncEngine');
+        await syncPullEmployeeFacePhotos([empId]);
+      } catch (_) {}
 
       // Refresh diagnostic view
       await checkVectorIntegrity();
@@ -620,6 +675,18 @@ export default function SinkronisasiPage() {
                                   <span className="text-[10px]">{copiedId === emp.id ? 'Tersalin' : 'Salin'}</span>
                                 </button>
                               )}
+                              {emp.last_error_step === 'photo' && (
+                                <button
+                                  type="button"
+                                  onClick={handleRetryPhotoSync}
+                                  disabled={syncingEmployees}
+                                  title="Coba unggah foto master saja"
+                                  className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-100 text-[10px] font-semibold flex items-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  <Camera size={12} />
+                                  <span>Coba Foto</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={handleSyncEmployees}
@@ -743,6 +810,31 @@ export default function SinkronisasiPage() {
                       <div className="bg-rose-500/10 p-3 rounded-lg border border-rose-500/30">
                         <div className="text-[11px] font-bold uppercase text-rose-600">Format Rusak</div>
                         <div className="text-xl font-black text-rose-600">{diagResults.invalidFormatCount}</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Photo Storage Diagnostic Banner */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-[var(--bg-input)] border border-[var(--border-color)] text-xs">
+                    <div className="flex items-center gap-2">
+                      <Camera size={15} className="text-cyan-600" />
+                      <span className="font-semibold text-[var(--text-main)]">Audit Foto Master Cloud:</span>
+                      <span className="text-[var(--text-muted)]">
+                        <strong>{diagResults.remotePhotoCount}</strong> tersimpan di cloud &bull;{' '}
+                        {diagResults.remoteMissingPhotos > 0 ? (
+                          <span className="text-amber-600 font-bold">{diagResults.remoteMissingPhotos} karyawan belum memiliki foto di server</span>
+                        ) : (
+                          <span className="text-emerald-600 font-bold">Seluruh karyawan memiliki foto master</span>
+                        )}
+                      </span>
+                    </div>
+                    {diagResults.sampleEmpId && (
+                      <div className="text-[11px] text-[var(--text-muted)] font-mono">
+                        Sampel #{diagResults.sampleEmpId}: {diagResults.samplePhotoFound ? (
+                          <span className="text-emerald-600 font-semibold">Tersedia di storage</span>
+                        ) : (
+                          <span className="text-amber-600 font-semibold">Tidak ditemukan di storage</span>
+                        )}
                       </div>
                     )}
                   </div>

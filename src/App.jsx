@@ -4,7 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
-import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray } from './db';
+import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray, normalizeEmployeeFaceThumbKeys } from './db';
 import { vectorChecksum } from './biometrics';
 import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener, syncPullEmployeeFacePhotos } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -63,6 +63,7 @@ function AppContent() {
     async function setupStorage() {
       try {
         await initSQLite();
+        await normalizeEmployeeFaceThumbKeys();
       } catch (err) {
         console.error('[App] SQLite initialization error:', err);
       } finally {
