@@ -155,6 +155,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     );
 
     let syncedTextIds = [];
+    let localToRealIdMap = {};
 
     if (textPendingLogs.length > 0) {
       isSyncing = true;
@@ -189,7 +190,6 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     let syncedIds = [];
     let successfulData = [];
-    let localToRealIdMap = {};
     let telemetryExcluded = false;
 
     let { data, error } = await supabase
@@ -842,8 +842,8 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               status_tk: emp.status_tk,
               jabatan: emp.jabatan,
               status_perkawinan: emp.status_perkawinan,
-              descriptor_json: descObj,
-              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              descriptor_json: normalizedVec,
+              template_version: queueTemplateVer !== null ? queueTemplateVer : 1,
               vector_checksum: checksumVal
             });
           }

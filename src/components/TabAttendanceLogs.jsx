@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { db } from '../db';
 import { API_BASE_URL } from '../config';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -1161,7 +1162,7 @@ export default function TabAttendanceLogs({
                               <button
                                 type="button"
                                 className="btn-action edit"
-                                onClick={() => handleOpenEditModal(log)}
+                                onClick={() => handleOpenEdit(log)}
                                 title="Edit Log"
                               >
                                 <Edit2 size={13} />
@@ -1169,7 +1170,7 @@ export default function TabAttendanceLogs({
                               <button
                                 type="button"
                                 className="btn-action delete"
-                                onClick={() => handleDeleteLog(log)}
+                                onClick={() => handleDeleteGroup(log)}
                                 title="Hapus Log"
                               >
                                 <Trash2 size={13} />
