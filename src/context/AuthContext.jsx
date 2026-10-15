@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
 import { db, getUnsyncedDataSummary } from '../db';
 import { checkOnline, triggerAutoSync } from '../syncEngine';
+import { Capacitor } from '@capacitor/core';
 
 // Helper function to hash a string to SHA-256 for local offline credential matching
 async function hashPassword(password) {
