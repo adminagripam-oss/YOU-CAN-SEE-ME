@@ -1274,10 +1274,10 @@ export async function syncPendingEmployeeFaceThumbs() {
       await markSyncedEmployeeFaceThumbs(syncedEmpIds);
       console.log(`[Auto-Sync] Successfully synced ${syncedEmpIds.length} employee face photos.`);
     }
-    return { count: syncedEmpIds.length };
+    return { count: syncedEmpIds.length, syncedCount: syncedEmpIds.length };
   } catch (err) {
     console.error('[Auto-Sync Face Thumbs Exception]:', err);
-    return { count: 0 };
+    return { count: 0, syncedCount: 0 };
   }
 }
 

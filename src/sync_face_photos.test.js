@@ -397,5 +397,70 @@ describe('TAHAP 2: Reproduksi Kegagalan Sinkronisasi Foto Master Wajah (TEST SUI
     expect(item).not.toBeNull();
     expect(item.thumb_base64).toBe(dummyBase64);
   });
+
+  it('Kasus 8: Rekonsiliasi NIK berhasil memetakan thumbnail ID sementara ke ID server resmi saat NIK cocok', async () => {
+    const { supabase } = await import('./supabaseClient');
+
+    vi.spyOn(supabase.storage, 'from').mockImplementation((bucket) => {
+      return {
+        upload: async (path, blob) => {
+          memStorageUploads.push({ bucket, path, blob });
+          return { data: { path }, error: null };
+        },
+        getPublicUrl: (path) => ({
+          data: { publicUrl: `https://fake.supabase.co/storage/v1/object/public/${bucket}/${path}` }
+        })
+      };
+    });
+
+    vi.spyOn(supabase, 'from').mockImplementation((table) => {
+      return {
+        upsert: async (payload) => {
+          if (table === 'employee_face_photos') {
+            memUploadedPhotos.push(payload);
+          }
+          return { data: payload, error: null };
+        },
+        update: async () => ({ eq: async () => ({ error: null }) }),
+        delete: async () => ({ eq: async () => ({ error: null }) }),
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+          in: () => ({ error: null, data: [] })
+        })
+      };
+    });
+
+    // Simulasi: Karyawan sudah ada di employees_cache dengan ID resmi 1234 dan NIK 'KB-RECON-01'
+    await dexieDb.employees_cache.put({
+      id: 1234,
+      nik: 'KB-RECON-01',
+      name: 'Pemanen Rekonsiliasi',
+      department: 'Pemanen'
+    });
+
+    // Thumbnail tersimpan dengan ID sementara 'off_emp_9999' namun memiliki properti nik 'KB-RECON-01'
+    await dexieDb.employee_face_thumbs.put({
+      employee_id: 'off_emp_9999',
+      nik: 'KB-RECON-01',
+      thumb_base64: dummyBase64,
+      photo_version: 1,
+      is_synced: false
+    });
+
+    const res = await syncPendingEmployeeFaceThumbs();
+    expect(res.count).toBe(1);
+    expect(res.syncedCount).toBe(1);
+
+    expect(memUploadedPhotos.length).toBeGreaterThan(0);
+    expect(memUploadedPhotos[0].employee_id).toBe(1234);
+
+    const remapped = await dexieDb.employee_face_thumbs.get('1234');
+    expect(remapped).not.toBeNull();
+    expect(remapped.is_synced).toBe(true);
+
+    const oldThumb = await dexieDb.employee_face_thumbs.get('off_emp_9999');
+    expect(oldThumb).toBeNull();
+  });
 });
+
 

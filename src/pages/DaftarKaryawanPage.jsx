@@ -420,12 +420,13 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     const descriptorJson = scanCurrentDescriptorRef.current;
     const isOfflineEmp = String(scanEmp.id).startsWith('off_') || String(scanEmp.id).startsWith('tmp_') || !navigator.onLine;
     const csVal = vectorChecksum(descriptorJson);
+    const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
 
     try {
       // Capture face thumbnail and save locally
       const thumb = captureEnrollmentPhoto(scanVideoRef.current, scanFaceCheckResult?.boundingBox, scanFacingMode);
       if (thumb?.base64) {
-        await saveEmployeeFaceThumb(scanEmp.id, thumb.base64);
+        await saveEmployeeFaceThumb(scanEmp.id, thumb.base64, rescanTemplateVer, null, scanEmp.nik);
       }
 
       let shouldQueue = isOfflineEmp;
@@ -436,7 +437,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           const { error: empErr } = await supabase.from('employees').update({ has_master_biometric: true }).eq('id', scanEmp.id);
           if (empErr) throw empErr;
 
-          const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
           const { error: descErr } = await supabase
             .from('master_descriptors')
             .upsert({
@@ -535,7 +535,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           try {
             const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
             const res = await syncPendingEmployeeFaceThumbs();
-            if (res?.syncedCount > 0) {
+            if ((res?.count || res?.syncedCount) > 0) {
               showToast('Foto Master Diunggah', `Foto wajah ${scanEmp.name} berhasil disimpan di cloud.`, 'success');
             }
           } catch (syncErr) {
@@ -960,10 +960,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         if (editFormMode === 'camera' && editVideoRef.current) {
           const thumb = captureEnrollmentPhoto(editVideoRef.current, editFaceCheckResult?.boundingBox, editFacingMode);
           if (thumb?.base64) {
-            await saveEmployeeFaceThumb(editingEmp.id, thumb.base64);
+            await saveEmployeeFaceThumb(editingEmp.id, thumb.base64, editTemplateVer, null, payload.nik);
           }
         } else if (editPhotoPreview) {
-          await saveEmployeeFaceThumb(editingEmp.id, editPhotoPreview);
+          await saveEmployeeFaceThumb(editingEmp.id, editPhotoPreview, editTemplateVer, null, payload.nik);
         }
 
         await cacheUserMasterVector({
@@ -1006,7 +1006,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           try {
             const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
             const res = await syncPendingEmployeeFaceThumbs();
-            if (res?.syncedCount > 0) {
+            if ((res?.count || res?.syncedCount) > 0) {
               showToast('Foto Master Diunggah', `Foto wajah ${payload.name} berhasil disimpan di cloud.`, 'success');
             }
           } catch (syncErr) {

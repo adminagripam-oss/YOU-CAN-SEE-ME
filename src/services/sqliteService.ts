@@ -240,6 +240,7 @@ export async function initSQLite(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS local_employee_face_thumbs (
         employee_id TEXT PRIMARY KEY,
+        nik TEXT,
         thumb_base64 TEXT,
         captured_at TEXT,
         photo_version INTEGER DEFAULT 1,
@@ -448,6 +449,17 @@ export async function initSQLite(): Promise<void> {
       }
     } catch (e) {
       console.warn('[SQLite Service] Migration local_employee_sync_queue add columns warning:', e);
+    }
+
+    try {
+      const thumbInfo = await dbConnection.query(`PRAGMA table_info(local_employee_face_thumbs);`);
+      const cols = new Set((thumbInfo.values || []).map((c: any) => c.name));
+      if (!cols.has('nik')) {
+        console.log('[SQLite Service] Adding missing nik column to local_employee_face_thumbs...');
+        await dbConnection.execute(`ALTER TABLE local_employee_face_thumbs ADD COLUMN nik TEXT;`);
+      }
+    } catch (e) {
+      console.warn('[SQLite Service] Migration local_employee_face_thumbs add nik warning:', e);
     }
 
     try {
@@ -2079,23 +2091,25 @@ export async function sqliteSaveEmployeeFaceThumb(
   employeeId: string,
   thumbBase64: string,
   photoVersion: number = 1,
-  photoChecksum: string | null = null
+  photoChecksum: string | null = null,
+  nik: string | null = null
 ): Promise<void> {
   const db = await waitForConnection();
   if (!db || !employeeId) return;
   try {
     const now = new Date().toISOString();
     await db.run(
-      `INSERT INTO local_employee_face_thumbs (employee_id, thumb_base64, captured_at, photo_version, photo_checksum, updated_at, is_synced)
-       VALUES (?, ?, ?, ?, ?, ?, 0)
+      `INSERT INTO local_employee_face_thumbs (employee_id, nik, thumb_base64, captured_at, photo_version, photo_checksum, updated_at, is_synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(employee_id) DO UPDATE SET
+         nik = COALESCE(EXCLUDED.nik, local_employee_face_thumbs.nik),
          thumb_base64 = EXCLUDED.thumb_base64,
          captured_at = EXCLUDED.captured_at,
          photo_version = EXCLUDED.photo_version,
          photo_checksum = EXCLUDED.photo_checksum,
          updated_at = EXCLUDED.updated_at,
          is_synced = 0`,
-      [String(employeeId), thumbBase64, now, photoVersion, photoChecksum, now]
+      [String(employeeId), nik ? String(nik).trim() : null, thumbBase64, now, photoVersion, photoChecksum, now]
     );
   } catch (err: any) {
     console.error('[SQLite Service sqliteSaveEmployeeFaceThumb Error]:', err?.message || err);

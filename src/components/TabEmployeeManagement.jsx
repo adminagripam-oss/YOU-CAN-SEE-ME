@@ -427,7 +427,7 @@ export default function TabEmployeeManagement({
 
       // Simpan Thumbnail Foto Wajah jika ada
       if (enrollmentThumbRef.current) {
-        await saveEmployeeFaceThumb(tempId, enrollmentThumbRef.current);
+        await saveEmployeeFaceThumb(tempId, enrollmentThumbRef.current, chosenTemplateVersion !== null ? chosenTemplateVersion : 2, null, empNik.trim());
       }
 
       // Simpan Vektor Wajah (Biometrik) secara lokal
