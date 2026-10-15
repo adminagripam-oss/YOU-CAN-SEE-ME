@@ -95,18 +95,19 @@ export default function EmployeeFacePreviewModal({
         }
 
         // Tier 2: Check Supabase Storage via public URL or thumbnail if online
+        const targetId = !isNaN(Number(employee.id)) ? Number(employee.id) : employee.id;
         if (navigator.onLine && employee.id && !String(employee.id).startsWith('off_') && !String(employee.id).startsWith('tmp_')) {
           try {
             const { data: photoRec } = await supabase
               .from('employee_face_photos')
               .select('storage_path, thumbnail_base64, photo_version, photo_checksum, updated_at')
-              .eq('employee_id', employee.id)
+              .eq('employee_id', targetId)
               .maybeSingle();
 
             if (photoRec?.thumbnail_base64) {
               // Cache locally so it is available offline next time
               await saveEmployeeFaceThumb(
-                employee.id,
+                String(employee.id),
                 photoRec.thumbnail_base64,
                 photoRec.photo_version || 1,
                 photoRec.photo_checksum || null
@@ -146,7 +147,7 @@ export default function EmployeeFacePreviewModal({
             const { data: logRec } = await supabase
               .from('attendance_logs')
               .select('photo_url, timestamp')
-              .eq('employee_id', employee.id)
+              .eq('employee_id', targetId)
               .not('photo_url', 'is', null)
               .order('timestamp', { ascending: false })
               .limit(1)
@@ -240,10 +241,10 @@ export default function EmployeeFacePreviewModal({
               <div className="flex flex-col items-center gap-2 p-4 text-center text-[var(--text-muted)]">
                 <User size={40} strokeWidth={1.5} className="opacity-50" />
                 <span className="text-xs font-semibold text-[var(--text-main)]">
-                  {errorMsg || 'Belum Ada Foto Wajah'}
+                  {errorMsg || 'Foto master belum didaftarkan'}
                 </span>
-                <span className="text-[11px] text-[var(--text-muted)]">
-                  Wajah belum didaftarkan untuk verifikasi
+                <span className="text-[11px] text-[var(--text-muted)] max-w-[210px] leading-relaxed">
+                  Lakukan rescan dari kamera untuk mendaftarkan foto master wajah.
                 </span>
                 <button
                   type="button"
@@ -265,7 +266,7 @@ export default function EmployeeFacePreviewModal({
             <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 text-center font-medium max-w-sm">
               <AlertCircle size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
               <span>
-                Foto Absensi Lapangan Terakhir (Foto Master Belum Disinkronkan{attendanceDate ? ` - ${new Date(attendanceDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
+                Foto Absensi Lapangan (Bukan Foto Master{attendanceDate ? ` - ${new Date(attendanceDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
               </span>
             </div>
           )}

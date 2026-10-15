@@ -2128,7 +2128,8 @@ export async function sqliteSaveEmployeeFaceThumbsBatch(
            photo_version = EXCLUDED.photo_version,
            photo_checksum = EXCLUDED.photo_checksum,
            updated_at = EXCLUDED.updated_at,
-           is_synced = EXCLUDED.is_synced`,
+           is_synced = EXCLUDED.is_synced
+         WHERE local_employee_face_thumbs.is_synced != 0`,
         [
           String(t.employee_id),
           t.thumb_base64,

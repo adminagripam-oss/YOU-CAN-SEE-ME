@@ -1159,6 +1159,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         let descriptorJson = null;
         let hasMasterBiometric = false;
 
+        let thumbBase64 = null;
         if (photoFile) {
           const embedding = await processImageFileForEmbedding(photoFile);
           const validVec = toVectorArray(embedding);
@@ -1166,6 +1167,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             descriptorJson = validVec;
             hasMasterBiometric = true;
           }
+          try {
+            thumbBase64 = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = () => resolve(null);
+              reader.readAsDataURL(photoFile);
+            });
+          } catch (_) {}
         }
 
         const employeePayload = {
@@ -1222,6 +1231,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             vector_checksum: descriptorJson ? vectorChecksum(descriptorJson) : null,
             has_master_biometric: hasMasterBiometric
           });
+
+          // 4. Simpan Thumbnail Foto Master Wajah ke database lokal
+          if (employeeId && thumbBase64) {
+            await saveEmployeeFaceThumb(employeeId, thumbBase64, 1);
+          }
 
           successCount++;
         } catch (err) {

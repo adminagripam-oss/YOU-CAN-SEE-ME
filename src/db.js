@@ -1405,3 +1405,52 @@ export async function markSyncedEmployeeFaceThumbs(employeeIds) {
   }
 }
 
+/**
+ * Normalisasi satu kali untuk key employee_face_thumbs bertipe number menjadi string.
+ * Mengikuti pengaman data lokal: salin dulu ke string, verifikasi ketersediaan, baru hapus key lama.
+ * Idempotent: jika dijalankan dua kali, operasi kedua langsung no-op.
+ */
+export async function normalizeEmployeeFaceThumbKeys() {
+  if (Capacitor.isNativePlatform() || !dexieDb?.employee_face_thumbs) return { converted: 0 };
+  try {
+    const all = await dexieDb.employee_face_thumbs.toArray();
+    if (!all || all.length === 0) return { converted: 0 };
+
+    const numberKeyItems = all.filter(item => typeof item.employee_id === 'number');
+    if (numberKeyItems.length === 0) return { converted: 0 };
+
+    // 1. Salin ke baris ber-key string lebih dulu
+    const stringKeyItems = numberKeyItems.map(item => ({
+      ...item,
+      employee_id: String(item.employee_id)
+    }));
+
+    await dexieDb.employee_face_thumbs.bulkPut(stringKeyItems);
+
+    // 2. Verifikasi jumlah salinan tersimpan secara presisi
+    let verified = true;
+    for (const item of stringKeyItems) {
+      const readBack = await dexieDb.employee_face_thumbs.get(item.employee_id);
+      if (!readBack) {
+        verified = false;
+        break;
+      }
+    }
+
+    // 3. Hanya jika verifikasi 100% lengkap, hapus baris lama ber-key number
+    if (verified) {
+      for (const item of numberKeyItems) {
+        await dexieDb.employee_face_thumbs.delete(item.employee_id);
+      }
+      return { converted: numberKeyItems.length };
+    } else {
+      console.warn('[IndexedDB] Normalisasi key dibatalkan karena verifikasi tidak lengkap.');
+      return { converted: 0, error: 'verification_failed' };
+    }
+  } catch (err) {
+    console.warn('[IndexedDB normalizeEmployeeFaceThumbKeys Warning]:', err?.message || err);
+    return { converted: 0, error: err?.message || err };
+  }
+}
+
+
