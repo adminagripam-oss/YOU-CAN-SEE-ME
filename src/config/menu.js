@@ -58,7 +58,7 @@ export const MENU = [
   {
     title: 'Sinkronisasi',
     icon: 'RefreshCw',
-    roles: ['estate_admin'],
+    roles: ['estate_admin', 'regional_admin', 'headoffice_admin'],
     path: '/sinkronisasi',
     badgeKey: 'unsynced',
   },

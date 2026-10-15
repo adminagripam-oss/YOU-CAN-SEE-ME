@@ -234,13 +234,20 @@ const appRouter = createBrowserRouter([
               { path: 'daftar-karyawan',        element: <DaftarKaryawanRoute /> },
               { path: 'daftar-karyawan/mutasi', element: <MutasiRoute /> },
 
+              // Shared sync route for estate, regional, and headoffice admins
+              {
+                element: <RoleGuard allowedRoles={['estate_admin', 'regional_admin', 'headoffice_admin']} />,
+                children: [
+                  { path: 'sinkronisasi', element: <SinkronisasiPage /> },
+                ],
+              },
+
               // Estate-admin-only routes
               {
                 element: <RoleGuard allowedRoles={['estate_admin']} />,
                 children: [
                   { path: 'absensi',     element: <AbsensiRoute /> },
                   { path: 'karyawan',    element: <KaryawanRoute /> },
-                  { path: 'sinkronisasi', element: <SinkronisasiPage /> },
                   { path: 'hasil-panen', element: <Placeholder /> },
                   { path: 'pengajuan',   element: <Placeholder /> },
                 ],

@@ -529,6 +529,21 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         'success'
       );
 
+      // Auto-upload foto master ke Supabase Storage & employee_face_photos di latar belakang jika online
+      if (navigator.onLine && thumb?.base64) {
+        (async () => {
+          try {
+            const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
+            const res = await syncPendingEmployeeFaceThumbs();
+            if (res?.syncedCount > 0) {
+              showToast('Foto Master Diunggah', `Foto wajah ${scanEmp.name} berhasil disimpan di cloud.`, 'success');
+            }
+          } catch (syncErr) {
+            console.warn('[handleScanSubmit] Auto-upload foto master di latar belakang:', syncErr);
+          }
+        })();
+      }
+
       setScanModalOpen(false);
       refreshEmployees();
       window.dispatchEvent(new CustomEvent('refresh_employees'));
@@ -985,6 +1000,21 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         'success'
       );
 
+      // Auto-upload foto master ke Supabase Storage & employee_face_photos di latar belakang jika online
+      if (navigator.onLine && (editCurrentDescriptorRef.current || editPhotoPreview)) {
+        (async () => {
+          try {
+            const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
+            const res = await syncPendingEmployeeFaceThumbs();
+            if (res?.syncedCount > 0) {
+              showToast('Foto Master Diunggah', `Foto wajah ${payload.name} berhasil disimpan di cloud.`, 'success');
+            }
+          } catch (syncErr) {
+            console.warn('[handleEditSubmit] Auto-upload foto master di latar belakang:', syncErr);
+          }
+        })();
+      }
+
       setEditModalOpen(false);
       refreshEmployees();
       window.dispatchEvent(new CustomEvent('refresh_employees', { detail: { employeeId: editingEmp.id } }));
@@ -1245,6 +1275,19 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       }
 
       showToast('Import Selesai', `Berhasil mengimpor ${successCount} karyawan. Gagal: ${failCount}`, 'success');
+
+      // Auto-upload foto master hasil import massal ke cloud jika online
+      if (navigator.onLine && successCount > 0) {
+        (async () => {
+          try {
+            const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
+            await syncPendingEmployeeFaceThumbs();
+          } catch (syncErr) {
+            console.warn('[handleImportSubmit] Auto-upload foto master import di latar belakang:', syncErr);
+          }
+        })();
+      }
+
       refreshEmployees();
       setImportModalOpen(false);
       setCsvFile(null);
