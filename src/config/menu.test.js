@@ -37,11 +37,11 @@ describe('filterMenuByRole', () => {
     expect(titles).not.toContain('Data Karyawan');
   });
 
-  it('headoffice_admin sees Persetujuan group but NOT Sinkronisasi or Scanner Absensi', () => {
+  it('headoffice_admin sees Persetujuan group and Sinkronisasi but NOT Scanner Absensi', () => {
     const result = filterMenuByRole(MENU, HQ);
     const titles = result.map((i) => i.title);
     expect(titles).toContain('Persetujuan');
-    expect(titles).not.toContain('Sinkronisasi');
+    expect(titles).toContain('Sinkronisasi');
     // Flatten children titles to check Scanner Absensi is absent
     const childTitles = result.flatMap((i) => (i.children ?? []).map((c) => c.title));
     expect(childTitles).not.toContain('Scanner Absensi');
@@ -113,20 +113,20 @@ describe('allowedPaths', () => {
     expect(paths).toContain('/sinkronisasi');
   });
 
-  it('regional_admin cannot access /karyawan or /sinkronisasi', () => {
+  it('regional_admin cannot access /karyawan, but can access /sinkronisasi', () => {
     const paths = allowedPaths(MENU, REGION);
     expect(paths).not.toContain('/karyawan');
-    expect(paths).not.toContain('/sinkronisasi');
+    expect(paths).toContain('/sinkronisasi');
   });
 
-  it('headoffice_admin can access /persetujuan/inbox', () => {
+  it('headoffice_admin can access /persetujuan/inbox and /sinkronisasi', () => {
     const paths = allowedPaths(MENU, HQ);
     expect(paths).toContain('/persetujuan/inbox');
+    expect(paths).toContain('/sinkronisasi');
   });
 
-  it('headoffice_admin cannot access /sinkronisasi or /absensi', () => {
+  it('headoffice_admin cannot access /absensi', () => {
     const paths = allowedPaths(MENU, HQ);
-    expect(paths).not.toContain('/sinkronisasi');
     expect(paths).not.toContain('/absensi');
   });
 });

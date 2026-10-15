@@ -105,16 +105,20 @@ export default function EmployeeFacePreviewModal({
               .maybeSingle();
 
             if (photoRec?.thumbnail_base64) {
+              const srcUrl = photoRec.thumbnail_base64.startsWith('data:')
+                ? photoRec.thumbnail_base64
+                : `data:image/jpeg;base64,${photoRec.thumbnail_base64}`;
+
               // Cache locally so it is available offline next time
               await saveEmployeeFaceThumb(
                 String(employee.id),
-                photoRec.thumbnail_base64,
+                srcUrl,
                 photoRec.photo_version || 1,
                 photoRec.photo_checksum || null
               ).catch(() => {});
 
               if (isMounted) {
-                setPhotoUrl(photoRec.thumbnail_base64);
+                setPhotoUrl(srcUrl);
                 setSourceType('cloud');
                 setSavedDate(photoRec.updated_at);
                 setLoading(false);
