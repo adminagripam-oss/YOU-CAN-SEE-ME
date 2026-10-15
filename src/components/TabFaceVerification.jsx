@@ -913,7 +913,7 @@ export default function TabFaceVerification({
           vec = validArr;
           resolvedSource = 'local_cache';
           resolvedChecksum = cached.vector_checksum || vectorChecksum(validArr);
-          resolvedVersion = cached.template_version || 1;
+          resolvedVersion = cached.template_version !== undefined && cached.template_version !== null ? Number(cached.template_version) : 1;
           console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid, panjang:', validArr.length, 'checksum:', resolvedChecksum, 'employee:', empIdKey);
         } else {
           console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (descriptor null/kosong), employee:', empIdKey);
@@ -940,7 +940,7 @@ export default function TabFaceVerification({
                 vec = validArr;
                 resolvedSource = 'supabase_cloud';
                 resolvedChecksum = masterData.vector_checksum || vectorChecksum(validArr);
-                resolvedVersion = masterData.template_version || 1;
+                resolvedVersion = masterData.template_version !== undefined && masterData.template_version !== null ? Number(masterData.template_version) : 1;
                 console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
               } else {
                 console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid');
@@ -964,7 +964,7 @@ export default function TabFaceVerification({
           vec = validArr;
           resolvedSource = isOfflineId ? 'offline_props' : 'employee_props';
           resolvedChecksum = vectorChecksum(validArr);
-          resolvedVersion = empObj?.template_version || 1;
+          resolvedVersion = empObj?.template_version !== undefined && empObj?.template_version !== null ? Number(empObj.template_version) : 1;
           console.log('[LOAD MASTER T3-PROPS] Vektor ditemukan valid di employees props, source:', resolvedSource);
         } else {
           console.warn('[LOAD MASTER T3-PROPS] Tidak ada vektor valid di props. Employee ID:', empIdKey);
@@ -1001,7 +1001,7 @@ export default function TabFaceVerification({
 
           masterVectorRef.current = parsedArray;
           masterChecksumRef.current = resolvedChecksum || vectorChecksum(parsedArray);
-          masterVersionRef.current = resolvedVersion || cached?.template_version || 1;
+          masterVersionRef.current = resolvedVersion !== undefined && resolvedVersion !== null ? resolvedVersion : (cached?.template_version !== undefined && cached?.template_version !== null ? Number(cached.template_version) : 1);
           vectorSourceRef.current = resolvedSource || 'unknown';
           scoreHistoryRef.current = []; // flush any zeros accumulated before master loaded
 
@@ -1710,7 +1710,7 @@ export default function TabFaceVerification({
         path_foto_lokal: pathFotoLokal,
         match_cosine: lastMedianCosRef.current || null,
         match_threshold: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: masterVersionRef.current || 1,
+        template_version: masterVersionRef.current !== undefined && masterVersionRef.current !== null ? Number(masterVersionRef.current) : 1,
         vector_checksum_used: masterChecksumRef.current || null,
         vector_source: vectorSourceRef.current || null,
         facing_mode: facingMode,
@@ -1725,7 +1725,7 @@ export default function TabFaceVerification({
         median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
         max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : (lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null),
         threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: masterVersionRef.current || 1,
+        template_version: masterVersionRef.current !== undefined && masterVersionRef.current !== null ? Number(masterVersionRef.current) : 1,
         master_checksum: masterChecksumRef.current || null,
         vector_source: vectorSourceRef.current || null,
         facing_mode: facingMode,

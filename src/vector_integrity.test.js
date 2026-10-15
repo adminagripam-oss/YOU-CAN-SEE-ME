@@ -225,9 +225,9 @@ describe('Vector Integrity and Checksum Verification', () => {
     expect(shouldUpdate3).toBe(true);
   });
 
-  it('enforces storage bucket name consistency as employee-faces across all references', () => {
-    const expectedBucket = 'employee-faces';
-    expect(expectedBucket).toBe('employee-faces');
+  it('enforces storage bucket name consistency as attendance-photos across all references', () => {
+    const expectedBucket = 'attendance-photos';
+    expect(expectedBucket).toBe('attendance-photos');
     expect(expectedBucket).not.toBe('employee-face-photos');
   });
 });

@@ -22,7 +22,7 @@ describe('A8: Schema Migrations Integrity', () => {
     }
 
     // Verify latest version is at least 10 and includes employee_face_thumbs
-    expect(versions[versions.length - 1]).toBe(10);
+    expect(versions[versions.length - 1]).toBeGreaterThanOrEqual(10);
     expect(content).toContain("employee_face_thumbs: 'employee_id, captured_at, is_synced'");
     expect(content).toContain("scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at'");
   });

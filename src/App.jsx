@@ -389,7 +389,7 @@ function AppContent() {
                           .from('master_descriptors')
                           .update({
                             vector_checksum: calculatedChecksum,
-                            template_version: desc.template_version || 1
+                            template_version: desc.template_version !== undefined && desc.template_version !== null ? Number(desc.template_version) : 1
                           })
                           .eq('employee_id', desc.employee_id)
                           .then(({ error: backfillErr }) => {
@@ -406,7 +406,7 @@ function AppContent() {
                       employee_id: desc.employee_id,
                       descriptor_json: desc.descriptor_json,
                       geometric_descriptor_json: desc.geometric_descriptor_json,
-                      template_version: desc.template_version || 1,
+                      template_version: desc.template_version !== undefined && desc.template_version !== null ? Number(desc.template_version) : 1,
                       vector_checksum: calculatedChecksum,
                       updated_at: desc.updated_at
                     }).catch(() => {});
@@ -437,7 +437,10 @@ function AppContent() {
                 kebun: emp.kebun || emp.nama_kebun || '',
                 has_master_biometric: isBioTrue || !!biometrics || !!localMaster,
                 descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
-                geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null
+                geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null,
+                template_version: biometrics?.template_version !== undefined && biometrics?.template_version !== null
+                  ? Number(biometrics.template_version)
+                  : (localMaster?.template_version !== undefined && localMaster?.template_version !== null ? Number(localMaster.template_version) : null)
               };
             });
 
@@ -486,6 +489,7 @@ function AppContent() {
                 ...p,
                 kebun: p.nama_kebun,
                 has_master_biometric: p.has_master_biometric !== false && (!!p.descriptor_json || !!p.descriptor),
+                template_version: p.template_version !== undefined && p.template_version !== null ? Number(p.template_version) : null,
                 is_synced: false
               });
             }

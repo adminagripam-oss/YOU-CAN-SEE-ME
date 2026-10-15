@@ -2,8 +2,8 @@
 ## AgriFace: Sistem Absensi Biometrik Wajah Perkebunan Berbasis 1-to-1 Verification Engine, Capgo OTA Updater & Hybrid Offline-First Architecture
 
 - **Nama Proyek**: AgriFace (AgriFace Biometric Attendance System)
-- **Versi Dokumen & Proyek**: 3.2.2-minor-release (Oktober 2026)
-- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js v9 (Web IndexedDB), `@capacitor-community/sqlite` (Android Native SQLite - 9 Tables, TEXT Primary Key)
+- **Versi Dokumen & Proyek**: 3.2.3-minor-release (Oktober 2026)
+- **Database Engine**: Supabase Cloud PostgreSQL (JSONB Vector Storage, RPC), Dexie.js v9 (Web IndexedDB - 9 Object Stores), `@capacitor-community/sqlite` (Android Native SQLite - 10 Tables, TEXT Primary Key)
 - **Biometric Engine**: `@vladmandic/human` (1024-dim Embedding Vector, FP16 WebGL Precision) + MediaPipe Face Mesh (468 landmarks) + EAR Liveness Engine + Cosine Similarity + Piecewise Linear Display Score + 2-Pass Outlier Filter (`buildTemplateDetailed`)
 - **Update System**: `@capgo/capacitor-updater` Over-The-Air (OTA) Bundle Update Engine with POSIX-compliant ZIP
 - **Target Kompleksitas**: $O(1)$ Time Complexity Direct Lookup Matching
@@ -12,11 +12,18 @@
 
 ## 1. Pendahuluan & Latar Belakang
 
-> **Minor Release Note (v3.2.1)**: Peningkatan Akurasi Biometrik, Eliminasi Outlier Pendaftaran Wajah, dan Penyelarasan Kurva Tampilan Skor:
+> **Minor Release Note (v3.2.3)**: Sinkronisasi Terpadu Foto Master Wajah, Scoping Autorisasi Unit Kebun, dan Diagnostik Integritas Vektor Offline-First:
+> 1) **Alur Penyimpanan & Resolusi Foto Master Wajah Pemanen (`attendance-photos/faces/` & `employee_face_photos`)**: Standarisasi alur sinkronisasi upload foto master pendaftaran karyawan ke cloud storage Supabase pada bucket `attendance-photos` (sub-folder `faces/${empId}/master.jpg`) dan tabel metadata `public.employee_face_photos`. Implementasi 3-tier resolusi cerdas di `EmployeeFacePreviewModal.jsx` (Lokal SQLite/Dexie -> Cloud Public URL & Thumbnail Base64 -> Fallback Foto Absensi Terakhir) serta penegasan badge visual status sumber foto yang jelas. Akun `admin.hq` (Head Office Admin) kini dapat melihat foto pemanen dari seluruh kebun secara global via tombol Mata (`<Eye>`) di Daftar Karyawan.
+> 2) **Scoping Autorisasi Unit Kebun pada Halaman Sinkronisasi (`/sinkronisasi`)**: Penegakan hak akses berbasis unit kebun pada antrean Log Absensi (`attendanceQueue`), antrean Pendaftaran Karyawan (`employeeQueue`), dan diagnostik Integritas Vektor. Akun `estate_admin` dibatasi ketat hanya pada data dari kebunnnya (`user.kebun`), akun `regional_admin` pada wilayahnya (`user.region`), dan akun `admin.hq` memiliki akses global seluruh unit kebun.
+> 3) **Dropdown Filter Kebun & Kolom Kebun Khusus `admin.hq`**: Penambahan filter unit kebun (A-Z) yang dibungkus dengan standar desain proyek (`div.custom-select-wrapper` + `ChevronDown`) serta penambahan kolom "Kebun" pada tabel diagnostik integritas vektor untuk transparansi audit per unit.
+> 4) **Ketahanan Mode Luring pada Diagnostik Integritas Vektor**: Penonaktifan tombol audit saat perangkat sedang luring (offline) disertai banner peringatan informatif, memastikan tidak ada unhandled network error saat mandor berada di area *blank-spot* kebun.
+
+> **Minor Release Note (v3.2.1 - v3.2.2)**: Peningkatan Akurasi Biometrik, Eliminasi Outlier Pendaftaran Wajah, Penyelarasan Kurva Tampilan Skor, dan Stabilisasi Antrean Pendaftaran:
 > 1) **Algoritma Eliminasi Outlier Pendaftaran Wajah (`buildTemplateDetailed`)**: Implementasi kalkulasi centroid 1024-dimensi dan eliminasi matematis satu sampel terburuk (deviasi cosine terjauh dari centroid) saat pengambilan 7 frame diskrit pendaftaran karyawan baru.
 > 2) **Gate Konsistensi Biometrik (`ENROLL_MIN_CONSISTENCY: 0.90`)**: Perlindungan template master terhadap gerakan kepala mendadak saat enrollment. Jika konsistensi antar-sampel $< 0.90$, proses otomatis diulang dengan pesan edukatif: *"Wajah terlalu banyak bergerak. Tahan posisi..."*.
 > 3) **Penyelarasan Skor Tampilan Piecewise Linear (`displayScore`)**: Menggantikan kurva eksponensial lama dengan kurva Piecewise Linear dua-fase terkalibrasi, memastikan nilai ambang batas kelulusan cosine $0.92$ tepat tampil sebagai **`82.0%`** di layar scanner demi transparansi UX mandor dan pekerja.
 > 4) **Pengetatan Threshold Cosine Match**: Default threshold kelulusan pencocokan wajah dinaikkan dari $0.90$ menjadi **`0.92`**, menekan *False Accept Rate (FAR)* hingga $< 0.1\%$.
+> 5) **Stabilisasi Normalisasi ID Antrean Pendaftaran Offline**: Pemisahan eksekusi pendaftaran inti (`employees` + `master_descriptors`) dari langkah sekunder (foto master & telemetri scan attempts), serta pencatatan audit kegagalan (`last_error_code`, `last_error_message`, `attempt_count`).
 
 > **Major Release Note (v3.2.0)**: Major update arsitektur Full-Bleed Mobile Data Tables, Eliminasi Gutter Layout, Pembersihan Hierarki Tag Semantic Main, Smooth Stacking Context Sliding Header, Anti-Distortion Biometric Canvas, dan Dual-Camera Scanner.
 > 1) **Full-Bleed Mobile Data Tables (100% Viewport)**: Transformasi menyeluruh antarmuka tabel data pada 4 modul utama (Log Absensi, Monitoring Absensi, Daftar Karyawan, dan Mutasi Karyawan) untuk layar ponsel ($\le 768\text{px}$). Menggunakan arsitektur `MobileDataPage`, `MobileFilterSheet`, `MobileTableViewport`, dan hook `useIsMobileLayout` dengan pemenuhan standar metrik UX: eliminasi total margin/gutter ancestor, lebar 100% sejajar topbar, tinggi header $\le 200\text{px}$, area tabel $\ge 65\%$ tinggi layar, baris tampak $\ge 12$ baris, dan nol horizontal scroll pada `body`.
@@ -149,6 +156,10 @@ $$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \|p_1 - p_4\|}$$
 ### 3.3 Engine Sinkronisasi (Auto-Sync) & Cut-Off 22:00
 - **Cut-Off 22:00 Strict Mode**: Aplikasi menyimpan absen secara persisten secara lokal saat offline, dan mengalokasikan siklus *upload* massal (Sinkronisasi Otomatis) secara berkala (utamanya di ujung jam kerja pukul 22:00) atau ketika tombol **Sinkronisasi Manual** diklik. Data absensi setelah pukul 22:00 tidak dipaksakan keluar saat proses logout harian.
 - **Auto-Recovery untuk Orphaned Logs**: Jika ada log absensi luring yang dibuat sebelum data karyawan barunya disinkronkan ke cloud (`employee_id` masih string sementara `off_emp_xxx`), `syncEngine.js` secara otomatis mencocokkan NIK log dengan data karyawan di Supabase dan mengupdate foreign key `employee_id` ke BigInt server secara transparan tanpa kehilangan log.
+- **Stabilisasi & Pemisahan Transaksi Pendaftaran Karyawan Offline**:
+  1. *Normalisasi Tipe ID*: Sistem menormalisasi format ID offline (`off_emp_xxx` maupun string angka `"123"`) menjadi tipe data yang kompatibel dengan skema Supabase Cloud sebelum pengiriman payload.
+  2. *Pemisahan Eksekusi Inti dan Sekunder*: Operasi sinkronisasi memisahkan langkah inti (insert ke `employees` dan upsert ke `master_descriptors`) dari langkah sekunder (upload foto master ke storage `attendance-photos/faces/` dan pengiriman telemetri scan attempts). Kegagalan pada langkah sekunder tidak membatalkan registrasi inti karyawan.
+  3. *Audit & Telemetri Kegagalan Detail*: Antrean mencatat `last_error_code`, `last_error_message`, `last_error_step`, `attempt_count`, dan `last_attempt_at`. Error Supabase asli ditampilkan langsung pada antarmuka Halaman Sinkronisasi (`/sinkronisasi`) untuk mempermudah diagnosa mandor.
 - **Delta Sync**: Penarikan data (karyawan & log) hanya memuat perubahan baris baru (*Delta*) via `.gt('created_at', lastSyncTime)`, menghemat bandwidth dan memori secara masif.
 
 ### 3.4 Arsitektur Autentikasi 3-Tier & Failsafe Blank-Spot
@@ -177,6 +188,21 @@ Menjawab tantangan operasional absensi di lapangan perkebunan:
 ### 3.7 Capgo Over-The-Air (OTA) Live Update & POSIX Deployment Engine
 - **In-App Dynamic Update**: Aplikasi memeriksa ketersediaan versi baru di bucket Supabase `ota-updates` via `version.json` saat peluncuran atau saat kembali aktif dari background.
 - **POSIX-Compliant ZIP Packaging**: Pemaketan bundle rilis menggunakan script kustom `create_posix_zip.js` yang memaksa seluruh path internal zip menggunakan forward-slash (`/`). Hal ini krusial untuk mencegah kegagalan ekstraksi path Windows pada sistem Android WebView.
+
+### 3.8 Arsitektur Penyimpanan & Resolusi Foto Master Wajah 3-Tier
+Untuk memungkinkan pengawasan visual kualitas wajah karyawan tanpa membebani memori perangkat lapangan:
+1. **Tier 1 (Cache Thumbnail Lokal)**: Saat pendaftaran di HP kebun, foto master dikompresi ke thumbnail Base64 JPEG dan disimpan ke tabel SQLite `local_employee_face_thumbs` (atau Dexie `employee_face_thumbs`). Resolusi ini langsung terbuka dalam $< 5\text{ ms}$ secara luring.
+2. **Tier 2 (Cloud Public Storage & Metadata)**: Saat auto-sync aktif, file biner diunggah ke Supabase Storage bucket `attendance-photos` pada path `faces/${empId}/master.jpg`, dan metadata dicatat ke tabel `employee_face_photos`. Ketika dibuka di perangkat lain (misal PC Head Office), foto dimuat via Public URL dan otomatis disimpan ke cache lokal perangkat tersebut.
+3. **Tier 3 (Fallback Foto Absensi Lapangan)**: Jika master foto belum pernah tersinkronkan ke server, sistem cerdas melakukan fallback ke foto bukti absensi terakhir dari tabel `attendance_logs` (`photo_url`).
+4. **Indikator Badge Sumber Foto**: Antarmuka modal secara tegas membedakan sumber: badge hijau untuk *"Foto Master Pendaftaran Resmi"* dan badge amber untuk *"Foto Absensi Lapangan Terakhir (Foto Master Belum Disinkronkan)"*.
+
+### 3.9 Diagnostik Integritas Vektor & Sidik Vektor Deterministik (Vector Checksum)
+Untuk memvalidasi kesehatan vektor biometrik 1024-D yang tidak dapat dibaca kasat mata:
+1. **Formula Sidik Vektor (Checksum)**: Fungsi deterministik menggabungkan panjang vektor, norma L2, FNV-1a hash 8-digit hex, dan 4 elemen desimal pertama:
+   $$\text{Checksum} = \text{Length} \parallel \text{L2Norm} \parallel \text{FNV1aHex} \parallel \text{Sample4}$$
+2. **Audit Komparasi Cloud vs Lokal**: Membandingkan checksum seluruh karyawan antara memori SQLite lokal dengan tabel `master_descriptors` di Supabase. Status audit terbagi menjadi: `MATCH` (Selaras), `LOCAL_ONLY` (Hanya Lokal), `REMOTE_ONLY` (Hanya Cloud), `MISMATCH` (Beda Template), dan `UNCOMPUTED` (Belum Dihitung).
+3. **Mekanisme Pemulihan Sekali Klik (Self-Healing)**: Tombol *"Tarik Cloud"* dan *"Hitung & Sync"* memungkinkan mandor memperbarui template biometrik yang usang tanpa perlu pemindaian ulang di lapangan.
+4. **Scoping Autorisasi & Penanganan Luring**: Query cloud menyaring karyawan berdasarkan unit kebun (`employees.nama_kebun`) untuk peran `estate_admin`, dan membuka seluruh kebun dengan kontrol dropdown A-Z untuk `admin.hq`. Tombol audit otomatis dinonaktifkan saat offline guna mencegah unhandled network error.
 
 ---
 
@@ -258,6 +284,23 @@ Menjawab tantangan operasional absensi di lapangan perkebunan:
 ### FR-12: Over-The-Air (OTA) Live Update & POSIX Deployment Engine
 - Sistem native Android wajib mengintegrasikan `@capgo/capacitor-updater` untuk pembaruan OTA instan tanpa perlu re-install APK.
 - Paket ZIP OTA wajib dikompilasi menggunakan format POSIX forward-slash.
+
+### FR-13: Resolusi & Pratinjau Foto Master Wajah 3-Tier (`/daftar-karyawan`)
+- Halaman Daftar Karyawan menyediakan tombol preview Mata (`<Eye>`) untuk memanggil modal `EmployeeFacePreviewModal`.
+- Modal wajib menyelesaikan foto menggunakan arsitektur 3-tier: (1) Cache thumbnail lokal di SQLite/Dexie, (2) Public URL & Thumbnail Base64 dari Supabase Storage `attendance-photos/faces/${empId}/master.jpg` dan tabel `employee_face_photos`, (3) Fallback foto absensi terakhir (`attendance_logs.photo_url`).
+- Foto yang berhasil diunduh dari cloud wajib disimpan ke basis data lokal perangkat agar selanjutnya dapat dibuka instan dan luring.
+- Antarmuka modal wajib menampilkan badge status sumber foto yang jelas: *"Foto Master Pendaftaran Resmi (Cloud / Tersimpan di Perangkat)"* (hijau) atau *"Foto Absensi Lapangan Terakhir (Foto Master Belum Disinkronkan)"* (amber).
+- Akun `admin.hq` (Head Office Admin) memiliki visibilitas global untuk melihat foto pemanen dari seluruh unit kebun.
+
+### FR-14: Scoping Autorisasi Unit Kebun & Filter Head Office Halaman Sinkronisasi (`/sinkronisasi`)
+- Halaman Sinkronisasi (`/sinkronisasi`) wajib menerapkan pembatasan data berbasis peran (*role-based authorization*):
+  - **Estate Admin (`estate_admin`)**: Antrean absensi, antrean pendaftaran, dan diagnostik integritas vektor secara ketat disaring hanya untuk pemanen dari unit kebunnnya (`user.kebun`).
+  - **Regional Admin (`regional_admin`)**: Disaring untuk pemanen dalam teritorialnya (`user.region`).
+  - **Head Office Admin (`admin.hq`)**: Diberikan akses global untuk memantau seluruh kebun, dilengkapi dropdown pemilih unit kebun (terurut A-Z, dibungkus `div.custom-select-wrapper` dengan ikon `ChevronDown`) dan kolom unit kebun pada tabel diagnostik.
+
+### FR-15: Proteksi Mode Luring pada Diagnostik Integritas Vektor
+- Tab Diagnostik Integritas Vektor wajib mendeteksi status konektivitas jaringan secara reaktif.
+- Saat luring (offline), tombol *"Periksa Integritas"* dinonaktifkan (`disabled`) dan sistem menampilkan banner peringatan informatif bahwa audit komparasi cloud memerlukan koneksi internet, mencegah unhandled network exception dan menjaga kestabilan aplikasi saat mandor berada di area perkebunan tanpa sinyal.
 
 ---
 
@@ -362,9 +405,24 @@ CREATE TABLE admin_auth (
     name VARCHAR(100),
     nik VARCHAR(50)
 );
+
+-- Tabel Foto Master Wajah Karyawan
+CREATE TABLE IF NOT EXISTS public.employee_face_photos (
+    id BIGSERIAL PRIMARY KEY,
+    employee_id BIGINT NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
+    storage_path TEXT NOT NULL,
+    thumbnail_base64 TEXT,
+    captured_at TIMESTAMPTZ DEFAULT now(),
+    is_primary BOOLEAN DEFAULT true,
+    photo_version INTEGER DEFAULT 1,
+    photo_checksum TEXT,
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_emp_face_photos UNIQUE (employee_id)
+);
 ```
 
-### 7.2 Skema SQLite Native (Android APK Shell - 9 Tabel)
+### 7.2 Skema SQLite Native (Android APK Shell - 10 Tabel)
 
 Dikelola di `src/services/sqliteService.ts` dengan Primary Key bertipe `TEXT` untuk menampung format ID offline `off_emp_xxx`:
 
@@ -507,9 +565,20 @@ CREATE TABLE IF NOT EXISTS local_attendance_requests (
 CREATE TABLE IF NOT EXISTS local_employee_delete_queue (
   id TEXT PRIMARY KEY
 );
+
+-- 10. Cache Thumbnail Foto Wajah Master Karyawan
+CREATE TABLE IF NOT EXISTS local_employee_face_thumbs (
+  employee_id TEXT PRIMARY KEY,
+  thumb_base64 TEXT NOT NULL,
+  captured_at TEXT,
+  photo_version INTEGER DEFAULT 1,
+  photo_checksum TEXT,
+  updated_at TEXT,
+  is_synced INTEGER DEFAULT 0
+);
 ```
 
-### 7.3 Skema IndexedDB (Dexie.js v9 Web Fallback - 8 Object Stores)
+### 7.3 Skema IndexedDB (Dexie.js v9 Web Fallback - 9 Object Stores)
 
 Dikelola di `src/db.js` untuk fallback operasional pada browser web desktop/mobile:
 
@@ -522,7 +591,8 @@ dexieDb.version(9).stores({
   attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
   local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
   attendance_requests: 'id, request_type, log_id, status, is_synced',
-  employee_delete_queue: 'id'
+  employee_delete_queue: 'id',
+  employee_face_thumbs: 'employee_id, photo_version, photo_checksum, is_synced'
 });
 ```
 
@@ -532,10 +602,11 @@ dexieDb.version(9).stores({
 
 1. **Performa Edge (Kecepatan Pemindaian)**: Pencocokan Cosine Similarity diselesaikan di bawah $<15\text{ ms}$. Respons kamera tetap berada pada ambang stabil $>15\text{ FPS}$ di HP menengah-bawah.
 2. **Offline-First Resilience**: Aplikasi 100% fungsional saat sinyal seluler mati total (*Blank Spot*). Asset statis Web Bundle dikontrol lewat `sw.js`, dan transaksi luring dijadwalkan secara aman ke *Write-Ahead Log* (WAL) SQLite lokal Android.
-3. **Privasi Absolut (No Raw Imaging)**: Tidak satupun berkas foto `JPG/PNG` mentah diunggah ke server operasional absensi. Semua wajah diurai menjadi larik Float32 array 1024-D seketika langsung di memori klien.
+3. **Keamanan & Efisiensi Citra Biometrik**: Citra wajah untuk operasional pencocokan absensi diurai seketika menjadi larik Float32 1024-D di memori klien tanpa menyimpan frame mentah pada alur verifikasi. Untuk keperluan audit visual pengawasan oleh Head Office, foto pendaftaran master dikompresi menjadi thumbnail Base64 ultra-ringan ($< 25\text{ KB}$) pada basis data lokal dan resolusi penuh disimpan secara aman di Cloud Storage Supabase (`attendance-photos/faces/`).
 4. **Ergonomi & Utilisasi Layar Mobile**: Ketinggian total header pada tampilan tabel mobile dibatasi maksimal $\le 200\text{px}$ dari tepi atas layar. Area pandang tabel wajib mendominasi $\ge 65\%$ tinggi layar dengan kapasitas minimal 12 baris tampak. Ukuran font sel tabel dijaga minimal $12\text{px}$ ($0.75\text{rem}$) dan header kolom minimal $11\text{px}$ ($0.68\text{rem}$) untuk keterbacaan optimal di bawah terik matahari kebun. Zero-scroll horizontal pada dokumen root (`body`).
 5. **Standar Tipografi & Visual UI Enterprise**: Menggunakan font sans-serif modern (Inter / Geist). Skema warna UI elegan mengutamakan palet netral monokromatik (putih, abu-abu muda, dark gray, slate). Warna biru dilarang pada elemen layout/sidebar. Warna semantik (hijau, merah, oranye) digunakan murni untuk indikator status (Hadir, Gagal, Pending).
 6. **AI Model Resilience & Cache Guard**: Penggunaan `@vladmandic/human` wajib mengatur `cacheModels: false` untuk mencegah korupsi IndexedDB model caching pada WebView Android. File `public/human.esm.js` wajib memiliki null-guard pada GraphModel executor.
+7. **Ketahanan Jaringan & Degradasi Anggun Diagnostik (Graceful Degradation)**: Modul diagnostik integritas vektor dan peninjauan foto master menerapkan degradasi anggun saat konektivitas terputus. Sistem mendeteksi `navigator.onLine` dan status koneksi Supabase secara reaktif, menonaktifkan trigger audit komparasi cloud saat luring, serta menyajikan data dari cache SQLite/Dexie lokal dengan latensi $< 5\text{ ms}$ tanpa memicu unhandled network exception.
 
 ---
 
