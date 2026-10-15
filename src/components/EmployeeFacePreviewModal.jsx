@@ -94,10 +94,9 @@ export default function EmployeeFacePreviewModal({
           return;
         }
 
-        // Tier 2: Check Supabase Storage via signed URL or thumbnail if online
+        // Tier 2: Check Supabase Storage via public URL or thumbnail if online
         if (navigator.onLine && employee.id && !String(employee.id).startsWith('off_') && !String(employee.id).startsWith('tmp_')) {
           try {
-            let storagePath = `faces/${employee.id}/master.jpg`;
             const { data: photoRec } = await supabase
               .from('employee_face_photos')
               .select('storage_path, thumbnail_base64, photo_version, photo_checksum, updated_at')
@@ -123,19 +122,18 @@ export default function EmployeeFacePreviewModal({
             }
 
             if (photoRec?.storage_path) {
-              storagePath = photoRec.storage_path;
-            }
+              const { data: pubData } = supabase
+                .storage
+                .from('attendance-photos')
+                .getPublicUrl(photoRec.storage_path);
 
-            const { data: signedData, error: signErr } = await supabase
-              .storage
-              .from('employee-faces')
-              .createSignedUrl(storagePath, 600);
-
-            if (!signErr && signedData?.signedUrl && isMounted) {
-              setPhotoUrl(signedData.signedUrl);
-              setSourceType('cloud');
-              setLoading(false);
-              return;
+              if (pubData?.publicUrl && isMounted) {
+                setPhotoUrl(pubData.publicUrl);
+                setSourceType('cloud');
+                setSavedDate(photoRec.updated_at);
+                setLoading(false);
+                return;
+              }
             }
           } catch (storageErr) {
             console.warn('[FacePreview] Storage fetch error:', storageErr);
@@ -264,25 +262,27 @@ export default function EmployeeFacePreviewModal({
 
           {/* Source Indicator / Warning */}
           {sourceType === 'attendance' && (
-            <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 text-center font-medium max-w-sm">
+            <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 text-center font-medium max-w-sm">
               <AlertCircle size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
               <span>
-                Bukan foto master (foto absensi terakhir{attendanceDate ? ` - ${new Date(attendanceDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
+                Foto Absensi Lapangan Terakhir (Foto Master Belum Disinkronkan{attendanceDate ? ` - ${new Date(attendanceDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
               </span>
             </div>
           )}
           {sourceType === 'local_thumb' && (
-            <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5 font-medium">
-              <CheckCircle2 size={13} color="var(--accent-success)" />
+            <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 font-medium">
+              <CheckCircle2 size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
               <span>
-                ✓ Tersimpan di perangkat{savedDate ? ` (${new Date(savedDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })})` : ''}
+                Foto Master Pendaftaran Resmi (Tersimpan di Perangkat{savedDate ? ` - ${new Date(savedDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
               </span>
             </div>
           )}
           {sourceType === 'cloud' && (
-            <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5 font-medium">
-              <CheckCircle2 size={13} color="var(--accent-success)" />
-              <span>✓ Diunduh dari server</span>
+            <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 font-medium">
+              <CheckCircle2 size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <span>
+                Foto Master Pendaftaran Resmi (Cloud Server{savedDate ? ` - ${new Date(savedDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
+              </span>
             </div>
           )}
 
@@ -300,6 +300,20 @@ export default function EmployeeFacePreviewModal({
               <span className="text-[var(--text-muted)] font-medium">Afdeling / Kebun</span>
               <span className="text-[var(--text-main)]">{employee.afdeling || '-'} / {employee.nama_kebun || '-'}</span>
             </div>
+            {employee.template_version !== undefined && employee.template_version !== null && (
+              <div className="flex justify-between items-center pt-1 border-t border-[var(--border-color)] mt-1">
+                <span className="text-[var(--text-muted)] font-medium">Tipe Template</span>
+                {Number(employee.template_version) <= 1 ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                    Template Sempit ({Number(employee.template_version) === 0 ? 'Foto Statis' : 'Frontal Saja'})
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                    Multi-Pose (Versi 2)
+                  </span>
+                )}
+              </div>
+            )}
             {checksum && (
               <div className="flex justify-between items-center pt-1 border-t border-[var(--border-color)] mt-1">
                 <span className="text-[var(--text-muted)] font-medium">Vector Checksum</span>

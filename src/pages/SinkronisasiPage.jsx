@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle } from 'lucide-react';
+import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle, ChevronDown, Building2, WifiOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
@@ -20,22 +20,47 @@ export default function SinkronisasiPage() {
   const [copiedId, setCopiedId] = useState(null);
   const [schemaNotice, setSchemaNotice] = useState(null);
 
+  // Connectivity & Scoping States
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [selectedKebunFilter, setSelectedKebunFilter] = useState('ALL');
+  const [availableKebunList, setAvailableKebunList] = useState([]);
+
   // Vector Integrity Diagnostic States
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResults, setDiagResults] = useState(null);
   const [syncingVectorId, setSyncingVectorId] = useState(null);
 
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const checkRegistrationSchema = async () => {
     try {
-      const { error } = await supabase
+      const notices = [];
+      const { error: descErr } = await supabase
         .from('master_descriptors')
         .select('vector_checksum')
         .limit(1);
-      if (error && (error.code === '42703' || String(error.message || '').includes('vector_checksum'))) {
-        setSchemaNotice('Kolom vector_checksum belum dibuat di tabel master_descriptors server Supabase (42703). Sinkronisasi adaptif otomatis menggunakan skema standar. Harap jalankan migration 20261015_alter_master_descriptors.sql di SQL Editor untuk audit biometrik.');
-      } else {
-        setSchemaNotice(null);
+      if (descErr && (descErr.code === '42703' || String(descErr.message || '').includes('vector_checksum'))) {
+        notices.push('Kolom vector_checksum / template_version belum dibuat di tabel master_descriptors server Supabase (42703). Harap jalankan migrasi 20261015_alter_master_descriptors.sql.');
       }
+
+      const { error: attErr } = await supabase
+        .from('attendance_logs')
+        .select('match_cosine')
+        .limit(1);
+      if (attErr && (attErr.code === '42703' || String(attErr.message || '').includes('match_cosine'))) {
+        notices.push('Kolom telemetri (match_cosine, match_threshold, template_version, facing_mode) belum dibuat di attendance_logs server Supabase (42703). Sinkronisasi adaptif otomatis menyisihkan telemetri agar log absensi tetap tersimpan. Harap jalankan migrasi 20261015_fix_attendance_logs_columns.sql.');
+      }
+
+      setSchemaNotice(notices.length > 0 ? notices.join(' | ') : null);
     } catch (_) {}
   };
 
@@ -86,12 +111,43 @@ export default function SinkronisasiPage() {
       const empData = await db.employee_sync_queue.toArray();
       
       // Filter out any records that are already synced (strictly pending/unsynced only)
-      const pendingAtt = (attData || []).filter(item => 
+      let pendingAtt = (attData || []).filter(item => 
         (!item.is_synced || item.is_synced === 0) && item.status_sync_teks !== 'done'
       );
-      const pendingEmp = (empData || []).filter(emp => 
+      let pendingEmp = (empData || []).filter(emp => 
         !emp.is_synced || emp.is_synced === 0
       );
+
+      // Scoping based on user role and authorization
+      if (user?.role === 'estate_admin' && user?.kebun) {
+        pendingAtt = pendingAtt.filter(item => item.kebun === user.kebun || item.nama_kebun === user.kebun);
+        pendingEmp = pendingEmp.filter(emp => emp.kebun === user.kebun || emp.nama_kebun === user.kebun);
+      } else if (user?.role === 'regional_admin' && user?.region) {
+        pendingAtt = pendingAtt.filter(item => item.region === user.region);
+        pendingEmp = pendingEmp.filter(emp => emp.region === user.region);
+      } else if ((user?.username === 'admin.hq' || user?.role === 'headoffice_admin') && selectedKebunFilter !== 'ALL') {
+        pendingAtt = pendingAtt.filter(item => item.kebun === selectedKebunFilter || item.nama_kebun === selectedKebunFilter);
+        pendingEmp = pendingEmp.filter(emp => emp.kebun === selectedKebunFilter || emp.nama_kebun === selectedKebunFilter);
+      }
+
+      // Populate availableKebunList from cached employees and queues
+      try {
+        const cached = await db.employees_cache.toArray();
+        const kSet = new Set();
+        (cached || []).forEach(c => {
+          if (c.nama_kebun) kSet.add(c.nama_kebun);
+          if (c.kebun) kSet.add(c.kebun);
+        });
+        (attData || []).forEach(a => {
+          if (a.kebun) kSet.add(a.kebun);
+          if (a.nama_kebun) kSet.add(a.nama_kebun);
+        });
+        (empData || []).forEach(e => {
+          if (e.kebun) kSet.add(e.kebun);
+          if (e.nama_kebun) kSet.add(e.nama_kebun);
+        });
+        setAvailableKebunList(Array.from(kSet).filter(Boolean).sort((a, b) => a.localeCompare(b)));
+      } catch (_) {}
 
       // Sort newest first
       setAttendanceQueue(pendingAtt.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
@@ -105,27 +161,108 @@ export default function SinkronisasiPage() {
     }
   };
 
-  const checkVectorIntegrity = async () => {
+  const checkVectorIntegrity = async (overrideKebun = null) => {
+    if (!navigator.onLine) {
+      setDiagLoading(false);
+      return;
+    }
+
     setDiagLoading(true);
     try {
-      const localMasters = await getAllMasterVectors();
+      const activeKebun = overrideKebun !== null ? overrideKebun : selectedKebunFilter;
+
+      // 1. Fetch local cached employees to map employee metadata (name, nik, kebun)
+      let cachedEmps = [];
+      try {
+        cachedEmps = await db.employees_cache.toArray();
+      } catch (_) {}
+      const empMetaMap = new Map();
+      const kebunSet = new Set();
+      (cachedEmps || []).forEach(e => {
+        empMetaMap.set(String(e.id), e);
+        if (e.nama_kebun) kebunSet.add(e.nama_kebun);
+        if (e.kebun) kebunSet.add(e.kebun);
+      });
+
+      // 2. Fetch local master vectors and filter by kebun scope
+      const rawLocalMasters = await getAllMasterVectors();
+      const localMasters = (rawLocalMasters || []).filter(m => {
+        const meta = empMetaMap.get(String(m.employee_id));
+        const kbn = meta?.nama_kebun || meta?.kebun || m.nama_kebun || m.kebun;
+        if (user?.role === 'estate_admin' && user?.kebun) {
+          return kbn === user.kebun;
+        }
+        if (user?.role === 'regional_admin' && user?.region) {
+          return meta?.region === user.region;
+        }
+        if (activeKebun && activeKebun !== 'ALL') {
+          return kbn === activeKebun;
+        }
+        return true;
+      });
+
       const localMap = new Map();
       for (const m of localMasters) {
-        const cs = m.vector_checksum || (m.descriptor_json ? vectorChecksum(m.descriptor_json) : null);
+        const meta = empMetaMap.get(String(m.employee_id));
+        let isInvalid = false;
+        let cs = m.vector_checksum;
+        if (m.descriptor_json) {
+          const normArr = toVectorArray(m.descriptor_json);
+          if (!normArr) {
+            isInvalid = true;
+            console.warn(`[VectorIntegrity] Vektor master lokal karyawan #${m.employee_id} (${m.name || meta?.name}) memiliki format rusak (INVALID_FORMAT).`);
+          } else if (!cs) {
+            cs = vectorChecksum(normArr);
+          }
+        } else {
+          isInvalid = true;
+        }
         localMap.set(String(m.employee_id), {
           ...m,
-          computed_checksum: cs
+          name: m.name || meta?.name,
+          nik: m.nik || meta?.nik,
+          nama_kebun: meta?.nama_kebun || meta?.kebun || m.nama_kebun || m.kebun || '-',
+          computed_checksum: cs,
+          isInvalidFormat: isInvalid
         });
       }
 
-      // Fetch remote master descriptors
-      const { data: remoteData, error: remoteErr } = await supabase
+      // 3. Fetch remote master descriptors joined with employees
+      let query = supabase
         .from('master_descriptors')
-        .select('employee_id, vector_checksum, updated_at, template_version');
+        .select(`
+          employee_id,
+          vector_checksum,
+          updated_at,
+          template_version,
+          employees!inner (
+            id,
+            name,
+            nik,
+            nama_kebun,
+            region
+          )
+        `);
 
+      if (user?.role === 'estate_admin' && user?.kebun) {
+        query = query.eq('employees.nama_kebun', user.kebun);
+      } else if (user?.role === 'regional_admin' && user?.region) {
+        query = query.eq('employees.region', user.region);
+      } else if (activeKebun && activeKebun !== 'ALL') {
+        query = query.eq('employees.nama_kebun', activeKebun);
+      }
+
+      const { data: remoteData, error: remoteErr } = await query;
       if (remoteErr) {
         throw remoteErr;
       }
+
+      // Harvest kebun names from remote data as well for admin.hq selector
+      (remoteData || []).forEach(r => {
+        const rKbn = r.employees?.nama_kebun;
+        if (rKbn) kebunSet.add(rKbn);
+      });
+      setAvailableKebunList(Array.from(kebunSet).filter(Boolean).sort((a, b) => a.localeCompare(b)));
 
       const remoteMap = new Map((remoteData || []).map(r => [String(r.employee_id), r]));
       const allIds = new Set([...localMap.keys(), ...remoteMap.keys()]);
@@ -135,6 +272,7 @@ export default function SinkronisasiPage() {
       let localOnlyCount = 0;
       let remoteOnlyCount = 0;
       let uncomputedCount = 0;
+      let invalidFormatCount = 0;
       const details = [];
 
       for (const empId of allIds) {
@@ -142,7 +280,10 @@ export default function SinkronisasiPage() {
         const remote = remoteMap.get(empId);
 
         let status = 'MATCH';
-        if (local && !remote) {
+        if (local?.isInvalidFormat) {
+          status = 'INVALID_FORMAT';
+          invalidFormatCount++;
+        } else if (local && !remote) {
           status = 'LOCAL_ONLY';
           localOnlyCount++;
         } else if (!local && remote) {
@@ -163,10 +304,15 @@ export default function SinkronisasiPage() {
           }
         }
 
+        const employeeName = remote?.employees?.name || local?.name || `Karyawan #${empId}`;
+        const employeeNik = remote?.employees?.nik || local?.nik || '-';
+        const employeeKebun = remote?.employees?.nama_kebun || local?.nama_kebun || '-';
+
         details.push({
           employee_id: empId,
-          name: local?.name || `Karyawan #${empId}`,
-          nik: local?.nik || '-',
+          name: employeeName,
+          nik: employeeNik,
+          nama_kebun: employeeKebun,
           status,
           localChecksum: local?.vector_checksum || local?.computed_checksum || '-',
           remoteChecksum: remote?.vector_checksum || '-',
@@ -182,7 +328,12 @@ export default function SinkronisasiPage() {
         localOnlyCount,
         remoteOnlyCount,
         uncomputedCount,
-        details: details.sort((a, b) => (a.status === 'MATCH' ? 1 : -1))
+        invalidFormatCount,
+        details: details.sort((a, b) => {
+          if (a.status === 'INVALID_FORMAT') return -1;
+          if (b.status === 'INVALID_FORMAT') return 1;
+          return (a.status === 'MATCH' ? 1 : -1);
+        })
       });
     } catch (err) {
       console.error('[VectorIntegrity] Diagnostic error:', err);
@@ -204,22 +355,23 @@ export default function SinkronisasiPage() {
 
       let calculatedChecksum = data.vector_checksum;
       const arr = toVectorArray(data.descriptor_json);
+      const pullTemplateVer = data.template_version !== undefined && data.template_version !== null ? Number(data.template_version) : 1;
       if (!calculatedChecksum && arr) {
         calculatedChecksum = vectorChecksum(arr);
         await supabase
           .from('master_descriptors')
           .update({
             vector_checksum: calculatedChecksum,
-            template_version: data.template_version || 1
+            template_version: pullTemplateVer
           })
           .eq('employee_id', empId);
       }
 
       await cacheUserMasterVector({
         employee_id: empId,
-        descriptor_json: data.descriptor_json,
+        descriptor_json: arr || data.descriptor_json,
         geometric_descriptor_json: data.geometric_descriptor_json,
-        template_version: data.template_version || 1,
+        template_version: pullTemplateVer,
         vector_checksum: calculatedChecksum,
         updated_at: data.updated_at
       });
@@ -308,7 +460,7 @@ export default function SinkronisasiPage() {
             </TabsTrigger>
             <TabsTrigger 
               value="vectors" 
-              onClick={() => { if (!diagResults) checkVectorIntegrity(); }}
+              onClick={() => { if (!diagResults && isOnline) checkVectorIntegrity(); }}
               className="flex-1 flex items-center justify-center gap-2 h-full rounded-lg data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-slate-900 dark:data-[state=active]:text-slate-100 data-[state=active]:shadow-sm transition-all"
             >
               <Activity className="size-4" />
@@ -494,27 +646,65 @@ export default function SinkronisasiPage() {
         {/* Vector Integrity Diagnostics Tab */}
         <TabsContent value="vectors" className="flex-1 mt-2 px-0 md:px-6 pb-6">
           <Card className="rounded-xl border shadow-sm border-t-4 border-t-cyan-500 overflow-hidden h-full flex flex-col">
-            <CardHeader className="px-4 md:px-6 flex flex-row items-center justify-between">
+            <CardHeader className="px-4 md:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <ShieldCheck size={20} className="text-cyan-600" />
                   Diagnostik Integritas Vektor
                 </CardTitle>
                 <CardDescription>
-                  Membandingkan keselarasan sidik vektor (checksum) antara cache lokal perangkat dan database pusat Supabase.
+                  {user?.role === 'estate_admin' && user?.kebun ? (
+                    <span>Membandingkan sidik vektor unit <strong>{user.kebun}</strong> antara cache lokal dan cloud Supabase.</span>
+                  ) : (
+                    <span>Membandingkan keselarasan sidik vektor (checksum) antara cache lokal perangkat dan database pusat Supabase.</span>
+                  )}
                 </CardDescription>
               </div>
-              <button
-                type="button"
-                onClick={checkVectorIntegrity}
-                disabled={diagLoading}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-input)] transition-colors"
-              >
-                <RefreshCw size={14} className={diagLoading ? 'animate-spin' : ''} />
-                <span>Periksa Integritas</span>
-              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(user?.username === 'admin.hq' || user?.role === 'headoffice_admin') && (
+                  <div className="custom-select-wrapper relative min-w-[190px]">
+                    <select
+                      value={selectedKebunFilter}
+                      onChange={(e) => {
+                        const newKbn = e.target.value;
+                        setSelectedKebunFilter(newKbn);
+                        if (isOnline) {
+                          checkVectorIntegrity(newKbn);
+                        }
+                      }}
+                      className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-input)] text-[var(--text-main)] text-xs font-semibold py-1.5 pl-3 pr-8 focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)]"
+                    >
+                      <option value="ALL">Semua Kebun ({availableKebunList.length})</option>
+                      {availableKebunList.map((kbn) => (
+                        <option key={kbn} value={kbn}>
+                          {kbn}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-muted)]" />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => checkVectorIntegrity()}
+                  disabled={diagLoading || !isOnline}
+                  title={!isOnline ? "Pemeriksaan memerlukan koneksi internet aktif" : "Mulai audit vektor"}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-input)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={14} className={diagLoading ? 'animate-spin' : ''} />
+                  <span>Periksa Integritas</span>
+                </button>
+              </div>
             </CardHeader>
             <CardContent className="flex-1 p-4 md:p-6 pt-0 space-y-4">
+              {!isOnline && (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-xs font-medium">
+                  <AlertTriangle size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>Perangkat sedang luring (offline). Komparasi sidik vektor dengan server pusat memerlukan koneksi internet aktif.</span>
+                </div>
+              )}
               {diagLoading ? (
                 <div className="text-center py-16 text-muted-foreground flex flex-col items-center gap-2">
                   <RefreshCw className="animate-spin size-6 text-cyan-600" />
@@ -528,7 +718,7 @@ export default function SinkronisasiPage() {
               ) : (
                 <div className="space-y-4">
                   {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className={`grid grid-cols-2 ${diagResults.invalidFormatCount > 0 ? 'md:grid-cols-6' : 'md:grid-cols-5'} gap-3`}>
                     <div className="bg-[var(--bg-input)] p-3 rounded-lg border border-[var(--border-color)]">
                       <div className="text-[11px] font-bold uppercase text-[var(--text-muted)]">Vektor Lokal</div>
                       <div className="text-xl font-black text-[var(--text-main)]">{diagResults.totalLocal}</div>
@@ -549,6 +739,12 @@ export default function SinkronisasiPage() {
                       <div className="text-[11px] font-bold uppercase text-amber-600">Beda Checksum</div>
                       <div className="text-xl font-black text-amber-600">{diagResults.mismatchCount + diagResults.remoteOnlyCount}</div>
                     </div>
+                    {diagResults.invalidFormatCount > 0 && (
+                      <div className="bg-rose-500/10 p-3 rounded-lg border border-rose-500/30">
+                        <div className="text-[11px] font-bold uppercase text-rose-600">Format Rusak</div>
+                        <div className="text-xl font-black text-rose-600">{diagResults.invalidFormatCount}</div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Detail Table */}
@@ -557,6 +753,7 @@ export default function SinkronisasiPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Karyawan</TableHead>
+                          <TableHead>Kebun</TableHead>
                           <TableHead>Status Checksum</TableHead>
                           <TableHead>Checksum Lokal</TableHead>
                           <TableHead>Checksum Cloud</TableHead>
@@ -572,8 +769,15 @@ export default function SinkronisasiPage() {
                                 <div className="font-semibold text-foreground">{item.name}</div>
                                 <div className="text-xs text-muted-foreground font-mono">{item.nik} (ID: {item.employee_id})</div>
                               </TableCell>
+                              <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">
+                                {item.nama_kebun || '-'}
+                              </TableCell>
                               <TableCell>
-                                {isMatch ? (
+                                {item.status === 'INVALID_FORMAT' ? (
+                                  <Badge variant="destructive" className="bg-rose-600 text-white gap-1" title="Format vektor di database lokal rusak atau bukan dimensi 1024">
+                                    <AlertTriangle size={12} /> Format Rusak
+                                  </Badge>
+                                ) : isMatch ? (
                                   <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 gap-1">
                                     <CheckCircle2 size={12} /> Cocok
                                   </Badge>

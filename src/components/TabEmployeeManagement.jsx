@@ -61,14 +61,8 @@ export default function TabEmployeeManagement({
   const [faceCheckResult, setFaceCheckResult] = useState(null);
   const [regFailCount, setRegFailCount] = useState(0);
   const [regMode, setRegMode] = useState('multi_pose');
-  // Cosine >= 0.88 = batas genuine minimum pada embedding 1024-D FaceRes.
-  // Mencegah satu wajah didaftarkan ke dua karyawan berbeda.
-  const DUPLICATE_THRESHOLD = 0.88;
-
-
-  // Removed Edit Modal State (moved to DaftarKaryawanPage)
-
   const currentEmpDescriptorRef = useRef(null);
+  const enrollTemplateVersionRef = useRef(null);
   const descriptorHistoryRef = useRef([]);
   const enrollmentCollectorRef = useRef(createEnrollmentCollector());
   const currentEmpGFVRef = useRef(null); // 40-d Geometric Feature Vector
@@ -136,6 +130,7 @@ export default function TabEmployeeManagement({
         }).catch(() => {});
 
         currentEmpDescriptorRef.current = Array.from(templateResult.vector);
+        enrollTemplateVersionRef.current = templateResult.template_version || (regMode === 'frontal_only' ? 1 : 2);
         currentEmpGFVRef.current = [];
 
         // Capture face thumbnail for local cache & preview
@@ -150,9 +145,12 @@ export default function TabEmployeeManagement({
           const allMasters = await getAllMasterVectors();
           let bestSim = 0, bestName = '', bestNik = '';
           const currentVec = templateResult.vector;
-          for (const m of allMasters) {
-            const vec = m.descriptor_json;
-            if (!Array.isArray(vec) || vec.length !== currentVec.length) continue;
+          if ((!allMasters || allMasters.length === 0) && !navigator.onLine) {
+            console.warn('[TabEmployeeManagement] Database master lokal kosong saat offline. Melanjutkan.');
+          }
+          for (const m of (allMasters || [])) {
+            const vec = toVectorArray(m.descriptor_json);
+            if (!vec) continue;
             const sim = cosineSimilarity(currentVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; bestNik = m.nik; }
           }
@@ -164,12 +162,15 @@ export default function TabEmployeeManagement({
               attempt_type: 'ENROLL-DUPLICATE',
               matched_cosine: parseFloat(bestSim.toFixed(4)),
               threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
-              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              template_version: enrollTemplateVersionRef.current || 2,
               outcome: 'NOT_MATCHED'
             }).catch(() => {});
           } else {
             setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
-            setCameraStatusText(`✓ Wajah Baru Terdeteksi (Valid, Belum Terdaftar)`);
+            const offlineNote = ((!allMasters || allMasters.length === 0) && !navigator.onLine)
+              ? ' (Pemeriksaan duplikasi hanya terhadap data di perangkat ini)'
+              : '';
+            setCameraStatusText(`✓ Wajah Baru Terdeteksi (Valid, Belum Terdaftar)${offlineNote}`);
             setCameraStatusColor('var(--accent-success)');
             regFrameStateRef.current = { state: 'success', progress: 1 };
             if (useFullscreen) {
@@ -207,7 +208,7 @@ export default function TabEmployeeManagement({
         ctx.fill();
       }
     }
-  }, [DUPLICATE_THRESHOLD, useFullscreen]);
+  }, [useFullscreen]);
 
   // Callback saat tidak ada wajah di register mode
   const onRegNoFace = useCallback(() => {
@@ -271,17 +272,18 @@ export default function TabEmployeeManagement({
 
           if (result.face && result.face.length > 0 && result.face[0].embedding) {
             const newVec = Array.from(result.face[0].embedding);
+            enrollTemplateVersionRef.current = 0;
             // Cek duplikasi untuk upload foto juga
             try {
               const allMasters = await getAllMasterVectors();
               let bestSim = 0, bestName = '';
-              for (const m of allMasters) {
-                const vec = m.descriptor_json;
-                if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              for (const m of (allMasters || [])) {
+                const vec = toVectorArray(m.descriptor_json);
+                if (!vec) continue;
                 const sim = cosineSimilarity(newVec, vec);
                 if (sim > bestSim) { bestSim = sim; bestName = m.name; }
               }
-              if (bestSim >= DUPLICATE_THRESHOLD) {
+              if (bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
                 currentEmpDescriptorRef.current = newVec;
                 currentEmpGFVRef.current = [];
                 setFaceCheckResult({ isDuplicate: true, matchedName: bestName, matchedNik: '', similarity: bestSim });
@@ -291,7 +293,10 @@ export default function TabEmployeeManagement({
                 currentEmpDescriptorRef.current = newVec;
                 currentEmpGFVRef.current = [];
                 setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
-                setCameraStatusText(`✓ Wajah Diekstrak dari Foto [Valid — Belum Terdaftar]`);
+                const offlineNote = ((!allMasters || allMasters.length === 0) && !navigator.onLine)
+                  ? ' (Pemeriksaan duplikasi hanya terhadap data di perangkat ini)'
+                  : '';
+                setCameraStatusText(`✓ Wajah Diekstrak dari Foto [Valid — Belum Terdaftar]${offlineNote}`);
                 setCameraStatusColor('var(--accent-success)');
               }
             } catch (_) {
@@ -303,6 +308,7 @@ export default function TabEmployeeManagement({
             }
           } else {
             currentEmpDescriptorRef.current = null;
+            enrollTemplateVersionRef.current = null;
             currentEmpGFVRef.current = null;
             setFaceCheckResult(null);
             setCameraStatusText('Wajah Tidak Terdeteksi dalam Foto! Gunakan foto lain.');
@@ -311,6 +317,7 @@ export default function TabEmployeeManagement({
         } catch (err) {
           console.error('[PHOTO EXTRACT ERROR]:', err);
           currentEmpDescriptorRef.current = null;
+          enrollTemplateVersionRef.current = null;
           setCameraStatusText('Gagal mengekstrak foto: ' + err.message);
           setCameraStatusColor('var(--accent-error)');
         }
@@ -342,11 +349,11 @@ export default function TabEmployeeManagement({
     if (currentEmpDescriptorRef.current) {
       try {
         const allMasters = await getAllMasterVectors();
-        for (const m of allMasters) {
-          const vec = m.descriptor_json;
-          if (!Array.isArray(vec) || vec.length !== 1024) continue;
+        for (const m of (allMasters || [])) {
+          const vec = toVectorArray(m.descriptor_json);
+          if (!vec) continue;
           const sim = cosineSimilarity(currentEmpDescriptorRef.current, vec);
-          if (sim >= DUPLICATE_THRESHOLD) {
+          if (sim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
             showToast(
               'Wajah Sudah Terdaftar',
               `Wajah ini sudah terdaftar atas nama "${m.name}" (NIK: ${m.nik}). Similaritas: ${(sim * 100).toFixed(1)}%.`,
@@ -392,10 +399,15 @@ export default function TabEmployeeManagement({
         created_at: new Date().toISOString()
       };
 
+      const chosenTemplateVersion = enrollTemplateVersionRef.current !== undefined && enrollTemplateVersionRef.current !== null
+        ? enrollTemplateVersionRef.current
+        : (currentEmpDescriptorRef.current ? 2 : null);
+
       const empQueueRecord = {
         ...createdEmp,
         descriptor_json: currentEmpDescriptorRef.current || null,
-        geometric_descriptor_json: currentEmpGFVRef.current || null
+        geometric_descriptor_json: currentEmpGFVRef.current || null,
+        template_version: chosenTemplateVersion
       };
 
       if (Capacitor.isNativePlatform()) {
@@ -408,6 +420,7 @@ export default function TabEmployeeManagement({
           ...createdEmp,
           has_master_biometric: !!currentEmpDescriptorRef.current,
           descriptor_json: currentEmpDescriptorRef.current || null,
+          template_version: chosenTemplateVersion,
           is_synced: false
         });
       }
@@ -426,7 +439,7 @@ export default function TabEmployeeManagement({
           ...createdEmp,
           descriptor_json: currentEmpDescriptorRef.current,
           geometric_descriptor_json: currentEmpGFVRef.current || null,
-          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+          template_version: chosenTemplateVersion !== null ? chosenTemplateVersion : 2,
           vector_checksum: cs
         });
       }
@@ -789,6 +802,46 @@ export default function TabEmployeeManagement({
                         }}
                         alt="Preview Foto Master"
                       />
+                    )}
+                    {photoPreview && currentEmpDescriptorRef.current && (
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          padding: '10px 14px',
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid var(--accent-warning)',
+                          borderRadius: '8px',
+                          textAlign: 'left'
+                        }}
+                      >
+                        <div style={{ color: 'var(--accent-warning)', fontWeight: 700, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <i className="fa-solid fa-triangle-exclamation" /> Peringatan: Template Sempit (1 Foto)
+                        </div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: '8px', lineHeight: 1.4 }}>
+                          Template dari satu foto lebih sempit dan lebih mudah gagal di lapangan. Disarankan mendaftar ulang lewat kamera.
+                        </div>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            setEmpFormMode('camera');
+                            currentEmpDescriptorRef.current = null;
+                            enrollTemplateVersionRef.current = null;
+                            setPhotoPreview(null);
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '0.78rem',
+                            background: 'var(--bg-secondary)',
+                            color: 'var(--text-main)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            width: 'auto'
+                          }}
+                        >
+                          <i className="fa-solid fa-camera" /> Beralih ke Pendaftaran Kamera
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}

@@ -155,9 +155,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const editLastSampleTimeRef = useRef(0);
   const editCollectorRef = useRef(createEnrollmentCollector());
   const editVideoRef = useRef(null);
-  // Cosine >= 0.88 = batas bawah zona genuine pada embedding 1024-D FaceRes.
-  // Di bawah ini masih zona impostor/abu-abu; aman sebagai anti-duplikasi.
-  const EDIT_DUPLICATE_THRESHOLD = 0.88;
 
 
   const editCanvasRef = useRef(null);
@@ -286,14 +283,17 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             const allMasters = await getAllMasterVectors();
             let bestSim = 0, bestName = '';
             const currentVec = templateResult.vector;
-            for (const m of allMasters) {
+            if ((!allMasters || allMasters.length === 0) && !isOnlineRef.current) {
+              console.warn('[DaftarKaryawan Rescan] Database master lokal kosong saat offline. Melanjutkan pendaftaran.');
+            }
+            for (const m of (allMasters || [])) {
               if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
-              const vec = m.descriptor_json;
-              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const vec = toVectorArray(m.descriptor_json);
+              if (!vec) continue;
               const sim = cosine(currentVec, vec);
               if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
-            if (isOnlineRef.current && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+            if (bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
               setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
               setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%). Jika saudara kandung / keliru, laporkan ke mandor.`);
               setScanCameraStatusColor('var(--accent-error)');
@@ -301,7 +301,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 attempt_type: 'ENROLL-DUPLICATE',
                 matched_cosine: parseFloat(bestSim.toFixed(4)),
                 threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
-                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                template_version: templateResult.template_version || 2,
                 outcome: 'NOT_MATCHED'
               }).catch(() => { });
               // Beri waktu membaca pesan, lalu buka kunci agar bisa mengulang
@@ -311,7 +311,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               }, 4000);
             } else {
               setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-              setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+              const offlineNote = ((!allMasters || allMasters.length === 0) && !isOnlineRef.current)
+                ? ' (Pemeriksaan duplikasi hanya terhadap data di perangkat ini)'
+                : '';
+              setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})${offlineNote}`);
               setScanCameraStatusColor('var(--accent-success)');
               scanReadyRef.current = true;
               setScanSamplesReady(true);
@@ -433,13 +436,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           const { error: empErr } = await supabase.from('employees').update({ has_master_biometric: true }).eq('id', scanEmp.id);
           if (empErr) throw empErr;
 
+          const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
           const { error: descErr } = await supabase
             .from('master_descriptors')
             .upsert({
               employee_id: scanEmp.id,
               descriptor_json: descriptorJson,
               updated_at: new Date().toISOString(),
-              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              template_version: rescanTemplateVer,
               vector_checksum: csVal
             }, { onConflict: 'employee_id' });
           if (descErr) throw descErr;
@@ -452,6 +456,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       }
 
       if (shouldQueue) {
+        const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
         // Mode Offline / Temporary Employee / Cloud Fail: Simpan ke antrean lokal (Dexie / SQLite)
         if (Capacitor.isNativePlatform()) {
           const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
@@ -460,6 +465,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             has_master_biometric: true,
             descriptor_json: descriptorJson || null,
             geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
+            template_version: rescanTemplateVer,
             is_synced: false,
             created_at: scanEmp.created_at || new Date().toISOString()
           });
@@ -471,6 +477,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               has_master_biometric: true,
               descriptor_json: descriptorJson || null,
               geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
+              template_version: rescanTemplateVer,
               is_synced: false
             });
           } else {
@@ -479,6 +486,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               has_master_biometric: true,
               descriptor_json: descriptorJson || null,
               geometric_descriptor_json: (typeof scanCurrentGFVRef !== 'undefined' && scanCurrentGFVRef?.current) ? scanCurrentGFVRef.current : null,
+              template_version: rescanTemplateVer,
               is_synced: false,
               created_at: scanEmp.created_at || new Date().toISOString()
             });
@@ -486,6 +494,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         }
       }
 
+      const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
       // Simpan ke Vektor Wajah (Master Descriptor) lokal (Selalu dijalankan)
       await cacheUserMasterVector({
         employee_id: scanEmp.id,
@@ -499,7 +508,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         status_perkawinan: scanEmp.status_perkawinan || '',
         region: scanEmp.region || '',
         descriptor_json: descriptorJson,
-        template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+        template_version: rescanTemplateVer,
         vector_checksum: csVal,
         has_master_biometric: true
       });
@@ -598,14 +607,17 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             const allMasters = await getAllMasterVectors();
             let bestSim = 0, bestName = '';
             const currentVec = templateResult.vector;
-            for (const m of allMasters) {
+            if ((!allMasters || allMasters.length === 0) && !isOnlineRef.current) {
+              console.warn('[DaftarKaryawan Edit] Database master lokal kosong saat offline. Melanjutkan pendaftaran.');
+            }
+            for (const m of (allMasters || [])) {
               if (String(m.employee_id) === String(editingEmp.id)) continue;
-              const vec = m.descriptor_json;
-              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const vec = toVectorArray(m.descriptor_json);
+              if (!vec) continue;
               const sim = cosine(currentVec, vec);
               if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
-            if (isOnlineRef.current && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+            if (bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
               setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
               setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%). Jika saudara kandung / keliru, laporkan ke mandor.`);
               setEditCameraStatusColor('var(--accent-error)');
@@ -613,7 +625,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 attempt_type: 'ENROLL-DUPLICATE',
                 matched_cosine: parseFloat(bestSim.toFixed(4)),
                 threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
-                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                template_version: templateResult.template_version || 2,
                 outcome: 'NOT_MATCHED'
               }).catch(() => { });
               setTimeout(() => {
@@ -622,7 +634,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               }, 4000);
             } else {
               setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-              setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+              const offlineNote = ((!allMasters || allMasters.length === 0) && !isOnlineRef.current)
+                ? ' (Pemeriksaan duplikasi hanya terhadap data di perangkat ini)'
+                : '';
+              setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})${offlineNote}`);
               setEditCameraStatusColor('var(--accent-success)');
               editReadyRef.current = true;
               setEditSamplesReady(true);
@@ -725,21 +740,24 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           try {
             const allMasters = await getAllMasterVectors();
             let bestSim = 0, bestName = '';
-            for (const m of allMasters) {
+            for (const m of (allMasters || [])) {
               if (String(m.employee_id) === String(editingEmp.id)) continue;
-              const vec = m.descriptor_json;
-              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const vec = toVectorArray(m.descriptor_json);
+              if (!vec) continue;
               const sim = cosineSimilarity(newVec, vec);
               if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
             editCurrentDescriptorRef.current = newVec;
-            if (isOnline && bestSim >= EDIT_DUPLICATE_THRESHOLD) {
+            if (bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
               setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
               setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
               setEditCameraStatusColor('var(--accent-error)');
             } else {
               setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-              setEditCameraStatusText('✓ Wajah Diekstrak dari Foto [Valid — Belum Digunakan Lain]');
+              const offlineNote = ((!allMasters || allMasters.length === 0) && !isOnline)
+                ? ' (Pemeriksaan duplikasi hanya terhadap data di perangkat ini)'
+                : '';
+              setEditCameraStatusText(`✓ Wajah Diekstrak dari Foto [Valid — Belum Digunakan Lain]${offlineNote}`);
               setEditCameraStatusColor('var(--accent-success)');
             }
           } catch (_) {
@@ -819,12 +837,12 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     if (editUpdateBiometrics && editCurrentDescriptorRef.current) {
       try {
         const allMasters = await getAllMasterVectors();
-        for (const m of allMasters) {
+        for (const m of (allMasters || [])) {
           if (String(m.employee_id) === String(editingEmp.id)) continue; // skip self
-          const vec = m.descriptor_json;
-          if (!Array.isArray(vec) || vec.length !== 1024) continue;
+          const vec = toVectorArray(m.descriptor_json);
+          if (!vec) continue;
           const sim = cosineSimilarity(editCurrentDescriptorRef.current, vec);
-          if (sim >= EDIT_DUPLICATE_THRESHOLD) {
+          if (sim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
             showToast(
               'Wajah Sudah Terdaftar',
               `Wajah ini sudah digunakan oleh "${m.name}" (NIK: ${m.nik}). Similaritas: ${(sim * 100).toFixed(1)}%.`,
@@ -851,6 +869,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     };
 
     const descriptorJson = editUpdateBiometrics ? editCurrentDescriptorRef.current : null;
+    const editTemplateVer = editFormMode === 'file' ? 0 : 2;
     if (descriptorJson) {
       payload.has_master_biometric = true;
     }
@@ -874,7 +893,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 employee_id: editingEmp.id,
                 descriptor_json: descriptorJson,
                 updated_at: new Date().toISOString(),
-                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                template_version: editTemplateVer,
                 vector_checksum: csVal
               }, { onConflict: 'employee_id' });
             if (descErr) throw descErr;
@@ -894,6 +913,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             id: editingEmp.id,
             ...payload,
             descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : editingEmp.descriptor_json,
+            template_version: editUpdateBiometrics ? editTemplateVer : (editingEmp.template_version !== undefined ? editingEmp.template_version : null),
             is_synced: false,
             created_at: editingEmp.created_at || new Date().toISOString()
           });
@@ -904,6 +924,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               ...existingQueue,
               ...payload,
               descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : existingQueue.descriptor_json,
+              template_version: editUpdateBiometrics ? editTemplateVer : existingQueue.template_version,
               is_synced: false
             });
           } else {
@@ -911,6 +932,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               id: editingEmp.id,
               ...payload,
               descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : editingEmp.descriptor_json,
+              template_version: editUpdateBiometrics ? editTemplateVer : (editingEmp.template_version !== undefined ? editingEmp.template_version : null),
               is_synced: false,
               created_at: editingEmp.created_at || new Date().toISOString()
             });
@@ -941,7 +963,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           status_perkawinan: payload.status_perkawinan,
           region: editingEmp.region || '',
           descriptor_json: editCurrentDescriptorRef.current,
-          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+          template_version: editTemplateVer,
           vector_checksum: csVal,
           has_master_biometric: true
         });
@@ -1139,8 +1161,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
         if (photoFile) {
           const embedding = await processImageFileForEmbedding(photoFile);
-          if (embedding) {
-            descriptorJson = JSON.stringify(embedding);
+          const validVec = toVectorArray(embedding);
+          if (validVec) {
+            descriptorJson = validVec;
             hasMasterBiometric = true;
           }
         }
@@ -1171,9 +1194,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
           // 2. If biometrics are ready, upsert descriptor
           if (employeeId && descriptorJson) {
+            const cs = vectorChecksum(descriptorJson);
             const { error: descErr } = await supabase
               .from('master_descriptors')
-              .upsert({ employee_id: employeeId, descriptor_json: descriptorJson });
+              .upsert({
+                employee_id: employeeId,
+                descriptor_json: descriptorJson,
+                template_version: 0,
+                vector_checksum: cs
+              }, { onConflict: 'employee_id' });
             if (descErr) console.warn('Warning: Failed to save master descriptor:', descErr.message);
           }
 
@@ -1189,6 +1218,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             jabatan: employeePayload.jabatan,
             status_perkawinan: employeePayload.status_perkawinan,
             descriptor_json: descriptorJson,
+            template_version: 0,
+            vector_checksum: descriptorJson ? vectorChecksum(descriptorJson) : null,
             has_master_biometric: hasMasterBiometric
           });
 
@@ -1649,7 +1680,18 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                         <TableCell data-label="Biometrik" className="no-print">
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
                             {isBiometrikReady ? (
-                              <span className="status-badge success">Siap</span>
+                              <>
+                                <span className="status-badge success">Siap</span>
+                                {emp.template_version !== undefined && emp.template_version !== null && Number(emp.template_version) <= 1 && (
+                                  <span
+                                    className="status-badge warning"
+                                    style={{ background: '#f59e0b', color: '#000', fontSize: '0.65rem', padding: '1px 5px', fontWeight: 'bold' }}
+                                    title="Didaftarkan dari satu foto atau mode frontal saja. Disarankan re-scan multi-pose untuk stabilitas check-out sore."
+                                  >
+                                    Template Sempit
+                                  </span>
+                                )}
+                              </>
                             ) : (
                               <span className="status-badge fail">Belum</span>
                             )}

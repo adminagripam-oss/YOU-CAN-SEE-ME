@@ -15,12 +15,80 @@ export const BIOMETRIC_CONFIG = {
   QUALITY_MAX_PITCH_TURNED: 0.20,
   DUPLICATE_COSINE_THRESHOLD: 0.88,
   ENROLL_MIN_CONSISTENCY: 0.90,
+  // template_version semantics:
+  // 0: Upload Foto 1-frame (template sempit)
+  // 1: Kamera frontal-only (termasuk fallback timeout frontal)
+  // 2: Kamera multi-pose penuh (frontal + miring oportunistik)
   TEMPLATE_VERSION: 2
 };
 
+/**
+ * Normalizes any vector input (array, JSON string, double-encoded string,
+ * TypedArray, or numeric-indexed object) into a validated array of 1024 numbers.
+ * Validates length === 1024 and all numbers are finite (no NaN, no null).
+ * Returns null and logs a warning if invalid.
+ */
+export function toVectorArray(v) {
+  if (v == null) return null;
+  let parsed = v;
+  while (typeof parsed === 'string') {
+    try {
+      const next = JSON.parse(parsed);
+      parsed = next;
+    } catch (_) {
+      break;
+    }
+  }
+  if (parsed == null) return null;
+
+  let rawList = null;
+  if (Array.isArray(parsed)) {
+    rawList = parsed;
+  } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
+    rawList = Array.from(parsed);
+  } else if (typeof parsed === 'object' && parsed !== null) {
+    const vals = Object.values(parsed);
+    if (vals.length > 0) {
+      rawList = vals;
+    }
+  }
+
+  if (!rawList || rawList.length !== 1024) {
+    console.warn(`[toVectorArray] Invalid dimension: expected 1024, got ${rawList ? rawList.length : 0}`);
+    return null;
+  }
+
+  const result = new Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const val = Number(rawList[i]);
+    if (!Number.isFinite(val)) {
+      console.warn(`[toVectorArray] Non-finite value at index ${i}: ${rawList[i]}`);
+      return null;
+    }
+    result[i] = val;
+  }
+
+  return result;
+}
+
 export function toF32(v) {
-  if (v instanceof Float32Array) return v;
-  if (Array.isArray(v)) return new Float32Array(v);
+  if (v instanceof Float32Array) {
+    for (let i = 0; i < v.length; i++) {
+      if (!Number.isFinite(v[i])) throw new Error("Invalid vector type: non-finite value");
+    }
+    return v;
+  }
+  if (Array.isArray(v)) {
+    const f32 = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i++) {
+      const num = Number(v[i]);
+      if (!Number.isFinite(num)) throw new Error("Invalid vector type: non-finite value");
+      f32[i] = num;
+    }
+    return f32;
+  }
+  const normalized = toVectorArray(v);
+  if (normalized) return new Float32Array(normalized);
   throw new Error("Invalid vector type");
 }
 

@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { SQLiteConnection, SQLiteDBConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
 // @ts-ignore
-import { vectorChecksum, BIOMETRIC_CONFIG } from '../biometrics';
+import { vectorChecksum, BIOMETRIC_CONFIG, toVectorArray } from '../biometrics';
 
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbConnection: SQLiteDBConnection | null = null;
@@ -185,6 +185,7 @@ export async function initSQLite(): Promise<void> {
         region TEXT,
         descriptor_json TEXT,
         geometric_descriptor_json TEXT,
+        template_version INTEGER,
         is_synced INTEGER DEFAULT 0,
         created_at TEXT,
         last_error_code TEXT,
@@ -689,6 +690,9 @@ export async function initSQLite(): Promise<void> {
     try {
       await dbConnection.execute(`ALTER TABLE local_employee_face_thumbs ADD COLUMN updated_at TEXT;`);
     } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN template_version INTEGER;`);
+    } catch (e) { }
 
     console.log('[SQLite Service] SQLite tables verified and ready.');
     _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
@@ -722,28 +726,11 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 
     let vector = user.descriptor_json || user.descriptor || user.face_vector || null;
     let vectorStr: string | null = null;
-    let arr: number[] | null = null;
+    let normArr: number[] | null = null;
     if (vector) {
-      let parsed = vector;
-      while (typeof parsed === 'string') {
-        try {
-          parsed = JSON.parse(parsed);
-        } catch (e) {
-          break;
-        }
-      }
-      if (Array.isArray(parsed)) {
-        arr = parsed;
-      } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
-        arr = Array.from(parsed as any);
-      } else if (typeof parsed === 'object' && parsed !== null) {
-        const values = Object.values(parsed);
-        if (values.length > 0) {
-          arr = Array.from(values as any);
-        }
-      }
-      if (arr && arr.length > 0) {
-        vectorStr = JSON.stringify(arr.map(n => Number(n) || 0));
+      normArr = toVectorArray(vector);
+      if (normArr && normArr.length === 1024) {
+        vectorStr = JSON.stringify(normArr);
       }
     }
 
@@ -782,8 +769,8 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
       ]
     );
 
-    const templateVersion = user.template_version || 1;
-    const vectorChecksumVal = user.vector_checksum || (arr ? vectorChecksum(arr) : null);
+    const templateVersion = user.template_version !== undefined && user.template_version !== null ? Number(user.template_version) : 1;
+    const vectorChecksumVal = user.vector_checksum || (normArr ? vectorChecksum(normArr) : null);
 
     // 2. Cache to local_master_descriptors
     await db.run(
@@ -863,11 +850,11 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
             status_tk: row.status_tk,
             jabatan: row.jabatan,
             status_perkawinan: row.status_perkawinan,
-            descriptor_json: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
-            face_vector: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
+            descriptor_json: toVectorArray(row.descriptor_json),
+            face_vector: toVectorArray(row.descriptor_json),
             geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
             updated_at: row.created_at,
-            template_version: row.template_version || 1,
+            template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
             vector_checksum: row.vector_checksum || null
           };
         }
@@ -886,11 +873,11 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       status_tk: row.status_tk,
       jabatan: row.jabatan,
       status_perkawinan: row.status_perkawinan,
-      descriptor_json: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
-      face_vector: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
+      descriptor_json: toVectorArray(row.descriptor_json),
+      face_vector: toVectorArray(row.descriptor_json),
       geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
       updated_at: row.updated_at,
-      template_version: row.template_version || 1,
+      template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
       vector_checksum: row.vector_checksum || null
     };
   } catch (err: any) {
@@ -1163,20 +1150,15 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
     );
     const rows = res.values || [];
     return rows.map(row => {
-      let parsedDesc = null;
-      if (row.descriptor_json) {
-        try {
-          parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
-        } catch (e) { }
-      }
-      const cs = row.vector_checksum || (parsedDesc && Array.isArray(parsedDesc) ? vectorChecksum(parsedDesc) : null);
+      const parsedDesc = toVectorArray(row.descriptor_json);
+      const cs = row.vector_checksum || (parsedDesc ? vectorChecksum(parsedDesc) : null);
       return {
         employee_id: row.employee_id,
         nik: row.nik,
         name: row.name,
         descriptor_json: parsedDesc,
         vector_checksum: cs,
-        template_version: row.template_version || 1,
+        template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
         updated_at: row.updated_at || null,
       };
     });
@@ -1687,8 +1669,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     // 1. Simpan ke Antrean Sync (Outbox)
     const sql = `
       INSERT INTO local_employee_sync_queue 
-      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, template_version, is_synced, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
       ON CONFLICT(id) DO UPDATE SET
          nik = COALESCE(NULLIF(EXCLUDED.nik, ''), local_employee_sync_queue.nik),
          name = COALESCE(NULLIF(EXCLUDED.name, ''), local_employee_sync_queue.name),
@@ -1701,9 +1683,11 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
          region = COALESCE(NULLIF(EXCLUDED.region, ''), local_employee_sync_queue.region),
          descriptor_json = COALESCE(NULLIF(EXCLUDED.descriptor_json, ''), local_employee_sync_queue.descriptor_json),
          geometric_descriptor_json = COALESCE(NULLIF(EXCLUDED.geometric_descriptor_json, ''), local_employee_sync_queue.geometric_descriptor_json),
+         template_version = COALESCE(EXCLUDED.template_version, local_employee_sync_queue.template_version),
          has_master_biometric = EXCLUDED.has_master_biometric,
          is_synced = 0
     `;
+    const pendingTemplateVer = empData.template_version !== undefined && empData.template_version !== null ? Number(empData.template_version) : null;
     const params = [
       String(empData.id),
       empData.nik,
@@ -1718,6 +1702,7 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       empData.region || null,
       descJson,
       geomJson,
+      pendingTemplateVer,
       empData.created_at || new Date().toISOString()
     ];
     await db.run(sql, params);
@@ -1758,16 +1743,20 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
 
     // 3. Simpan Vektor Wajah ke local_master_descriptors agar bisa langsung dipakai absen offline
     if (descJson || geomJson) {
+      const parsedArr = descJson ? toVectorArray(descJson) : null;
+      const cs = parsedArr ? vectorChecksum(parsedArr) : null;
       const descSql = `
         INSERT OR REPLACE INTO local_master_descriptors 
-        (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
-        VALUES (?, ?, ?, ?)
+        (employee_id, descriptor_json, geometric_descriptor_json, updated_at, template_version, vector_checksum)
+        VALUES (?, ?, ?, ?, ?, ?)
       `;
       const descParams = [
         String(empData.id),
         descJson,
         geomJson,
-        new Date().toISOString()
+        new Date().toISOString(),
+        pendingTemplateVer !== null ? pendingTemplateVer : 1,
+        cs
       ];
       await db.run(descSql, descParams);
     }

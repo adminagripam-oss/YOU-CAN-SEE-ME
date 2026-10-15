@@ -3,7 +3,26 @@ import { getUnsyncedLogs, removeSyncedLogs, db, writeToBackupStorage, updateSync
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { BIOMETRIC_CONFIG, vectorChecksum } from './biometrics';
+import { BIOMETRIC_CONFIG, vectorChecksum, toVectorArray } from './biometrics';
+
+export function stripAttendanceTelemetry(payload) {
+  if (Array.isArray(payload)) {
+    return payload.map(stripAttendanceTelemetry);
+  }
+  if (!payload || typeof payload !== 'object') return payload;
+  const { match_cosine, match_threshold, template_version, facing_mode, ...core } = payload;
+  return core;
+}
+
+export function isAttendanceMissingColumnError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  return err.code === '42703' ||
+    msg.includes('match_cosine') ||
+    msg.includes('match_threshold') ||
+    msg.includes('template_version') ||
+    msg.includes('facing_mode');
+}
 
 let isSyncing = false;
 
@@ -160,33 +179,72 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           attendance_type: (log.attendance_type || 'CHECK-IN').replace('_', '-'),
           nik: log.nik || null,
           name: log.name || null,
-          department: log.department || null
+          department: log.department || null,
+          match_cosine: log.match_cosine !== undefined && log.match_cosine !== null ? Number(log.match_cosine) : null,
+          match_threshold: log.match_threshold !== undefined && log.match_threshold !== null ? Number(log.match_threshold) : null,
+          template_version: (log.template_version !== undefined && log.template_version !== null && log.template_version !== '') ? Number(log.template_version) : null,
+          facing_mode: log.facing_mode || null
         };
       });
 
     let syncedIds = [];
     let successfulData = [];
     let localToRealIdMap = {};
+    let telemetryExcluded = false;
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('attendance_logs')
       .insert(logsToInsert)
       .select();
+
+    // Adaptive schema matching: if telemetry columns not yet migrated on attendance_logs (42703)
+    if (error && isAttendanceMissingColumnError(error)) {
+      telemetryExcluded = true;
+      console.warn('[Auto-Sync] attendance_logs server belum memiliki kolom telemetri (42703). Mencoba insert ulang tanpa kolom telemetri...');
+      if (typeof window !== 'undefined') {
+        window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
+      }
+      const retryRes = await supabase
+        .from('attendance_logs')
+        .insert(stripAttendanceTelemetry(logsToInsert))
+        .select();
+      data = retryRes.data;
+      error = retryRes.error;
+    }
 
     if (error) {
       console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to sequential for...of insert:', error.message || error);
       
       // Requirement 2: Sekuensial lambat (for...of) dengan try...catch per iterasi individu
       for (let i = 0; i < textPendingLogs.length; i++) {
-        const singleLogPayload = logsToInsert[i];
+        let singleLogPayload = logsToInsert[i];
+        if (telemetryExcluded) {
+          singleLogPayload = stripAttendanceTelemetry(singleLogPayload);
+        }
         const originalLog = textPendingLogs[i];
 
         try {
-          const { data: singleData, error: singleError } = await supabase
+          let { data: singleData, error: singleError } = await supabase
             .from('attendance_logs')
             .insert([singleLogPayload])
             .select();
           
+          // Adaptive fallback retry for individual item if 42703 occurs
+          if (singleError && isAttendanceMissingColumnError(singleError)) {
+            telemetryExcluded = true;
+            console.warn(`[Auto-Sync Fallback] attendance_logs missing telemetry columns (42703) on log #${originalLog.id}. Retrying without telemetry...`);
+            if (typeof window !== 'undefined') {
+              window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
+            }
+            singleLogPayload = stripAttendanceTelemetry(singleLogPayload);
+            const singleRetry = await supabase
+              .from('attendance_logs')
+              .insert([singleLogPayload])
+              .select();
+            singleData = singleRetry.data;
+            singleError = singleRetry.error;
+          }
+
           if (singleError) {
             console.error(`[Auto-Sync Fallback Error] Gagal insert log ID #${originalLog.id} (employee_id: ${singleLogPayload.employee_id}):`, singleError.message || singleError);
             
@@ -221,7 +279,8 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
             // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
             console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
             localToRealIdMap[originalLog.id] = singleData[0].id;
-            await updateSyncStatus(originalLog.id, 'done', null);
+            const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
+            await updateSyncStatus(originalLog.id, 'done', null, syncNote);
             syncedIds.push(originalLog.id);
             successfulData.push(singleData[0]);
           }
@@ -235,11 +294,12 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       if (data && Array.isArray(data) && data.length > 0) {
         syncedIds = textPendingLogs.map(log => log.id);
         successfulData = data;
+        const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
         for (let i = 0; i < syncedIds.length; i++) {
           if (data[i]) {
             localToRealIdMap[syncedIds[i]] = data[i].id;
           }
-          await updateSyncStatus(syncedIds[i], 'done', null);
+          await updateSyncStatus(syncedIds[i], 'done', null, syncNote);
         }
       }
     }
@@ -712,20 +772,21 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         }
 
         // 2. Insert master biometrics descriptor if present
-        let descObj = emp.descriptor_json;
-        if (typeof descObj === 'string') {
-          try { descObj = JSON.parse(descObj); } catch (_) {}
-        }
+        const normalizedVec = toVectorArray(emp.descriptor_json);
 
-        if (descObj && Array.isArray(descObj)) {
-          const checksumVal = vectorChecksum(descObj);
+        if (normalizedVec && Array.isArray(normalizedVec)) {
+          const checksumVal = vectorChecksum(normalizedVec);
           let descUpsertOk = false;
+
+          const queueTemplateVer = (emp.template_version !== undefined && emp.template_version !== null && emp.template_version !== '')
+            ? Number(emp.template_version)
+            : null;
 
           const fullPayload = {
             employee_id: realEmpId,
-            descriptor_json: descObj,
+            descriptor_json: normalizedVec,
             updated_at: new Date().toISOString(),
-            template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+            template_version: queueTemplateVer,
             vector_checksum: checksumVal
           };
 
@@ -739,7 +800,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               console.warn('[Sync Employee] master_descriptors table missing vector_checksum/template_version (42703). Fallback to standard schema.');
               const fallbackPayload = {
                 employee_id: realEmpId,
-                descriptor_json: descObj,
+                descriptor_json: normalizedVec,
                 updated_at: new Date().toISOString()
               };
               const { error: fallbackErr } = await supabase
@@ -1069,7 +1130,7 @@ export async function syncPendingEmployeeFaceThumbs() {
 
         const storagePath = `faces/${empId}/master.jpg`;
         const { error: uploadErr } = await supabase.storage
-          .from('employee-faces')
+          .from('attendance-photos')
           .upload(storagePath, blob, {
             contentType: 'image/jpeg',
             upsert: true

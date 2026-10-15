@@ -48,7 +48,8 @@ import {
   sqliteGetUnsyncedEmployeeFaceThumbs,
   sqliteMarkSyncedEmployeeFaceThumbs
 } from './services/sqliteService';
-import { vectorChecksum } from './biometrics';
+import { vectorChecksum, toVectorArray } from './biometrics';
+export { toVectorArray };
 
 /**
  * Dexie.js IndexedDB Database for Offline-First Face Attendance App
@@ -140,6 +141,20 @@ dexieDb.version(10).stores({
   attendance_requests: 'id, request_type, log_id, status, is_synced',
   employee_delete_queue: 'id',
   employee_sync_queue: 'id, nik, name, is_synced, created_at',
+  scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
+  employee_face_thumbs: 'employee_id, captured_at, is_synced'
+});
+
+dexieDb.version(11).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric, is_synced',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced',
+  employee_delete_queue: 'id',
+  employee_sync_queue: 'id, nik, name, template_version, is_synced, created_at',
   scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
   employee_face_thumbs: 'employee_id, captured_at, is_synced'
 });
@@ -655,35 +670,6 @@ export const db = {
  * Save / Cache Master Descriptor.
  * Automatically delegates to SQLite on native APK, or Dexie on Web.
  */
-export function toVectorArray(v) {
-  if (!v) return null;
-  let parsed = v;
-  while (typeof parsed === 'string') {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch (e) {
-      break;
-    }
-  }
-  if (!parsed) return null;
-
-  let arr = null;
-  if (Array.isArray(parsed)) {
-    arr = parsed;
-  } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
-    arr = Array.from(parsed);
-  } else if (typeof parsed === 'object' && parsed !== null) {
-    const values = Object.values(parsed);
-    if (values.length > 0) {
-      arr = Array.from(values);
-    }
-  }
-
-  if (arr && arr.length > 0) {
-    return arr.map(n => Number(n) || 0);
-  }
-  return null;
-}
 
 export async function cacheUserMasterVector(user) {
   if (Capacitor.isNativePlatform()) {
@@ -701,7 +687,7 @@ export async function cacheUserMasterVector(user) {
     const allMasters = await dexieDb.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(empId) || (m.nik && String(m.nik) === String(user.nik)));
 
-    const templateVersion = user.template_version || 1;
+    const templateVersion = user.template_version !== undefined && user.template_version !== null ? Number(user.template_version) : 1;
     const vectorChecksumVal = user.vector_checksum || (vector ? vectorChecksum(vector) : null);
 
     const payload = {
