@@ -691,6 +691,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
     const employeePromises = pendingEmps.map(async (emp) => {
       try {
         let realEmpId = null;
+        const tempIdStr = String(emp.id);
 
         let finalNik = emp.nik ?? '';
         if (finalNik === '' || finalNik === '-' || finalNik === 'Tanpa NIK') {
@@ -873,7 +874,6 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         // 3B. Update pending face thumbs and scan attempts FK if temporary ID was used
         try {
-          const tempIdStr = String(emp.id);
           if (isNative) {
             const { waitForConnection } = await import('./services/sqliteService');
             const nativeDb = await waitForConnection();
@@ -911,7 +911,6 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         
         // PURGE ghost employee dari local cache HANYA jika ID-nya adalah temporary offline ID.
         // Karyawan real (ID numerik dari Supabase) TIDAK boleh dihapus di sini.
-        const tempIdStr = String(emp.id);
         if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('off_emp_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
           const { hardDeleteLocalEmployee } = await import('./db');
           await hardDeleteLocalEmployee(emp.id);

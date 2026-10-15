@@ -36,6 +36,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const { useFullscreen, isPortrait, canvasSize } = useScanViewport();
 
   // Face Frame Geometry Refs
+  const handleScanSubmitRef = useRef(null);
   const editFrameStateRef = useRef({ state: 'idle', progress: 0 });
   const scanFrameStateRef = useRef({ state: 'idle', progress: 0 });
   const frameRectRef = useRef(getFrameRect(canvasSize.width, canvasSize.height, isPortrait));
@@ -373,8 +374,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setScanCameraStatusColor('var(--accent-danger)');
   }, []);
 
-  const handleScanSubmitRef = useRef(null);
-
   useNormalizedFaceMesh({
     videoRef: scanVideoRef,
     canvasRef: scanCanvasRef,
@@ -456,7 +455,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       }
 
       if (shouldQueue) {
-        const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
         // Mode Offline / Temporary Employee / Cloud Fail: Simpan ke antrean lokal (Dexie / SQLite)
         if (Capacitor.isNativePlatform()) {
           const { sqliteSavePendingEmployee } = await import('../services/sqliteService');
@@ -494,7 +492,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         }
       }
 
-      const rescanTemplateVer = scanMode === 'frontal_only' ? 1 : 2;
       // Simpan ke Vektor Wajah (Master Descriptor) lokal (Selalu dijalankan)
       await cacheUserMasterVector({
         employee_id: scanEmp.id,
@@ -1395,12 +1392,12 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     `;
 
     const fileName = `Data_Karyawan_${new Date().toISOString().split('T')[0]}.xls`;
+    const excelBlob = new Blob([template], { type: 'application/vnd.ms-excel' });
 
     if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.getPlatform() === 'android') {
       try {
-        const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
         const reader = new FileReader();
-        reader.readAsDataURL(blob);
+        reader.readAsDataURL(excelBlob);
         reader.onloadend = async () => {
           try {
             const base64Data = reader.result.split(',')[1];
@@ -1425,10 +1422,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       return;
     }
 
-    const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
+    const downloadUrl = URL.createObjectURL(excelBlob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
+    link.setAttribute("href", downloadUrl);
     link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
