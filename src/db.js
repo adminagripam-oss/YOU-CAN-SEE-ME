@@ -1305,16 +1305,17 @@ export async function removeSyncedScanAttempts(ids) {
   }
 }
 
-export async function saveEmployeeFaceThumb(employeeId, thumbBase64, photoVersion = 1, photoChecksum = null) {
+export async function saveEmployeeFaceThumb(employeeId, thumbBase64, photoVersion = 1, photoChecksum = null, nik = null) {
   if (!employeeId || !thumbBase64) return;
   if (Capacitor.isNativePlatform()) {
-    await sqliteSaveEmployeeFaceThumb(String(employeeId), thumbBase64, photoVersion, photoChecksum);
+    await sqliteSaveEmployeeFaceThumb(String(employeeId), thumbBase64, photoVersion, photoChecksum, nik);
     return;
   }
   try {
     const now = new Date().toISOString();
     await dexieDb.employee_face_thumbs.put({
       employee_id: String(employeeId),
+      nik: nik ? String(nik).trim() : null,
       thumb_base64: thumbBase64,
       photo_version: photoVersion,
       photo_checksum: photoChecksum,
