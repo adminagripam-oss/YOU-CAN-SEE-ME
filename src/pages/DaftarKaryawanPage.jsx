@@ -8,17 +8,17 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera, ChevronLeftIcon, ChevronRightIcon, Filter, Search, ArrowRightLeft } from 'lucide-react';
+import { Edit2, Trash2, FileSpreadsheet, FileDown, Plus, Upload, RefreshCw, Camera, ChevronLeftIcon, ChevronRightIcon, Filter, Search, ArrowRightLeft, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray } from '../db';
+import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray, queueScanAttempt, saveEmployeeFaceThumb, getEmployeeFaceThumb } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
-import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, buildTemplateDetailed, cosine } from '../biometrics';
+import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, buildTemplateDetailed, cosine, vectorChecksum, createEnrollmentCollector, selectEnrollmentFrames } from '../biometrics';
 import { useAuth } from '../context/AuthContext';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { useScanViewport } from '../hooks/useScanViewport';
@@ -28,6 +28,8 @@ import { useIsMobileLayout } from '../hooks/useIsMobileLayout';
 import MobileDataPage from '../components/mobile/MobileDataPage';
 import MobileFilterSheet from '../components/mobile/MobileFilterSheet';
 import MobileTableViewport from '../components/mobile/MobileTableViewport';
+import EmployeeFacePreviewModal from '../components/EmployeeFacePreviewModal';
+import { captureEnrollmentPhoto } from '../utils/enrollmentPhoto';
 
 export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, showToast, refreshEmployees, refreshLogs, openConfirmModal }) {
   const navigate = useNavigate();
@@ -151,12 +153,13 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const editCurrentDescriptorRef = useRef(null);
   const editSamplesRef = useRef([]);
   const editLastSampleTimeRef = useRef(0);
+  const editCollectorRef = useRef(createEnrollmentCollector());
   const editVideoRef = useRef(null);
   // Cosine >= 0.88 = batas bawah zona genuine pada embedding 1024-D FaceRes.
   // Di bawah ini masih zona impostor/abu-abu; aman sebagai anti-duplikasi.
   const EDIT_DUPLICATE_THRESHOLD = 0.88;
 
-  
+
   const editCanvasRef = useRef(null);
   const editStreamRef = useRef(null);
   const editFileInputRef = useRef(null);
@@ -170,6 +173,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [scanFaceCheckResult, setScanFaceCheckResult] = useState(null);
   const [isScanningSubmit, setIsScanningSubmit] = useState(false);
   const [scanSamplesReady, setScanSamplesReady] = useState(false);
+  const [scanFailCount, setScanFailCount] = useState(0);
+  const [scanMode, setScanMode] = useState('multi_pose');
 
   const scanCurrentDescriptorRef = useRef(null);
   const scanCurrentGFVRef = useRef(null);
@@ -177,6 +182,29 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const scanCanvasRef = useRef(null);
   const scanSamplesRef = useRef([]);
   const scanLastSampleTimeRef = useRef(0);
+  const scanCollectorRef = useRef(createEnrollmentCollector());
+  // Ref agar callback kamera (useCallback) tidak membaca state basi (stale closure)
+  const scanReadyRef = useRef(false);
+  const scanLockRef = useRef(false);
+  const editReadyRef = useRef(false);
+  const editLockRef = useRef(false);
+  const isOnlineRef = useRef(isOnline);
+  const useFullscreenRef = useRef(useFullscreen);
+  const scanModeRef = useRef('multi_pose');
+  useEffect(() => { isOnlineRef.current = isOnline; }, [isOnline]);
+  useEffect(() => { useFullscreenRef.current = useFullscreen; }, [useFullscreen]);
+  useEffect(() => { scanModeRef.current = scanMode; }, [scanMode]);
+  useEffect(() => { scanReadyRef.current = scanSamplesReady; }, [scanSamplesReady]);
+  useEffect(() => { editReadyRef.current = editSamplesReady; }, [editSamplesReady]);
+
+  // --- Face Photo Preview Modal State ---
+  const [previewEmp, setPreviewEmp] = useState(null);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+
+  const openPreviewModal = (emp) => {
+    setPreviewEmp(emp);
+    setPreviewModalOpen(true);
+  };
 
   const detectScanFacesCallback = React.useCallback(async (croppedCanvas) => {
     if (!modelsLoaded) return null;
@@ -191,14 +219,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     if (smoothedMesh) {
       scanCurrentGFVRef.current = smoothedMesh;
     }
-    
+
     // Evaluate if face is properly within the UI frame (same as check-in)
     const frameCheck = evaluateFaceInFrame(boundingBox, frameRectRef.current);
     let currentProgress = scanSamplesRef.current.length / BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
 
     if (!frameCheck.ok) {
       scanFrameStateRef.current = { state: 'misaligned', progress: currentProgress };
-      if (!scanSamplesReady && scanSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+      if (!scanReadyRef.current && !scanLockRef.current && scanSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
         setScanCameraStatusText(FRAME_HINTS[frameCheck.reason]);
         setScanCameraStatusColor('var(--accent-danger)');
       }
@@ -206,78 +234,110 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       scanFrameStateRef.current = { state: 'scanning', progress: currentProgress };
     }
 
-    if (detection && detection.embedding) {
-      const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
-      if (scanSamplesRef.current.length >= total) {
-        // Cukup sampel
-      } else if (frameCheck.ok) { // Hanya proses jika berada di dalam bingkai
-        const now = performance.now();
-        if (isGoodFrame(detection) && (now - scanLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
-          scanLastSampleTimeRef.current = now;
-          scanSamplesRef.current.push(Array.from(detection.embedding));
-          const count = scanSamplesRef.current.length;
-          
-          if (count < total) {
-            setScanCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
-            setScanCameraStatusColor('var(--accent-warning)');
-          } else {
-            const templateResult = buildTemplateDetailed(scanSamplesRef.current);
-            if (!templateResult) return;
+    if (detection && detection.embedding && frameCheck.ok && !scanReadyRef.current && !scanLockRef.current) {
+      const now = performance.now();
+      const res = selectEnrollmentFrames(scanCollectorRef.current, detection, now);
 
-            if (templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
-              setScanCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
-              setScanCameraStatusColor('var(--accent-warning)');
-              scanSamplesRef.current = [];
-              setScanSamplesReady(false);
-              return;
+      if (res.status === 'paused') {
+        setScanCameraStatusText(res.message || 'Arahkan wajah ke dalam bingkai...');
+        setScanCameraStatusColor('var(--accent-warning)');
+      } else if (res.status === 'collecting') {
+        setScanCameraStatusText(res.promptText || `Mengambil sampel ${res.frameCount}/${res.targetFrames}`);
+        setScanCameraStatusColor('var(--accent-warning)');
+        scanFrameStateRef.current = { state: 'scanning', progress: res.progress };
+      } else if (res.status === 'low_consistency' || res.status === 'timeout') {
+        const failMsg = res.message || (res.status === 'timeout' ? 'Waktu pendaftaran habis. Mengulang...' : 'Wajah terlalu banyak bergerak. Mengulang...');
+        setScanCameraStatusText(failMsg);
+        setScanCameraStatusColor('var(--accent-error)');
+        setScanFailCount(prev => prev + 1);
+        queueScanAttempt({
+          attempt_type: 'ENROLL',
+          outcome: 'FAILED',
+          max_cosine: null,
+          frames_used: res.framesCount || scanCollectorRef.current.frames.length,
+          threshold_used: BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY,
+          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION
+        }).catch(() => { });
+        scanCollectorRef.current = createEnrollmentCollector(scanModeRef.current);
+        setScanSamplesReady(false);
+      } else if (res.status === 'complete') {
+        // Kunci agar frame berikutnya tidak memproses "complete" berulang kali
+        scanLockRef.current = true;
+        const total = res.frames?.length ?? res.frameCount ?? res.targetFrames ?? BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+        setScanFailCount(0);
+        const templateResult = {
+          vector: res.vector,
+          consistency: res.consistency,
+          template_version: res.template_version || 1
+        };
+        queueScanAttempt({
+          attempt_type: 'ENROLL',
+          outcome: 'SUCCESS',
+          max_cosine: parseFloat(res.consistency.toFixed(4)),
+          frames_used: res.frames.length,
+          threshold_used: BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY,
+          template_version: res.template_version
+        }).catch(() => { });
+
+        scanCurrentDescriptorRef.current = Array.from(templateResult.vector);
+
+        (async () => {
+          try {
+            const allMasters = await getAllMasterVectors();
+            let bestSim = 0, bestName = '';
+            const currentVec = templateResult.vector;
+            for (const m of allMasters) {
+              if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
+              const vec = m.descriptor_json;
+              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const sim = cosine(currentVec, vec);
+              if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
-
-            scanCurrentDescriptorRef.current = Array.from(templateResult.vector);
-            
-            (async () => {
-              try {
-                const allMasters = await getAllMasterVectors();
-                let bestSim = 0, bestName = '';
-                for (const m of allMasters) {
-                  if (scanEmp && String(m.employee_id) === String(scanEmp.id)) continue;
-                  const vec = m.descriptor_json;
-                  if (!Array.isArray(vec) || vec.length !== 1024) continue;
-                  const sim = cosine(finalTemplate, vec);
-                  if (sim > bestSim) { bestSim = sim; bestName = m.name; }
-                }
-                if (isOnline && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
-                  setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
-                  setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
-                  setScanCameraStatusColor('var(--accent-error)');
-                } else {
-                  setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-                  setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
-                  setScanCameraStatusColor('var(--accent-success)');
-                  setScanSamplesReady(true);
-                  if (useFullscreen) {
-                    setTimeout(() => {
-                      handleScanSubmitRef.current?.();
-                    }, 1500);
-                  }
-                }
-              } catch (_) {
-                setScanFaceCheckResult(null);
-                setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
-                setScanCameraStatusColor('var(--accent-success)');
-                setScanSamplesReady(true);
-                if (useFullscreen) {
-                  setTimeout(() => {
-                    handleScanSubmitRef.current?.();
-                  }, 1500);
-                }
+            if (isOnlineRef.current && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+              setScanFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+              setScanCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%). Jika saudara kandung / keliru, laporkan ke mandor.`);
+              setScanCameraStatusColor('var(--accent-error)');
+              queueScanAttempt({
+                attempt_type: 'ENROLL-DUPLICATE',
+                matched_cosine: parseFloat(bestSim.toFixed(4)),
+                threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
+                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                outcome: 'NOT_MATCHED'
+              }).catch(() => { });
+              // Beri waktu membaca pesan, lalu buka kunci agar bisa mengulang
+              setTimeout(() => {
+                scanCollectorRef.current = createEnrollmentCollector(scanModeRef.current);
+                scanLockRef.current = false;
+              }, 4000);
+            } else {
+              setScanFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+              setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+              setScanCameraStatusColor('var(--accent-success)');
+              scanReadyRef.current = true;
+              setScanSamplesReady(true);
+              if (useFullscreenRef.current) {
+                setTimeout(() => {
+                  handleScanSubmitRef.current?.();
+                }, 1500);
               }
-            })();
+            }
+          } catch (_) {
+            setScanFaceCheckResult(null);
+            setScanCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+            setScanCameraStatusColor('var(--accent-success)');
+            scanReadyRef.current = true;
+            setScanSamplesReady(true);
+            if (useFullscreenRef.current) {
+              setTimeout(() => {
+                handleScanSubmitRef.current?.();
+              }, 1500);
+            }
           }
-        }
+        })();
       }
     }
 
-    if (scanSamplesReady) {
+    if (scanReadyRef.current) {
       scanFrameStateRef.current = { state: 'success', progress: 1 };
     }
 
@@ -293,11 +353,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         ctx.fill();
       }
     }
-  }, [scanEmp, EDIT_DUPLICATE_THRESHOLD]);
+  }, [scanEmp]);
 
   const onScanNoFace = React.useCallback(() => {
-    if (!scanSamplesReady && scanSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
-      setScanCameraStatusText('Menunggu Wajah di Kamera...');
+    if (!scanReadyRef.current && !scanSamplesReady) {
+      if (scanCollectorRef.current) {
+        selectEnrollmentFrames(scanCollectorRef.current, null, performance.now());
+      }
+      setScanCameraStatusText('Arahkan wajah ke dalam bingkai...');
       setScanCameraStatusColor('var(--accent-warning)');
     }
   }, [scanSamplesReady]);
@@ -326,10 +389,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setScanEmp(emp);
     setScanFacingMode('environment');
     setScanFaceCheckResult(null);
+    setScanFailCount(0);
+    setScanMode('multi_pose');
     scanCurrentDescriptorRef.current = null;
     scanCurrentGFVRef.current = null;
     scanSamplesRef.current = [];
     scanLastSampleTimeRef.current = 0;
+    scanCollectorRef.current = createEnrollmentCollector('multi_pose');
+    scanReadyRef.current = false;
+    scanLockRef.current = false;
     setScanSamplesReady(false);
     setScanModalOpen(true);
   };
@@ -348,8 +416,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setIsScanningSubmit(true);
     const descriptorJson = scanCurrentDescriptorRef.current;
     const isOfflineEmp = String(scanEmp.id).startsWith('off_') || String(scanEmp.id).startsWith('tmp_') || !navigator.onLine;
+    const csVal = vectorChecksum(descriptorJson);
 
     try {
+      // Capture face thumbnail and save locally
+      const thumb = captureEnrollmentPhoto(scanVideoRef.current, scanFaceCheckResult?.boundingBox, scanFacingMode);
+      if (thumb?.base64) {
+        await saveEmployeeFaceThumb(scanEmp.id, thumb.base64);
+      }
+
       let shouldQueue = isOfflineEmp;
       let cloudOk = false;
 
@@ -360,9 +435,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
           const { error: descErr } = await supabase
             .from('master_descriptors')
-            .upsert({ employee_id: scanEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+            .upsert({
+              employee_id: scanEmp.id,
+              descriptor_json: descriptorJson,
+              updated_at: new Date().toISOString(),
+              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              vector_checksum: csVal
+            }, { onConflict: 'employee_id' });
           if (descErr) throw descErr;
-          
+
           cloudOk = true;
         } catch (cloudErr) {
           console.warn('[Scan Submit Cloud Fail] Fallback ke lokal cache/queue:', cloudErr.message);
@@ -418,6 +499,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         status_perkawinan: scanEmp.status_perkawinan || '',
         region: scanEmp.region || '',
         descriptor_json: descriptorJson,
+        template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+        vector_checksum: csVal,
         has_master_biometric: true
       });
 
@@ -429,7 +512,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           descriptor_json: descriptorJson,
           is_synced: cloudOk
         });
-      } catch (_) {}
+      } catch (_) { }
 
       showToast(
         cloudOk ? 'Berhasil' : 'Tersimpan Lokal',
@@ -439,6 +522,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
       setScanModalOpen(false);
       refreshEmployees();
+      window.dispatchEvent(new CustomEvent('refresh_employees'));
     } catch (err) {
       showToast('Error', err.message, 'error');
     } finally {
@@ -469,7 +553,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
     if (!frameCheck.ok) {
       editFrameStateRef.current = { state: 'misaligned', progress: currentProgress };
-      if (!editSamplesReady && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+      if (!editReadyRef.current && !editLockRef.current && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
         setEditCameraStatusText(FRAME_HINTS[frameCheck.reason]);
         setEditCameraStatusColor('var(--accent-danger)');
       }
@@ -477,78 +561,94 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       editFrameStateRef.current = { state: 'scanning', progress: currentProgress };
     }
 
-    if (detection && detection.embedding) {
-      const total = BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
-      if (editSamplesRef.current.length >= total) {
-        // Cukup sampel
-      } else if (frameCheck.ok) { // Hanya proses jika berada di dalam bingkai
-        const now = performance.now();
-        if (isGoodFrame(detection) && (now - editLastSampleTimeRef.current >= BIOMETRIC_CONFIG.ENROLL_MIN_INTERVAL_MS)) {
-          editLastSampleTimeRef.current = now;
-          editSamplesRef.current.push(Array.from(detection.embedding));
-          const count = editSamplesRef.current.length;
-          
-          if (count < total) {
-            setEditCameraStatusText(`Mengambil sampel ${count}/${total}, tatap lurus...`);
-            setEditCameraStatusColor('var(--accent-warning)');
-          } else {
-            const templateResult = buildTemplateDetailed(editSamplesRef.current);
-            if (!templateResult) return;
+    if (detection && detection.embedding && frameCheck.ok && !editReadyRef.current && !editLockRef.current) {
+      const now = performance.now();
+      const res = selectEnrollmentFrames(editCollectorRef.current, detection, now);
 
-            if (templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
-              setEditCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
-              setEditCameraStatusColor('var(--accent-warning)');
-              editSamplesRef.current = [];
-              setEditSamplesReady(false);
-              return;
+      if (res.status === 'paused') {
+        setEditCameraStatusText(res.message || 'Arahkan wajah ke dalam bingkai...');
+        setEditCameraStatusColor('var(--accent-warning)');
+      } else if (res.status === 'collecting') {
+        setEditCameraStatusText(res.promptText || `Mengambil sampel ${res.frameCount}/${res.targetFrames}`);
+        setEditCameraStatusColor('var(--accent-warning)');
+        editFrameStateRef.current = { state: 'scanning', progress: res.progress };
+      } else if (res.status === 'low_consistency') {
+        setEditCameraStatusText('Wajah terlalu banyak bergerak (konsistensi < 0.90). Mengulang...');
+        setEditCameraStatusColor('var(--accent-warning)');
+        editCollectorRef.current = createEnrollmentCollector();
+        setEditSamplesReady(false);
+      } else if (res.status === 'timeout') {
+        setEditCameraStatusText('Waktu pendaftaran habis. Mengulang...');
+        setEditCameraStatusColor('var(--accent-warning)');
+        editCollectorRef.current = createEnrollmentCollector();
+        setEditSamplesReady(false);
+      } else if (res.status === 'complete') {
+        editLockRef.current = true;
+        const total = res.frames?.length ?? res.frameCount ?? res.targetFrames ?? BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT;
+        const templateResult = {
+          vector: res.vector,
+          consistency: res.consistency,
+          template_version: res.template_version || 2
+        };
+
+        editCurrentDescriptorRef.current = Array.from(templateResult.vector);
+
+        (async () => {
+          try {
+            const allMasters = await getAllMasterVectors();
+            let bestSim = 0, bestName = '';
+            const currentVec = templateResult.vector;
+            for (const m of allMasters) {
+              if (String(m.employee_id) === String(editingEmp.id)) continue;
+              const vec = m.descriptor_json;
+              if (!Array.isArray(vec) || vec.length !== 1024) continue;
+              const sim = cosine(currentVec, vec);
+              if (sim > bestSim) { bestSim = sim; bestName = m.name; }
             }
-
-            editCurrentDescriptorRef.current = Array.from(templateResult.vector);
-            
-            (async () => {
-              try {
-                const allMasters = await getAllMasterVectors();
-                let bestSim = 0, bestName = '';
-                for (const m of allMasters) {
-                  if (String(m.employee_id) === String(editingEmp.id)) continue;
-                  const vec = m.descriptor_json;
-                  if (!Array.isArray(vec) || vec.length !== 1024) continue;
-                  const sim = cosine(finalTemplate, vec);
-                  if (sim > bestSim) { bestSim = sim; bestName = m.name; }
-                }
-                if (isOnline && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
-                  setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
-                  setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
-                  setEditCameraStatusColor('var(--accent-error)');
-                } else {
-                  setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
-                  setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
-                  setEditCameraStatusColor('var(--accent-success)');
-                  setEditSamplesReady(true);
-                  if (useFullscreen) {
-                    setTimeout(() => {
-                      setEditScannerOpen(false);
-                    }, 1500);
-                  }
-                }
-              } catch (_) {
-                setEditFaceCheckResult(null);
-                setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
-                setEditCameraStatusColor('var(--accent-success)');
-                setEditSamplesReady(true);
-                if (useFullscreen) {
-                  setTimeout(() => {
-                    setEditScannerOpen(false);
-                  }, 1500);
-                }
+            if (isOnlineRef.current && bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
+              setEditFaceCheckResult({ isDuplicate: true, matchedName: bestName, similarity: bestSim });
+              setEditCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%). Jika saudara kandung / keliru, laporkan ke mandor.`);
+              setEditCameraStatusColor('var(--accent-error)');
+              queueScanAttempt({
+                attempt_type: 'ENROLL-DUPLICATE',
+                matched_cosine: parseFloat(bestSim.toFixed(4)),
+                threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
+                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                outcome: 'NOT_MATCHED'
+              }).catch(() => { });
+              setTimeout(() => {
+                editCollectorRef.current = createEnrollmentCollector();
+                editLockRef.current = false;
+              }, 4000);
+            } else {
+              setEditFaceCheckResult({ isDuplicate: false, matchedName: '', similarity: bestSim });
+              setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+              setEditCameraStatusColor('var(--accent-success)');
+              editReadyRef.current = true;
+              setEditSamplesReady(true);
+              if (useFullscreenRef.current) {
+                setTimeout(() => {
+                  setEditScannerOpen(false);
+                }, 1500);
               }
-            })();
+            }
+          } catch (_) {
+            setEditFaceCheckResult(null);
+            setEditCameraStatusText(`✓ Sampel Lengkap (${total}/${total})`);
+            setEditCameraStatusColor('var(--accent-success)');
+            editReadyRef.current = true;
+            setEditSamplesReady(true);
+            if (useFullscreenRef.current) {
+              setTimeout(() => {
+                setEditScannerOpen(false);
+              }, 1500);
+            }
           }
-        }
+        })();
       }
     }
 
-    if (editSamplesReady) {
+    if (editReadyRef.current) {
       editFrameStateRef.current = { state: 'success', progress: 1 };
     }
 
@@ -564,11 +664,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         ctx.fill();
       }
     }
-  }, [editingEmp.id, EDIT_DUPLICATE_THRESHOLD]);
+  }, [editingEmp.id]);
 
   // Callback saat tidak ada wajah
   const onEditNoFace = React.useCallback(() => {
-    if (!editSamplesReady && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+    if (!editReadyRef.current && !editLockRef.current && !editSamplesReady && editSamplesRef.current.length < BIOMETRIC_CONFIG.ENROLL_SAMPLE_COUNT) {
+      if (editCollectorRef.current) {
+        selectEnrollmentFrames(editCollectorRef.current, null, performance.now());
+      }
       setEditCameraStatusText('Menunggu Wajah di Kamera...');
       setEditCameraStatusColor('var(--accent-warning)');
     }
@@ -607,7 +710,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setEditPhotoPreview(imgUrl);
     setEditCameraStatusText('Menganalisis Wajah dari Foto...');
     setEditCameraStatusColor('var(--accent-warning)');
-    
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = async () => {
@@ -677,10 +780,13 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setEditPhotoPreview(null);
     editCurrentDescriptorRef.current = null;
     setEditFaceCheckResult(null);
+    editReadyRef.current = false;
+    editLockRef.current = false;
     setEditSamplesReady(false);
     setEditScannerOpen(false);
     editSamplesRef.current = [];
     editLastSampleTimeRef.current = 0;
+    editCollectorRef.current = createEnrollmentCollector();
     setEditModalOpen(true);
   };
 
@@ -761,9 +867,16 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           if (empErr) throw empErr;
 
           if (descriptorJson) {
+            const csVal = vectorChecksum(descriptorJson);
             const { error: descErr } = await supabase
               .from('master_descriptors')
-              .upsert({ employee_id: editingEmp.id, descriptor_json: descriptorJson }, { onConflict: 'employee_id' });
+              .upsert({
+                employee_id: editingEmp.id,
+                descriptor_json: descriptorJson,
+                updated_at: new Date().toISOString(),
+                template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+                vector_checksum: csVal
+              }, { onConflict: 'employee_id' });
             if (descErr) throw descErr;
           }
           cloudOk = true;
@@ -806,6 +919,16 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       }
 
       if (descriptorJson && editCurrentDescriptorRef.current) {
+        const csVal = vectorChecksum(editCurrentDescriptorRef.current);
+        if (editFormMode === 'camera' && editVideoRef.current) {
+          const thumb = captureEnrollmentPhoto(editVideoRef.current, editFaceCheckResult?.boundingBox, editFacingMode);
+          if (thumb?.base64) {
+            await saveEmployeeFaceThumb(editingEmp.id, thumb.base64);
+          }
+        } else if (editPhotoPreview) {
+          await saveEmployeeFaceThumb(editingEmp.id, editPhotoPreview);
+        }
+
         await cacheUserMasterVector({
           employee_id: editingEmp.id,
           nik: payload.nik,
@@ -818,6 +941,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           status_perkawinan: payload.status_perkawinan,
           region: editingEmp.region || '',
           descriptor_json: editCurrentDescriptorRef.current,
+          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+          vector_checksum: csVal,
           has_master_biometric: true
         });
       }
@@ -830,7 +955,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           descriptor_json: editUpdateBiometrics ? editCurrentDescriptorRef.current : (editingEmp.descriptor_json || null),
           is_synced: cloudOk
         });
-      } catch (_) {}
+      } catch (_) { }
 
       showToast(
         cloudOk ? 'Berhasil' : 'Tersimpan Lokal',
@@ -840,6 +965,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
       setEditModalOpen(false);
       refreshEmployees();
+      window.dispatchEvent(new CustomEvent('refresh_employees', { detail: { employeeId: editingEmp.id } }));
     } catch (err) {
       showToast('Error', err.message, 'error');
     } finally {
@@ -855,7 +981,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       onConfirm: async () => {
         try {
           const isOfflineEmp = String(emp.id).startsWith('off_') || String(emp.id).startsWith('tmp_');
-          
+
           if (Capacitor.isNativePlatform()) {
             const { sqliteRemovePendingEmployee } = await import('../services/sqliteService');
             await sqliteRemovePendingEmployee(emp.id);
@@ -889,11 +1015,12 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               }
             }
           }
-          
+
           showToast('Penghapusan Berhasil', 'Sukses menghapus karyawan beserta log absensinya.', 'success');
           refreshEmployees();
           if (refreshLogs) refreshLogs();
           window.dispatchEvent(new Event('refresh_logs'));
+          window.dispatchEvent(new CustomEvent('refresh_employees'));
         } catch (err) {
           showToast('Error Sistem', err.message, 'error');
         }
@@ -912,15 +1039,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
     if (lines.length === 0) return [];
-    
+
     const delimiter = lines[0].includes(';') ? ';' : ',';
     const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
-    
+
     const result = [];
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''));
       if (values.length < headers.length) continue;
-      
+
       const obj = {};
       headers.forEach((header, index) => {
         obj[header] = values[index];
@@ -967,10 +1094,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       showToast('File CSV Kosong', 'Harap pilih file CSV terlebih dahulu.', 'error');
       return;
     }
-    
+
     setImporting(true);
     setImportProgress({ current: 0, total: 0, status: 'Membaca file CSV...' });
-    
+
     try {
       const csvText = await csvFile.text();
       const rows = parseCSV(csvText);
@@ -979,37 +1106,37 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         setImporting(false);
         return;
       }
-      
+
       setImportProgress({ current: 0, total: rows.length, status: 'Memulai pencocokan foto...' });
-      
+
       let successCount = 0;
       let failCount = 0;
-      
+
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const nik = row.nik || row.employee_id;
         const name = row.name || row.nama;
-        
+
         if (!nik || !name) {
           failCount++;
           continue;
         }
-        
+
         setImportProgress(prev => ({
           ...prev,
           current: i + 1,
           status: `Memproses ${name} (NIK: ${nik})...`
         }));
-        
+
         // Find matching photo
         const photoFile = photoFiles.find(file => {
           const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
           return baseName.trim() === String(nik).trim();
         });
-        
+
         let descriptorJson = null;
         let hasMasterBiometric = false;
-        
+
         if (photoFile) {
           const embedding = await processImageFileForEmbedding(photoFile);
           if (embedding) {
@@ -1017,7 +1144,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             hasMasterBiometric = true;
           }
         }
-        
+
         const employeePayload = {
           nik: String(nik).trim(),
           name: String(name).trim(),
@@ -1029,7 +1156,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           status_perkawinan: row.status_perkawinan || 'Lajang',
           has_master_biometric: hasMasterBiometric
         };
-        
+
         try {
           // 1. Insert/Upsert into Supabase
           const { data: insertedEmp, error: dbErr } = await supabase
@@ -1037,11 +1164,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             .upsert(employeePayload, { onConflict: 'nik' })
             .select('id')
             .single();
-            
+
           if (dbErr) throw dbErr;
-          
+
           const employeeId = insertedEmp?.id;
-          
+
           // 2. If biometrics are ready, upsert descriptor
           if (employeeId && descriptorJson) {
             const { error: descErr } = await supabase
@@ -1049,7 +1176,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               .upsert({ employee_id: employeeId, descriptor_json: descriptorJson });
             if (descErr) console.warn('Warning: Failed to save master descriptor:', descErr.message);
           }
-          
+
           // 3. Cache locally in SQLite/IndexedDB
           await cacheUserMasterVector({
             employee_id: employeeId,
@@ -1064,14 +1191,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             descriptor_json: descriptorJson,
             has_master_biometric: hasMasterBiometric
           });
-          
+
           successCount++;
         } catch (err) {
           console.error(`Gagal menyimpan karyawan NIK: ${nik}`, err);
           failCount++;
         }
       }
-      
+
       showToast('Import Selesai', `Berhasil mengimpor ${successCount} karyawan. Gagal: ${failCount}`, 'success');
       refreshEmployees();
       setImportModalOpen(false);
@@ -1094,7 +1221,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     const matchesSearch =
       emp.nik?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.name?.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
     const matchesStatusTk = filterStatusTk ? emp.status_tk === filterStatusTk : true;
     const matchesStatusPerkawinan = filterStatusPerkawinan ? emp.status_perkawinan === filterStatusPerkawinan : true;
     const matchesKebun = filterKebun ? emp.nama_kebun === filterKebun : true;
@@ -1117,9 +1244,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       showToast('Data Kosong', 'Tidak ada data untuk diekspor.', 'warning');
       return;
     }
-    
+
     const headers = ['No.', 'NIK', 'Nama', 'Afdeling', 'Nama Kebun', 'Jabatan', 'Status TK', 'Status Pernikahan', 'Biometrik Siap'];
-    
+
     const rows = filteredEmployees.map((emp, index) => [
       (index + 1).toString(),
       emp.nik || '',
@@ -1535,6 +1662,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                         </TableCell>
                         <TableCell data-label="Aksi" className="no-print">
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <button type="button" onClick={() => openPreviewModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Lihat Foto Wajah" aria-label="Lihat Foto Wajah">
+                              <Eye size={17} color="var(--accent-primary)" />
+                            </button>
                             {!isBiometrikReady && (
                               <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Scan Wajah">
                                 <Camera size={17} color="var(--accent-primary)" />
@@ -1686,7 +1816,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             {/* Row 3: Filter bar */}
             <div className="filter-bar">
               <div className="filter-bar-search">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
                 <input
                   type="text"
                   placeholder="Cari NIK / Nama..."
@@ -1778,6 +1908,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                           </TableCell>
                           <TableCell data-label="Aksi" className="no-print">
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <button type="button" onClick={() => openPreviewModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Lihat Foto Wajah" aria-label="Lihat Foto Wajah">
+                                <Eye size={17} color="var(--accent-primary)" />
+                              </button>
                               {!isBiometrikReady && (
                                 <button type="button" onClick={() => openScanModal(emp)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }} title="Scan Wajah">
                                   <Camera size={17} color="var(--accent-primary)" />
@@ -1877,6 +2010,29 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 <span>Status:</span>
                 <strong style={{ color: scanCameraStatusColor }}>{scanCameraStatusText}</strong>
               </div>
+              {scanFailCount >= 2 && scanMode !== 'frontal_only' && (
+                <div style={{ marginTop: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid var(--accent-warning)', borderRadius: '6px', fontSize: '0.8rem' }}>
+                  <div style={{ color: 'var(--accent-warning)', fontWeight: 'bold', marginBottom: '4px' }}>
+                    Pendaftaran berulang kali gagal?
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.75rem' }}>
+                    Gunakan mode lurus saja (hanya 6 frame frontal). Akurasi pada cahaya sore hari mungkin sedikit berkurang.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ width: '100%', fontSize: '0.8rem', padding: '6px', background: 'var(--accent-warning)', color: '#000', fontWeight: 'bold' }}
+                    onClick={() => {
+                      setScanMode('frontal_only');
+                      scanCollectorRef.current = createEnrollmentCollector('frontal_only');
+                      scanLockRef.current = false;
+                      setScanCameraStatusText('Mode lurus aktif: tatap lurus ke kamera');
+                    }}
+                  >
+                    Daftar Mode Lurus Saja
+                  </button>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem' }}>
                 <button type="button" className="btn" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setScanModalOpen(false)}>Batal</button>
                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isScanningSubmit || !scanSamplesReady}>
@@ -1899,6 +2055,31 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           onToggleFacing={() => setScanFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
           hint={scanCameraStatusText}
           hintTone={scanFaceCheckResult?.isDuplicate ? 'error' : (scanSamplesReady ? 'success' : 'info')}
+          footer={
+            scanFailCount >= 2 && scanMode !== 'frontal_only' ? (
+              <div style={{ padding: '8px 12px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid var(--accent-warning)', borderRadius: '6px', textAlign: 'center' }}>
+                <div style={{ color: 'var(--accent-warning)', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>
+                  Pendaftaran berulang kali gagal?
+                </div>
+                <div style={{ color: '#fff', fontSize: '0.75rem', marginBottom: '8px' }}>
+                  Gunakan mode lurus saja (hanya 6 frame frontal). Akurasi sore hari mungkin sedikit berkurang.
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ width: '100%', fontSize: '0.8rem', padding: '8px', background: 'var(--accent-warning)', color: '#000', fontWeight: 'bold' }}
+                  onClick={() => {
+                    setScanMode('frontal_only');
+                    scanCollectorRef.current = createEnrollmentCollector('frontal_only');
+                    scanLockRef.current = false;
+                    setScanCameraStatusText('Mode lurus aktif: tatap lurus ke kamera');
+                  }}
+                >
+                  Daftar Mode Lurus Saja
+                </button>
+              </div>
+            ) : null
+          }
         >
           <FaceScanSurface
             videoRef={scanVideoRef}
@@ -1965,7 +2146,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                   <option value="Duda/Janda">Duda/Janda</option>
                 </select>
               </div>
-              
+
               <div className="form-group" style={{ marginTop: '1rem', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: editUpdateBiometrics ? '10px' : '0' }}>
                   <input type="checkbox" checked={editUpdateBiometrics} onChange={(e) => setEditUpdateBiometrics(e.target.checked)} />
@@ -2011,7 +2192,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                                 }}
                               >
                                 <span style={{ color: '#10b981', fontWeight: 700, fontSize: '0.85rem' }}>
-                                  ✓ 7 Sampel Wajah Berhasil Diambil
+                                  ✓ Sampel Wajah Berhasil Diambil
                                 </span>
                                 <button
                                   type="button"
@@ -2019,6 +2200,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                                   onClick={() => {
                                     editSamplesRef.current = [];
                                     editCurrentDescriptorRef.current = null;
+                                    editReadyRef.current = false;
+                                    editLockRef.current = false;
+                                    editCollectorRef.current = createEnrollmentCollector();
                                     setEditSamplesReady(false);
                                     setEditScannerOpen(true);
                                   }}
@@ -2041,6 +2225,9 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                                 onClick={() => {
                                   editSamplesRef.current = [];
                                   editCurrentDescriptorRef.current = null;
+                                  editReadyRef.current = false;
+                                  editLockRef.current = false;
+                                  editCollectorRef.current = createEnrollmentCollector();
                                   setEditSamplesReady(false);
                                   setEditScannerOpen(true);
                                 }}
@@ -2141,16 +2328,16 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold' }}>Import Massal CSV & Foto</h3>
               <button type="button" onClick={() => !importing && setImportModalOpen(false)} style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '1.2rem', cursor: 'pointer' }}>&times;</button>
             </div>
-            
+
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', background: 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-primary)' }}>
               <strong>Petunjuk CSV:</strong> File CSV harus memiliki header <code>nik</code> dan <code>name</code>. Nama file foto harus sama dengan NIK (contoh: <code>12345.jpg</code> untuk NIK 12345).
             </div>
 
             <div className="form-group" style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', fontSize: '0.85rem' }}>1. Pilih File CSV Karyawan</label>
-              <input 
-                type="file" 
-                accept=".csv" 
+              <input
+                type="file"
+                accept=".csv"
                 disabled={importing}
                 onChange={(e) => setCsvFile(e.target.files[0])}
                 style={{ width: '100%', padding: '8px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-primary)', color: 'inherit' }}
@@ -2159,10 +2346,10 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
               <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', fontSize: '0.85rem' }}>2. Pilih Foto Wajah Karyawan (Bisa Banyak File)</label>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 multiple
-                accept="image/*" 
+                accept="image/*"
                 disabled={importing}
                 onChange={(e) => setPhotoFiles(Array.from(e.target.files))}
                 style={{ width: '100%', padding: '8px', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-primary)', color: 'inherit' }}
@@ -2190,18 +2377,18 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             )}
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '15px' }}>
-              <button 
-                type="button" 
-                className="btn" 
+              <button
+                type="button"
+                className="btn"
                 disabled={importing}
                 onClick={() => setImportModalOpen(false)}
                 style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', padding: '8px 16px', width: 'auto' }}
               >
                 Batal
               </button>
-              <button 
-                type="button" 
-                className="btn btn-primary" 
+              <button
+                type="button"
+                className="btn btn-primary"
                 disabled={importing || !csvFile}
                 onClick={handleStartImport}
                 style={{ padding: '8px 16px', width: 'auto' }}
@@ -2212,6 +2399,14 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
           </div>
         </div>
       )}
+
+      {/* Face Photo Preview Modal */}
+      <EmployeeFacePreviewModal
+        isOpen={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        employee={previewEmp}
+        onReScan={(emp) => openScanModal(emp)}
+      />
     </div>
   );
 }

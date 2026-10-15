@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 import { supabase } from '../supabaseClient';
-import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity, toVectorArray } from '../db';
-import { buildTemplateDetailed, BIOMETRIC_CONFIG } from '../biometrics';
+import { cacheUserMasterVector, cacheGeometricVector, getAllMasterVectors, cosineSimilarity, toVectorArray, queueScanAttempt, saveEmployeeFaceThumb } from '../db';
+import { buildTemplateDetailed, BIOMETRIC_CONFIG, vectorChecksum, createEnrollmentCollector, selectEnrollmentFrames } from '../biometrics';
+import { captureEnrollmentPhoto } from '../utils/enrollmentPhoto';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { useAuth } from '../context/AuthContext';
@@ -58,6 +59,8 @@ export default function TabEmployeeManagement({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // null = belum dicek | { isDuplicate, matchedName, matchedNik, similarity } = hasil cek
   const [faceCheckResult, setFaceCheckResult] = useState(null);
+  const [regFailCount, setRegFailCount] = useState(0);
+  const [regMode, setRegMode] = useState('multi_pose');
   // Cosine >= 0.88 = batas genuine minimum pada embedding 1024-D FaceRes.
   // Mencegah satu wajah didaftarkan ke dua karyawan berbeda.
   const DUPLICATE_THRESHOLD = 0.88;
@@ -67,7 +70,9 @@ export default function TabEmployeeManagement({
 
   const currentEmpDescriptorRef = useRef(null);
   const descriptorHistoryRef = useRef([]);
+  const enrollmentCollectorRef = useRef(createEnrollmentCollector());
   const currentEmpGFVRef = useRef(null); // 40-d Geometric Feature Vector
+  const enrollmentThumbRef = useRef(null);
   const regVideoRef = useRef(null);
   const regCanvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -89,45 +94,82 @@ export default function TabEmployeeManagement({
       regFrameStateRef.current = { state: 'scanning', progress: 0.5 };
     }
 
-    if (detection?.embedding && frameCheck.ok) {
-      const newVec = Array.from(detection.embedding);
+    if (detection?.embedding && frameCheck.ok && !photoPreview) {
+      const now = performance.now();
+      const res = selectEnrollmentFrames(enrollmentCollectorRef.current, detection, now);
 
-      // Multi-Template Averaging (Buffer 5 frames)
-      const hist = descriptorHistoryRef.current;
-      hist.push(newVec);
-      if (hist.length > 5) hist.shift();
-
-      const templateResult = buildTemplateDetailed(hist);
-      if (!templateResult) return;
-
-      if (hist.length >= 5 && templateResult.consistency < BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY) {
-        setCameraStatusText('Wajah terlalu banyak bergerak. Tahan posisi...');
+      if (res.status === 'paused') {
+        setCameraStatusText(res.message || 'Arahkan wajah ke dalam bingkai...');
         setCameraStatusColor('var(--accent-warning)');
-        return;
-      }
+      } else if (res.status === 'collecting') {
+        setCameraStatusText(res.promptText || `Mengambil sampel ${res.frameCount}/${res.targetFrames}`);
+        setCameraStatusColor('var(--accent-warning)');
+        regFrameStateRef.current = { state: 'scanning', progress: res.progress };
+      } else if (res.status === 'low_consistency' || res.status === 'timeout') {
+        const failMsg = res.message || (res.status === 'timeout' ? 'Waktu pendaftaran habis. Mengulang...' : 'Wajah terlalu banyak bergerak. Mengulang...');
+        setCameraStatusText(failMsg);
+        setCameraStatusColor('var(--accent-error)');
+        setRegFailCount(prev => prev + 1);
+        queueScanAttempt({
+          attempt_type: 'ENROLL',
+          outcome: 'FAILED',
+          max_cosine: null,
+          frames_used: res.framesCount || enrollmentCollectorRef.current.frames.length,
+          threshold_used: BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY,
+          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION
+        }).catch(() => {});
+        enrollmentCollectorRef.current = createEnrollmentCollector(regMode);
+      } else if (res.status === 'complete') {
+        setRegFailCount(0);
+        const templateResult = {
+          vector: res.vector,
+          consistency: res.consistency,
+          template_version: res.template_version || 1
+        };
+        queueScanAttempt({
+          attempt_type: 'ENROLL',
+          outcome: 'SUCCESS',
+          max_cosine: parseFloat(res.consistency.toFixed(4)),
+          frames_used: res.frames.length,
+          threshold_used: BIOMETRIC_CONFIG.ENROLL_MIN_CONSISTENCY,
+          template_version: res.template_version
+        }).catch(() => {});
 
-      currentEmpDescriptorRef.current = Array.from(templateResult.vector);
-      currentEmpGFVRef.current = [];
+        currentEmpDescriptorRef.current = Array.from(templateResult.vector);
+        currentEmpGFVRef.current = [];
 
-      // Cek duplikasi wajah secara real-time (async, non-blocking)
+        // Capture face thumbnail for local cache & preview
+        const thumb = captureEnrollmentPhoto(regVideoRef.current, boundingBox, cameraFacingMode);
+        if (thumb?.base64) {
+          enrollmentThumbRef.current = thumb.base64;
+        }
+
+        // Cek duplikasi wajah secara real-time (async, non-blocking)
       (async () => {
         try {
           const allMasters = await getAllMasterVectors();
           let bestSim = 0, bestName = '', bestNik = '';
+          const currentVec = templateResult.vector;
           for (const m of allMasters) {
             const vec = m.descriptor_json;
-            if (!Array.isArray(vec) || vec.length !== avgVec.length) continue;
-            // Gunakan avgVec (yang stabil) untuk cek duplikasi
-            const sim = cosineSimilarity(avgVec, vec);
+            if (!Array.isArray(vec) || vec.length !== currentVec.length) continue;
+            const sim = cosineSimilarity(currentVec, vec);
             if (sim > bestSim) { bestSim = sim; bestName = m.name; bestNik = m.nik; }
           }
-          if (bestSim >= DUPLICATE_THRESHOLD) {
+          if (bestSim >= BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD) {
             setFaceCheckResult({ isDuplicate: true, matchedName: bestName, matchedNik: bestNik, similarity: bestSim });
-            setCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%)`);
+            setCameraStatusText(`⚠️ WAJAH SUDAH TERDAFTAR: ${bestName} (${(bestSim * 100).toFixed(1)}%). Jika saudara kandung / keliru, laporkan ke mandor.`);
             setCameraStatusColor('var(--accent-error)');
+            queueScanAttempt({
+              attempt_type: 'ENROLL-DUPLICATE',
+              matched_cosine: parseFloat(bestSim.toFixed(4)),
+              threshold_used: BIOMETRIC_CONFIG.DUPLICATE_COSINE_THRESHOLD,
+              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              outcome: 'NOT_MATCHED'
+            }).catch(() => {});
           } else {
             setFaceCheckResult({ isDuplicate: false, matchedName: '', matchedNik: '', similarity: bestSim });
-            setCameraStatusText(`✓ Wajah Baru Terdeteksi [Valid — Belum Terdaftar]`);
+            setCameraStatusText(`✓ Wajah Baru Terdeteksi (Valid, Belum Terdaftar)`);
             setCameraStatusColor('var(--accent-success)');
             regFrameStateRef.current = { state: 'success', progress: 1 };
             if (useFullscreen) {
@@ -150,6 +192,7 @@ export default function TabEmployeeManagement({
         }
       })();
     }
+  }
 
     // Menggambar 478 Mesh Points ke canvas overlay
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -168,12 +211,12 @@ export default function TabEmployeeManagement({
 
   // Callback saat tidak ada wajah di register mode
   const onRegNoFace = useCallback(() => {
-    currentEmpDescriptorRef.current = null;
-    descriptorHistoryRef.current = [];
-    currentEmpGFVRef.current = null;
+    if (enrollmentCollectorRef.current) {
+      selectEnrollmentFrames(enrollmentCollectorRef.current, null, performance.now());
+    }
     setFaceCheckResult(null);
     regFrameStateRef.current = { state: 'idle', progress: 0 };
-    setCameraStatusText('Menunggu Wajah di Kamera...');
+    setCameraStatusText('Arahkan wajah ke dalam bingkai...');
     setCameraStatusColor('var(--accent-warning)');
   }, []);
 
@@ -369,14 +412,22 @@ export default function TabEmployeeManagement({
         });
       }
 
+      // Simpan Thumbnail Foto Wajah jika ada
+      if (enrollmentThumbRef.current) {
+        await saveEmployeeFaceThumb(tempId, enrollmentThumbRef.current);
+      }
+
       // Simpan Vektor Wajah (Biometrik) secara lokal
       if (currentEmpDescriptorRef.current) {
+        const cs = vectorChecksum(currentEmpDescriptorRef.current);
         const { cacheUserMasterVector } = await import('../db');
         await cacheUserMasterVector({
           employee_id: tempId,
           ...createdEmp,
           descriptor_json: currentEmpDescriptorRef.current,
-          geometric_descriptor_json: currentEmpGFVRef.current || null
+          geometric_descriptor_json: currentEmpGFVRef.current || null,
+          template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+          vector_checksum: cs
         });
       }
 
@@ -401,9 +452,11 @@ export default function TabEmployeeManagement({
       currentEmpDescriptorRef.current = null;
       descriptorHistoryRef.current = [];
       currentEmpGFVRef.current = null;
+      enrollmentThumbRef.current = null;
       setFaceCheckResult(null);
 
       refreshEmployees();
+      window.dispatchEvent(new CustomEvent('refresh_employees'));
     } catch (err) {
       console.error('[ADD EMP ERROR]:', err);
       showToast('Gagal Simpan', err.message || 'Terjadi kesalahan sistem.', 'error');
@@ -754,6 +807,29 @@ export default function TabEmployeeManagement({
                   <span>Status Biometrik Master:</span>
                   <strong style={{ color: cameraStatusColor }}>{cameraStatusText}</strong>
                 </div>
+
+                {regFailCount >= 2 && regMode !== 'frontal_only' && (
+                  <div style={{ marginTop: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid var(--accent-warning)', borderRadius: '6px', fontSize: '0.8rem' }}>
+                    <div style={{ color: 'var(--accent-warning)', fontWeight: 'bold', marginBottom: '4px' }}>
+                      Pendaftaran berulang kali gagal?
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.75rem' }}>
+                      Gunakan mode lurus saja (hanya 6 frame frontal). Akurasi pada cahaya sore hari mungkin sedikit berkurang.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ width: '100%', fontSize: '0.8rem', padding: '6px', background: 'var(--accent-warning)', color: '#000', fontWeight: 'bold' }}
+                      onClick={() => {
+                        setRegMode('frontal_only');
+                        enrollmentCollectorRef.current = createEnrollmentCollector('frontal_only');
+                        setCameraStatusText('Mode lurus aktif: tatap lurus ke kamera');
+                      }}
+                    >
+                      Daftar Mode Lurus Saja
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
@@ -790,6 +866,30 @@ export default function TabEmployeeManagement({
           onToggleFacing={() => setCameraFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
           hint={cameraStatusText}
           hintTone={faceCheckResult?.isDuplicate ? 'error' : (currentEmpDescriptorRef.current ? 'success' : 'info')}
+          footer={
+            regFailCount >= 2 && regMode !== 'frontal_only' ? (
+              <div style={{ padding: '8px 12px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid var(--accent-warning)', borderRadius: '6px', textAlign: 'center' }}>
+                <div style={{ color: 'var(--accent-warning)', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>
+                  Pendaftaran berulang kali gagal?
+                </div>
+                <div style={{ color: '#fff', fontSize: '0.75rem', marginBottom: '8px' }}>
+                  Gunakan mode lurus saja (hanya 6 frame frontal). Akurasi sore hari mungkin sedikit berkurang.
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ width: '100%', fontSize: '0.8rem', padding: '8px', background: 'var(--accent-warning)', color: '#000', fontWeight: 'bold' }}
+                  onClick={() => {
+                    setRegMode('frontal_only');
+                    enrollmentCollectorRef.current = createEnrollmentCollector('frontal_only');
+                    setCameraStatusText('Mode lurus aktif: tatap lurus ke kamera');
+                  }}
+                >
+                  Daftar Mode Lurus Saja
+                </button>
+              </div>
+            ) : null
+          }
         >
           <FaceScanSurface
             videoRef={regVideoRef}

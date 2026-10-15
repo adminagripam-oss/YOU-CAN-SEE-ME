@@ -3,6 +3,7 @@ import { getUnsyncedLogs, removeSyncedLogs, db, writeToBackupStorage, updateSync
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { BIOMETRIC_CONFIG, vectorChecksum } from './biometrics';
 
 let isSyncing = false;
 
@@ -280,7 +281,9 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       for (const id of syncedTextIds) {
         const logToPhoto = textPendingLogs.find(l => l.id === id);
         if (logToPhoto && logToPhoto.path_foto_lokal) {
-          photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+          if (!photoPendingLogs.some(p => p.id === logToPhoto.id)) {
+            photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+          }
         } else {
           noPhotoIds.push(id);
         }
@@ -303,11 +306,21 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           if (log.path_foto_lokal && (log.path_foto_lokal.startsWith('data:image/') || log.path_foto_lokal.length > 500)) {
             base64String = log.path_foto_lokal;
           } else if (log.path_foto_lokal) {
-            // Read base64 from Capacitor Filesystem (native platform)
-            const readResult = await Filesystem.readFile({
-              path: log.path_foto_lokal
-            });
-            base64String = readResult.data;
+            try {
+              // Read base64 from Capacitor Filesystem (native platform)
+              const readResult = await Filesystem.readFile({
+                path: log.path_foto_lokal
+              });
+              base64String = readResult.data;
+            } catch (fsErr) {
+              // Fallback to Directory.Data using filename
+              const fileName = log.path_foto_lokal.split('/').pop();
+              const readResult = await Filesystem.readFile({
+                path: fileName,
+                directory: Directory.Data
+              });
+              base64String = readResult.data;
+            }
           }
 
           if (!base64String) {
@@ -345,12 +358,34 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           const publicUrl = publicUrlData.publicUrl;
 
           // Requirement 3: Update text log in server with photo url and verify response
-          const { data: photoUpdateData, error: photoUpdateErr } = await supabase
-            .from('attendance_logs')
-            .update({ path_foto: publicUrl })
-            .eq('employee_id', log.employee_id)
-            .eq('timestamp', log.timestamp)
-            .select();
+          // Resolve real server ID to ensure reliable primary-key match (preventing timestamptz string format mismatch)
+          let realServerId = localToRealIdMap[log.id];
+          if (!realServerId && log.id && !String(log.id).startsWith('offline_') && !String(log.id).startsWith('temp_') && !isNaN(Number(log.id))) {
+            realServerId = Number(log.id);
+          }
+          if (!realServerId) {
+            const { data: existingLog } = await supabase
+              .from('attendance_logs')
+              .select('id')
+              .eq('employee_id', log.employee_id)
+              .eq('timestamp', log.timestamp)
+              .limit(1);
+            if (existingLog && existingLog.length > 0) {
+              realServerId = existingLog[0].id;
+              localToRealIdMap[log.id] = realServerId;
+            }
+          }
+
+          let updateQuery = supabase.from('attendance_logs').update({ path_foto: publicUrl });
+          if (realServerId) {
+            updateQuery = updateQuery.eq('id', realServerId);
+          } else {
+            updateQuery = updateQuery
+              .eq('employee_id', log.employee_id)
+              .eq('timestamp', log.timestamp);
+          }
+
+          const { data: photoUpdateData, error: photoUpdateErr } = await updateQuery.select();
 
           if (photoUpdateErr) {
             console.warn(`[Auto-Sync Step B] Failed to update path_foto in cloud for log ${log.id}:`, photoUpdateErr.message || photoUpdateErr);
@@ -362,13 +397,23 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
             await updateSyncStatus(log.id, null, 'done');
             await removeSyncedLogs([log.id]);
             
-            try {
-              await Filesystem.deleteFile({
-                path: log.path_foto_lokal
-              });
-              console.log(`[Auto-Sync Step C] Garbage collected local photo for log ${log.id}`);
-            } catch (delErr) {
-              console.warn(`[Auto-Sync Step C] Failed to delete local photo:`, delErr);
+            if (Capacitor.isNativePlatform() && log.path_foto_lokal && !log.path_foto_lokal.startsWith('data:image/')) {
+              try {
+                await Filesystem.deleteFile({
+                  path: log.path_foto_lokal
+                });
+                console.log(`[Auto-Sync Step C] Garbage collected local photo for log ${log.id}`);
+              } catch (delErr) {
+                try {
+                  const fileName = log.path_foto_lokal.split('/').pop();
+                  await Filesystem.deleteFile({
+                    path: fileName,
+                    directory: Directory.Data
+                  });
+                } catch (delErr2) {
+                  console.warn(`[Auto-Sync Step C] Failed to delete local photo:`, delErr2);
+                }
+              }
             }
 
             syncedPhotoCount++;
@@ -382,14 +427,22 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       }
     }
 
-    // Clean up local queue ONLY if is_synced is 1 (done by getUnsyncedLogs but let's clear them)
-    // We already removed them in Step A (no photo) and Step C (with photo).
+    // Purge local queue for all verified synced text logs
+    if (syncedTextIds.length > 0) {
+      await removeSyncedLogs(syncedTextIds);
+    }
     
     // Write sync action to public backup log
     if (Capacitor.isNativePlatform() && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
       const timestamp = new Date().toISOString();
       const syncLine = `[${timestamp}] [SYNC SUCCESS] Uploaded ${syncedTextIds.length} texts and ${syncedPhotoCount} photos to cloud.\n`;
       await writeToBackupStorage(syncLine);
+    }
+
+    if (syncedTextIds.length > 0 || syncedPhotoCount > 0) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('refresh_logs'));
+      }
     }
 
     if (showToast && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
@@ -564,23 +617,9 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
     if (!pendingEmpsRaw || pendingEmpsRaw.length === 0) return { count: 0 };
 
-    // --- LOGIKA CUT-OFF 22:00 ---
-    const waktuCutOff = new Date();
-    waktuCutOff.setHours(22, 0, 0, 0);
-    const batasCutOffTime = waktuCutOff.getTime();
-
-    const pendingEmps = pendingEmpsRaw.filter(emp => {
-      // employee queue table di db.js (employee_sync_queue) dan local_employee_sync_queue (SQLite)
-      // memiliki atribut created_at
-      if (!emp.created_at) return true;
-      return new Date(emp.created_at).getTime() <= batasCutOffTime;
-    });
-
-    if (pendingEmpsRaw.length > 0 && pendingEmps.length === 0) {
-      console.log(`[Auto-Sync Employees] ${pendingEmpsRaw.length} employee pending berada di luar cut-off (setelah 22:00). Ditunda hingga besok.`);
-      return { count: 0 };
-    }
-    // ----------------------------
+    // Master employee records are not constrained by shift checkout cut-off (PRD 3.3).
+    // They should sync whenever network connectivity is available.
+    const pendingEmps = pendingEmpsRaw;
 
     const { cacheUserMasterVector, db } = await import('./db');
 
@@ -617,9 +656,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         if (rpcError) {
           console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, rpcError.message);
+          await db.employee_sync_queue.updateError(emp.id, {
+            last_error_code: rpcError.code || 'RPC_ERROR',
+            last_error_message: rpcError.message,
+            last_error_step: 'employees_rpc'
+          });
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('agriface-toast', {
-              detail: { title: 'Error Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcError.message}`, type: 'error' }
+              detail: { title: 'Error Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: [${rpcError.code || 'RPC'}] ${rpcError.message}`, type: 'error' }
             }));
           }
           return false;
@@ -641,6 +685,11 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
         if (rpcData && rpcData.status === 'error') {
            console.warn(`[Sync Employee Error] Error dari RPC:`, rpcData.message);
+           await db.employee_sync_queue.updateError(emp.id, {
+             last_error_code: 'RPC_RETURN_ERROR',
+             last_error_message: rpcData.message || 'RPC menolak data karyawan',
+             last_error_step: 'employees_rpc'
+           });
            if (typeof window !== 'undefined') {
              window.dispatchEvent(new CustomEvent('agriface-toast', {
                detail: { title: 'Error RPC Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcData.message}`, type: 'error' }
@@ -654,9 +703,13 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           console.log(`[Sync Employee] Sukses (${rpcData.status}) data karyawan ${emp.nik}`);
         } else {
           console.warn(`[Sync Employee] Status RPC tidak dikenali:`, rpcData);
+          await db.employee_sync_queue.updateError(emp.id, {
+            last_error_code: 'UNKNOWN_RPC_STATUS',
+            last_error_message: `Status RPC tidak dikenali: ${JSON.stringify(rpcData)}`,
+            last_error_step: 'employees_rpc'
+          });
           return false;
         }
-
 
         // 2. Insert master biometrics descriptor if present
         let descObj = emp.descriptor_json;
@@ -665,26 +718,74 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         }
 
         if (descObj && Array.isArray(descObj)) {
-          const descStr = JSON.stringify(descObj);
-          await supabase
-            .from('master_descriptors')
-            .upsert({
-              employee_id: realEmpId,
-              descriptor_json: descStr
-            }, { onConflict: 'employee_id' });
+          const checksumVal = vectorChecksum(descObj);
+          let descUpsertOk = false;
 
-          await cacheUserMasterVector({
+          const fullPayload = {
             employee_id: realEmpId,
-            nik: emp.nik,
-            name: emp.name,
-            department: emp.department || emp.jabatan,
-            afdeling: emp.afdeling,
-            nama_kebun: emp.nama_kebun,
-            status_tk: emp.status_tk,
-            jabatan: emp.jabatan,
-            status_perkawinan: emp.status_perkawinan,
-            descriptor_json: descObj
-          });
+            descriptor_json: descObj,
+            updated_at: new Date().toISOString(),
+            template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+            vector_checksum: checksumVal
+          };
+
+          const { error: descErr } = await supabase
+            .from('master_descriptors')
+            .upsert(fullPayload, { onConflict: 'employee_id' });
+
+          if (descErr) {
+            // Adaptive schema matching: if column vector_checksum / template_version not yet migrated (42703)
+            if (descErr.code === '42703' || String(descErr.message || '').includes('vector_checksum') || String(descErr.message || '').includes('template_version')) {
+              console.warn('[Sync Employee] master_descriptors table missing vector_checksum/template_version (42703). Fallback to standard schema.');
+              const fallbackPayload = {
+                employee_id: realEmpId,
+                descriptor_json: descObj,
+                updated_at: new Date().toISOString()
+              };
+              const { error: fallbackErr } = await supabase
+                .from('master_descriptors')
+                .upsert(fallbackPayload, { onConflict: 'employee_id' });
+
+              if (fallbackErr) {
+                console.error('[Sync Employee] Fallback upsert master_descriptors failed:', fallbackErr);
+                await db.employee_sync_queue.updateError(emp.id, {
+                  last_error_code: fallbackErr.code || 'DESC_FALLBACK_ERR',
+                  last_error_message: fallbackErr.message,
+                  last_error_step: 'master_descriptors'
+                });
+                return false;
+              } else {
+                descUpsertOk = true;
+              }
+            } else {
+              console.error('[Sync Employee] Failed to sync master descriptor:', descErr.message || descErr);
+              await db.employee_sync_queue.updateError(emp.id, {
+                last_error_code: descErr.code || 'DESC_ERR',
+                last_error_message: descErr.message,
+                last_error_step: 'master_descriptors'
+              });
+              return false;
+            }
+          } else {
+            descUpsertOk = true;
+          }
+
+          if (descUpsertOk) {
+            await cacheUserMasterVector({
+              employee_id: realEmpId,
+              nik: emp.nik,
+              name: emp.name,
+              department: emp.department || emp.jabatan,
+              afdeling: emp.afdeling,
+              nama_kebun: emp.nama_kebun,
+              status_tk: emp.status_tk,
+              jabatan: emp.jabatan,
+              status_perkawinan: emp.status_perkawinan,
+              descriptor_json: descObj,
+              template_version: BIOMETRIC_CONFIG.TEMPLATE_VERSION,
+              vector_checksum: checksumVal
+            });
+          }
         }
 
         // 3. Update any pending offline attendance logs that used this temporary employee ID
@@ -707,6 +808,36 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           await Promise.all(updateLogPromises);
         } catch (fkErr) {
           console.warn('[Sync Engine FK Mapping Error]:', fkErr);
+        }
+
+        // 3B. Update pending face thumbs and scan attempts FK if temporary ID was used
+        try {
+          const tempIdStr = String(emp.id);
+          if (isNative) {
+            const { waitForConnection } = await import('./services/sqliteService');
+            const nativeDb = await waitForConnection();
+            if (nativeDb) {
+              await nativeDb.run(
+                `UPDATE local_employee_face_thumbs SET employee_id = ? WHERE employee_id = ?`,
+                [String(realEmpId), tempIdStr]
+              );
+              await nativeDb.run(
+                `UPDATE local_scan_attempts_queue SET employee_id = ? WHERE employee_id = ?`,
+                [String(realEmpId), tempIdStr]
+              );
+            }
+          } else {
+            const { dexieDb } = await import('./db');
+            if (dexieDb?.employee_face_thumbs) {
+              const thumbItem = await dexieDb.employee_face_thumbs.get(tempIdStr);
+              if (thumbItem) {
+                await dexieDb.employee_face_thumbs.delete(tempIdStr);
+                await dexieDb.employee_face_thumbs.put({ ...thumbItem, employee_id: realEmpId });
+              }
+            }
+          }
+        } catch (secFkErr) {
+          console.warn('[Sync Engine Secondary FK Mapping Error]:', secFkErr);
         }
 
         // 4. Remove temp ID from local employee sync queue
@@ -739,7 +870,6 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               status_tk: emp.status_tk || null,
               jabatan: emp.jabatan || null,
               status_perkawinan: emp.status_perkawinan || null,
-              // Fix SQLite boolean deserialization: SQLite stores 1/0, not true/false
               has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1,
               is_synced: true,
               descriptor_json: emp.descriptor_json || null,
@@ -758,7 +888,6 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           }
 
           // JUGA: Update attendance_logs lokal (display cache) dari ID offline ke ID resmi
-          // FIX: db.attendance_logs.filter() tidak ada. Gunakan toArray() lalu .filter() array biasa.
           try {
             const allDisplayLogs = await db.attendance_logs.toArray();
             const offlineLogs = allDisplayLogs.filter(l => String(l.employee_id) === tempIdStr);
@@ -778,12 +907,26 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
         return true;
       } catch (singleErr) {
         console.error(`[Sync Single Employee Exception]`, singleErr);
+        try {
+          const { db } = await import('./db');
+          await db.employee_sync_queue.updateError(emp.id, {
+            last_error_code: singleErr.code || 'EXCEPTION',
+            last_error_message: singleErr.message || String(singleErr),
+            last_error_step: 'exception'
+          });
+        } catch (_) {}
         return false;
       }
     });
 
     const syncResults = await Promise.all(employeePromises);
     const syncedCount = syncResults.filter(Boolean).length;
+
+    // Dispatch reactive events so all open UI views update immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('refresh_logs'));
+      window.dispatchEvent(new CustomEvent('refresh_employees'));
+    }
 
     if (syncedCount > 0) {
       if (showToast) {
@@ -839,15 +982,238 @@ export async function syncPendingEmployeeDeletes() {
   }
 }
 
+export async function syncPendingScanAttempts() {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { getUnsyncedScanAttempts, removeSyncedScanAttempts } = await import('./db');
+    const pendingAttempts = await getUnsyncedScanAttempts();
+    if (!pendingAttempts || pendingAttempts.length === 0) return { count: 0 };
+
+    console.log(`[Auto-Sync] Syncing ${pendingAttempts.length} scan attempts telemetry to Supabase...`);
+
+    const rows = pendingAttempts.map(a => ({
+      employee_id: a.employee_id ? String(a.employee_id) : null,
+      nik: a.nik || null,
+      attempt_type: a.attempt_type || 'CHECK-IN',
+      outcome: a.outcome || 'NOT_MATCHED',
+      median_cosine: a.median_cosine != null ? Number(a.median_cosine) : null,
+      min_cosine: a.min_cosine != null ? Number(a.min_cosine) : null,
+      max_cosine: a.max_cosine != null ? Number(a.max_cosine) : (a.matched_cosine != null ? Number(a.matched_cosine) : null),
+      frames_used: a.frames_used != null ? Number(a.frames_used) : (a.frames_evaluated != null ? Number(a.frames_evaluated) : 0),
+      threshold_used: a.threshold_used != null ? Number(a.threshold_used) : null,
+      facing_mode: a.facing_mode || null,
+      canvas_w: a.canvas_w != null ? Number(a.canvas_w) : null,
+      canvas_h: a.canvas_h != null ? Number(a.canvas_h) : null,
+      brightness: a.brightness != null ? Number(a.brightness) : null,
+      master_checksum: a.master_checksum || a.vector_checksum_used || null,
+      master_updated_at: a.master_updated_at || null,
+      template_version: a.template_version || 1,
+      app_version: a.app_version || '3.2.1',
+      platform: a.platform || (Capacitor.isNativePlatform() ? 'android' : 'web'),
+      created_at: a.created_at || new Date().toISOString()
+    }));
+
+    const { error } = await supabase.from('scan_attempts').insert(rows);
+    if (error) {
+      console.warn('[Auto-Sync Scan Attempts Error]:', error.message);
+      return { count: 0 };
+    }
+
+    const idsToRemove = pendingAttempts.map(a => a.id).filter(Boolean);
+    await removeSyncedScanAttempts(idsToRemove);
+    console.log(`[Auto-Sync] Successfully synced and purged ${idsToRemove.length} scan attempts.`);
+    return { count: idsToRemove.length };
+  } catch (err) {
+    console.error('[Auto-Sync Scan Attempts Exception]:', err);
+    return { count: 0 };
+  }
+}
+
+const photoUploadFailures = new Map();
+
+export async function syncPendingEmployeeFaceThumbs() {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { getUnsyncedEmployeeFaceThumbs, markSyncedEmployeeFaceThumbs } = await import('./db');
+    const pendingThumbs = await getUnsyncedEmployeeFaceThumbs();
+    if (!pendingThumbs || pendingThumbs.length === 0) return { count: 0 };
+
+    console.log(`[Auto-Sync] Syncing ${pendingThumbs.length} employee face thumbnails...`);
+    const syncedEmpIds = [];
+
+    for (const item of pendingThumbs) {
+      const empId = item.employee_id;
+      if (String(empId).startsWith('off_') || String(empId).startsWith('tmp_')) continue;
+
+      const failCount = photoUploadFailures.get(String(empId)) || 0;
+      if (failCount >= 3) {
+        console.warn(`[Sync Face Thumb] Skipping ${empId} due to ${failCount} consecutive failures. Will retry on next sync.`);
+        continue;
+      }
+
+      try {
+        const base64Data = (item.thumb_base64 || '').replace(/^data:image\/\w+;base64,/, '');
+        if (!base64Data) continue;
+
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+        const storagePath = `faces/${empId}/master.jpg`;
+        const { error: uploadErr } = await supabase.storage
+          .from('employee-faces')
+          .upload(storagePath, blob, {
+            contentType: 'image/jpeg',
+            upsert: true
+          });
+
+        if (uploadErr) {
+          console.warn(`[Sync Face Thumb] Storage upload failed for ${empId}:`, uploadErr.message);
+          photoUploadFailures.set(String(empId), failCount + 1);
+          continue;
+        }
+
+        await supabase.from('employee_face_photos').upsert({
+          employee_id: Number(empId),
+          storage_path: storagePath,
+          thumbnail_base64: item.thumb_base64,
+          captured_at: item.captured_at || new Date().toISOString(),
+          is_primary: true,
+          photo_version: item.photo_version || 1,
+          photo_checksum: item.photo_checksum || null,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'employee_id' });
+
+        syncedEmpIds.push(empId);
+        photoUploadFailures.delete(String(empId));
+      } catch (thumbErr) {
+        console.warn(`[Sync Face Thumb Exception for ${item.employee_id}]:`, thumbErr);
+        photoUploadFailures.set(String(empId), failCount + 1);
+      }
+    }
+
+    if (syncedEmpIds.length > 0) {
+      await markSyncedEmployeeFaceThumbs(syncedEmpIds);
+      console.log(`[Auto-Sync] Successfully synced ${syncedEmpIds.length} employee face photos.`);
+    }
+    return { count: syncedEmpIds.length };
+  } catch (err) {
+    console.error('[Auto-Sync Face Thumbs Exception]:', err);
+    return { count: 0 };
+  }
+}
+
+export async function syncPullEmployeeFacePhotos(targetEmployeeIds = null) {
+  const isOnline = await checkOnline();
+  if (!isOnline) return { count: 0 };
+
+  try {
+    const { saveEmployeeFaceThumbsBatch, getEmployeeFaceThumbInfo, db } = await import('./db');
+    let idsToPull = targetEmployeeIds;
+
+    // If targetEmployeeIds not passed, fetch all employee IDs from local cache
+    if (!idsToPull || idsToPull.length === 0) {
+      const allCached = await db.employees_cache.toArray();
+      idsToPull = (allCached || [])
+        .map(e => e.id)
+        .filter(id => id && !String(id).startsWith('off_') && !String(id).startsWith('tmp_'));
+    }
+
+    if (!idsToPull || idsToPull.length === 0) return { count: 0 };
+
+    // Batch by 25 records to keep payload lightweight (<= 600KB)
+    const BATCH_SIZE = 25;
+    let totalDownloaded = 0;
+
+    for (let i = 0; i < idsToPull.length; i += BATCH_SIZE) {
+      const batchIds = idsToPull.slice(i, i + BATCH_SIZE);
+      const numIds = batchIds.map(Number).filter(n => !isNaN(n));
+      if (numIds.length === 0) continue;
+
+      try {
+        const { data: remotePhotos, error: fetchErr } = await supabase
+          .from('employee_face_photos')
+          .select('employee_id, thumbnail_base64, photo_version, photo_checksum, updated_at, captured_at')
+          .in('employee_id', numIds)
+          .not('thumbnail_base64', 'is', null);
+
+        if (fetchErr) {
+          console.warn('[Sync Pull Photos Batch Error]:', fetchErr.message);
+          continue;
+        }
+
+        if (remotePhotos && remotePhotos.length > 0) {
+          const thumbsToSave = [];
+          for (const rp of remotePhotos) {
+            if (!rp.thumbnail_base64) continue;
+            // Check if local cache already has this exact or newer version
+            const localInfo = await getEmployeeFaceThumbInfo(rp.employee_id);
+            if (localInfo) {
+              const localVer = localInfo.photo_version || 1;
+              const remoteVer = rp.photo_version || 1;
+              if (localVer >= remoteVer && localInfo.photo_checksum && localInfo.photo_checksum === rp.photo_checksum) {
+                continue; // Up-to-date
+              }
+            }
+
+            thumbsToSave.push({
+              employee_id: rp.employee_id,
+              thumb_base64: rp.thumbnail_base64,
+              photo_version: rp.photo_version || 1,
+              photo_checksum: rp.photo_checksum || null,
+              captured_at: rp.captured_at || rp.updated_at || new Date().toISOString(),
+              updated_at: rp.updated_at || new Date().toISOString(),
+              is_synced: 1
+            });
+          }
+
+          if (thumbsToSave.length > 0) {
+            await saveEmployeeFaceThumbsBatch(thumbsToSave);
+            totalDownloaded += thumbsToSave.length;
+          }
+        }
+      } catch (batchErr) {
+        console.warn('[Sync Pull Photos Batch Exception]:', batchErr);
+      }
+    }
+
+    if (totalDownloaded > 0) {
+      console.log(`[Sync Pull Photos] Sukses mengunduh ${totalDownloaded} master thumbnail foto untuk cache offline.`);
+    }
+    return { count: totalDownloaded };
+  } catch (err) {
+    console.error('[Sync Pull Face Photos Exception]:', err);
+    return { count: 0 };
+  }
+}
+
 export async function triggerAutoSync(showToast, onSyncComplete) {
   // Tier 1: Upload offline employee deletions FIRST to free up NIKs
   await syncPendingEmployeeDeletes();
   // Tier 2: Upload offline employees & update FKs
   await syncPendingEmployees(showToast, onSyncComplete);
-  // Tier 3: Upload offline attendance logs
+  // Tier 3: Upload offline face photos & thumbnails
+  await syncPendingEmployeeFaceThumbs();
+  // Tier 4: Upload offline attendance logs
   await syncPendingAttendanceLogs(showToast, onSyncComplete);
-  // Tier 4: Upload offline admin requests
+  // Tier 5: Upload offline admin requests
   await syncPendingAttendanceRequests();
+  // Tier 6: Upload diagnostic scan attempts telemetry
+  await syncPendingScanAttempts();
+  // Tier 7: Download updated master face thumbnails for offline caching
+  await syncPullEmployeeFacePhotos().catch(() => {});
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('refresh_logs'));
+  }
 }
 
 /**

@@ -1,5 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { SQLiteConnection, SQLiteDBConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
+// @ts-ignore
+import { vectorChecksum, BIOMETRIC_CONFIG } from '../biometrics';
 
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbConnection: SQLiteDBConnection | null = null;
@@ -184,7 +186,12 @@ export async function initSQLite(): Promise<void> {
         descriptor_json TEXT,
         geometric_descriptor_json TEXT,
         is_synced INTEGER DEFAULT 0,
-        created_at TEXT
+        created_at TEXT,
+        last_error_code TEXT,
+        last_error_message TEXT,
+        last_error_step TEXT,
+        attempt_count INTEGER DEFAULT 0,
+        last_attempt_at TEXT
       );
 
       CREATE TABLE IF NOT EXISTS local_attendance_requests (
@@ -204,6 +211,40 @@ export async function initSQLite(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS local_employee_delete_queue (
         id TEXT PRIMARY KEY
+      );
+
+      CREATE TABLE IF NOT EXISTS local_scan_attempts_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id TEXT,
+        nik TEXT,
+        attempt_type TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        median_cosine REAL,
+        min_cosine REAL,
+        max_cosine REAL,
+        frames_used INTEGER,
+        threshold_used REAL,
+        facing_mode TEXT,
+        canvas_w INTEGER,
+        canvas_h INTEGER,
+        brightness REAL,
+        master_checksum TEXT,
+        master_updated_at TEXT,
+        template_version INTEGER,
+        app_version TEXT,
+        platform TEXT,
+        created_at TEXT,
+        is_synced INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS local_employee_face_thumbs (
+        employee_id TEXT PRIMARY KEY,
+        thumb_base64 TEXT,
+        captured_at TEXT,
+        photo_version INTEGER DEFAULT 1,
+        photo_checksum TEXT,
+        updated_at TEXT,
+        is_synced INTEGER DEFAULT 0
       );
     `;
 
@@ -375,15 +416,34 @@ export async function initSQLite(): Promise<void> {
 
     try {
       const eqInfo = await dbConnection.query(`PRAGMA table_info(local_employee_sync_queue);`);
-      const hasHasMB = eqInfo.values?.some((c: any) => c.name === 'has_master_biometric');
-      const hasRegionCol = eqInfo.values?.some((c: any) => c.name === 'region');
-      if (!hasHasMB) {
+      const cols = new Set(eqInfo.values?.map((c: any) => c.name) || []);
+      if (!cols.has('has_master_biometric')) {
         console.log('[SQLite Service] Adding missing has_master_biometric column to local_employee_sync_queue...');
         await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN has_master_biometric INTEGER DEFAULT 0;`);
       }
-      if (!hasRegionCol) {
+      if (!cols.has('region')) {
         console.log('[SQLite Service] Adding missing region column to local_employee_sync_queue...');
         await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN region TEXT;`);
+      }
+      if (!cols.has('last_error_code')) {
+        console.log('[SQLite Service] Adding missing last_error_code column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_code TEXT;`);
+      }
+      if (!cols.has('last_error_message')) {
+        console.log('[SQLite Service] Adding missing last_error_message column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_message TEXT;`);
+      }
+      if (!cols.has('last_error_step')) {
+        console.log('[SQLite Service] Adding missing last_error_step column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_step TEXT;`);
+      }
+      if (!cols.has('attempt_count')) {
+        console.log('[SQLite Service] Adding missing attempt_count column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN attempt_count INTEGER DEFAULT 0;`);
+      }
+      if (!cols.has('last_attempt_at')) {
+        console.log('[SQLite Service] Adding missing last_attempt_at column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_attempt_at TEXT;`);
       }
     } catch (e) {
       console.warn('[SQLite Service] Migration local_employee_sync_queue add columns warning:', e);
@@ -589,6 +649,47 @@ export async function initSQLite(): Promise<void> {
       await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN syncStatus TEXT DEFAULT NULL;`);
     } catch (e) { }
 
+    // Telemetry & Biometrics accuracy migrations
+    const logMetricCols = ['match_cosine REAL', 'match_threshold REAL', 'template_version INTEGER', 'facing_mode TEXT'];
+    for (const colDef of logMetricCols) {
+      try {
+        await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN ${colDef};`);
+      } catch (e) { }
+      try {
+        await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN ${colDef};`);
+      } catch (e) { }
+    }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_master_descriptors ADD COLUMN template_version INTEGER;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_master_descriptors ADD COLUMN vector_checksum TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN vector_checksum_used TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_logs ADD COLUMN vector_source TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN vector_checksum_used TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_attendance_queue ADD COLUMN vector_source TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_scan_attempts_queue ADD COLUMN vector_source TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employee_face_thumbs ADD COLUMN photo_version INTEGER DEFAULT 1;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employee_face_thumbs ADD COLUMN photo_checksum TEXT;`);
+    } catch (e) { }
+    try {
+      await dbConnection.execute(`ALTER TABLE local_employee_face_thumbs ADD COLUMN updated_at TEXT;`);
+    } catch (e) { }
+
     console.log('[SQLite Service] SQLite tables verified and ready.');
     _initResolve?.(); // Signal: DB is ready — unblocks all waitForConnection() callers
   } catch (err: any) {
@@ -621,6 +722,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
 
     let vector = user.descriptor_json || user.descriptor || user.face_vector || null;
     let vectorStr: string | null = null;
+    let arr: number[] | null = null;
     if (vector) {
       let parsed = vector;
       while (typeof parsed === 'string') {
@@ -630,7 +732,6 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
           break;
         }
       }
-      let arr: number[] | null = null;
       if (Array.isArray(parsed)) {
         arr = parsed;
       } else if (parsed instanceof Float32Array || parsed instanceof Float64Array || ArrayBuffer.isView(parsed)) {
@@ -681,22 +782,29 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
       ]
     );
 
+    const templateVersion = user.template_version || 1;
+    const vectorChecksumVal = user.vector_checksum || (arr ? vectorChecksum(arr) : null);
+
     // 2. Cache to local_master_descriptors
     await db.run(
-      `INSERT INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO local_master_descriptors (employee_id, descriptor_json, geometric_descriptor_json, updated_at, template_version, vector_checksum)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(employee_id) DO UPDATE SET
          descriptor_json = COALESCE(NULLIF(EXCLUDED.descriptor_json, ''), local_master_descriptors.descriptor_json),
          geometric_descriptor_json = COALESCE(NULLIF(EXCLUDED.geometric_descriptor_json, ''), local_master_descriptors.geometric_descriptor_json),
-         updated_at = EXCLUDED.updated_at`,
+         updated_at = EXCLUDED.updated_at,
+         template_version = COALESCE(EXCLUDED.template_version, local_master_descriptors.template_version),
+         vector_checksum = COALESCE(EXCLUDED.vector_checksum, local_master_descriptors.vector_checksum)`,
       [
         empIdStr,
         vectorStr,
         gfvStr,
-        new Date().toISOString()
+        user.updated_at || new Date().toISOString(),
+        templateVersion,
+        vectorChecksumVal
       ]
     );
-    console.log(`[SQLite Service] Cached master for ${user.name} | GFV: ${gfvStr ? 'YES' : 'NO'}`);
+    console.log(`[SQLite Service] Cached master for ${user.name} | GFV: ${gfvStr ? 'YES' : 'NO'} | Ver: ${templateVersion} | CS: ${vectorChecksumVal ? 'YES' : 'NO'}`);
   } catch (err: any) {
     console.error('[SQLite Service cacheUserMasterVector Error]:', err?.message || err);
   }
@@ -758,7 +866,9 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
             descriptor_json: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
             face_vector: typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json,
             geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
-            updated_at: row.created_at
+            updated_at: row.created_at,
+            template_version: row.template_version || 1,
+            vector_checksum: row.vector_checksum || null
           };
         }
       }
@@ -779,7 +889,9 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       descriptor_json: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
       face_vector: row.descriptor_json ? (typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json) : null,
       geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
-      updated_at: row.updated_at
+      updated_at: row.updated_at,
+      template_version: row.template_version || 1,
+      vector_checksum: row.vector_checksum || null
     };
   } catch (err: any) {
     console.error('[SQLite Service getCachedUserMasterVector Error]:', err?.message || err);
@@ -802,8 +914,8 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
 
     const runRes = await db.run(
       `INSERT INTO local_attendance_queue (
-        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi, match_cosine, match_threshold, template_version, facing_mode, vector_checksum_used, vector_source
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(logData.employee_id),
         logData.nik || null,
@@ -824,7 +936,13 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
         statusSyncFoto,
         isSynced,
         createdAt,
-        logData.durasi !== undefined && logData.durasi !== null ? Number(logData.durasi) : null
+        logData.durasi !== undefined && logData.durasi !== null ? Number(logData.durasi) : null,
+        logData.match_cosine !== undefined && logData.match_cosine !== null ? Number(logData.match_cosine) : null,
+        logData.match_threshold !== undefined && logData.match_threshold !== null ? Number(logData.match_threshold) : null,
+        logData.template_version !== undefined && logData.template_version !== null ? Number(logData.template_version) : 1,
+        logData.facing_mode || null,
+        logData.vector_checksum_used || logData.master_checksum || null,
+        logData.vector_source || null
       ]
     );
 
@@ -861,7 +979,7 @@ export async function sqliteGetUnsyncedLogs(): Promise<any[]> {
     if (!db) return [];
   try {
     const res = await db.query(
-      `SELECT * FROM local_attendance_queue WHERE is_synced = 0`
+      `SELECT * FROM local_attendance_queue WHERE is_synced = 0 AND (status_sync_teks IS NULL OR status_sync_teks != 'done')`
     );
     return res.values || [];
   } catch (err: any) {
@@ -1038,7 +1156,7 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
   if (!dbConnection) return [];
   try {
     const res = await dbConnection.query(
-      `SELECT md.employee_id, md.descriptor_json, e.nik, e.name
+      `SELECT md.employee_id, md.descriptor_json, md.vector_checksum, md.template_version, md.updated_at, e.nik, e.name
        FROM local_master_descriptors md
        LEFT JOIN local_employees e ON md.employee_id = e.id
        WHERE md.descriptor_json IS NOT NULL`
@@ -1051,11 +1169,15 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
           parsedDesc = typeof row.descriptor_json === 'string' ? JSON.parse(row.descriptor_json) : row.descriptor_json;
         } catch (e) { }
       }
+      const cs = row.vector_checksum || (parsedDesc && Array.isArray(parsedDesc) ? vectorChecksum(parsedDesc) : null);
       return {
         employee_id: row.employee_id,
         nik: row.nik,
         name: row.name,
         descriptor_json: parsedDesc,
+        vector_checksum: cs,
+        template_version: row.template_version || 1,
+        updated_at: row.updated_at || null,
       };
     });
   } catch (err: any) {
@@ -1193,8 +1315,8 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
 
     await db.run(
       `INSERT OR REPLACE INTO local_attendance_logs 
-      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, employee_id, nik, name, department, afdeling, kebun, timestamp, location, lat, lng, status, attendance_type, euclidean_distance, path_foto_lokal, path_foto_storage, status_sync_teks, status_sync_foto, is_synced, created_at, durasi, match_cosine, match_threshold, template_version, facing_mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(log.id),
         String(log.employee_id),
@@ -1216,7 +1338,11 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
         statusSyncFoto,
         isSynced,
         log.created_at || null,
-        log.durasi !== undefined && log.durasi !== null ? Number(log.durasi) : null
+        log.durasi !== undefined && log.durasi !== null ? Number(log.durasi) : null,
+        log.match_cosine !== undefined && log.match_cosine !== null ? Number(log.match_cosine) : null,
+        log.match_threshold !== undefined && log.match_threshold !== null ? Number(log.match_threshold) : null,
+        log.template_version !== undefined && log.template_version !== null ? Number(log.template_version) : 1,
+        log.facing_mode || null
       ]
     );
   } catch (err: any) {
@@ -1689,10 +1815,51 @@ export async function sqliteRemovePendingEmployee(id: string | number): Promise<
     const db = await waitForConnection();
     if (!db) return;
   try {
-    await db.run(`DELETE FROM local_employee_sync_queue WHERE id = ?`, [String(id)]);
+    const idStr = String(id);
+    await db.run(
+      `DELETE FROM local_employee_sync_queue WHERE id = ? OR CAST(id AS TEXT) = ?`,
+      [idStr, idStr]
+    );
     console.log(`[SQLite Service] Removed pending employee from queue: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemovePendingEmployee Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Record failure details on a pending employee queue item
+ */
+export async function sqliteUpdatePendingEmployeeError(
+  id: string | number,
+  errorData: {
+    last_error_code?: string | null;
+    last_error_message?: string | null;
+    last_error_step?: string | null;
+  }
+): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    const idStr = String(id);
+    await db.run(
+      `UPDATE local_employee_sync_queue
+       SET last_error_code = ?,
+           last_error_message = ?,
+           last_error_step = ?,
+           attempt_count = COALESCE(attempt_count, 0) + 1,
+           last_attempt_at = ?
+       WHERE id = ? OR CAST(id AS TEXT) = ?`,
+      [
+        errorData.last_error_code || null,
+        errorData.last_error_message || null,
+        errorData.last_error_step || null,
+        new Date().toISOString(),
+        idStr,
+        idStr
+      ]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteUpdatePendingEmployeeError Error]:', err?.message || err);
   }
 }
 
@@ -1849,5 +2016,200 @@ export async function sqliteSoftDeleteAttendanceLog(id: string): Promise<void> {
     console.log(`[SQLite Service] Soft deleted attendance log: ${id}`);
   } catch (err: any) {
     console.error('[SQLite Service sqliteSoftDeleteAttendanceLog Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteQueueScanAttempt(attempt: any): Promise<number | null> {
+  const db = await waitForConnection();
+  if (!db) return null;
+  try {
+    const maxCos = attempt.max_cosine !== undefined ? attempt.max_cosine : (attempt.matched_cosine !== undefined ? attempt.matched_cosine : null);
+    const frames = attempt.frames_used !== undefined ? attempt.frames_used : (attempt.frames_evaluated !== undefined ? attempt.frames_evaluated : 0);
+    const thresh = attempt.threshold_used !== undefined ? attempt.threshold_used : BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD;
+
+    const res = await db.run(
+      `INSERT INTO local_scan_attempts_queue (
+        employee_id, nik, attempt_type, outcome, median_cosine, min_cosine, max_cosine,
+        frames_used, threshold_used, facing_mode, canvas_w, canvas_h, brightness,
+        master_checksum, master_updated_at, template_version, app_version, platform, created_at, is_synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        attempt.employee_id ? String(attempt.employee_id) : null,
+        attempt.nik || null,
+        attempt.attempt_type || 'CHECK-IN',
+        attempt.outcome || 'NOT_MATCHED',
+        attempt.median_cosine !== undefined ? attempt.median_cosine : null,
+        attempt.min_cosine !== undefined ? attempt.min_cosine : null,
+        maxCos,
+        frames,
+        thresh,
+        attempt.facing_mode || 'environment',
+        attempt.canvas_w || null,
+        attempt.canvas_h || null,
+        attempt.brightness !== undefined ? attempt.brightness : null,
+        attempt.master_checksum || null,
+        attempt.master_updated_at || null,
+        attempt.template_version || 1,
+        attempt.app_version || '3.2.1',
+        attempt.platform || (Capacitor.isNativePlatform() ? 'android' : 'web'),
+        attempt.created_at || new Date().toISOString(),
+        0
+      ]
+    );
+    return res.changes?.lastId || null;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteQueueScanAttempt Error]:', err?.message || err);
+    return null;
+  }
+}
+
+export async function sqliteGetUnsyncedScanAttempts(): Promise<any[]> {
+  const db = await waitForConnection();
+  if (!db) return [];
+  try {
+    const res = await db.query(`SELECT * FROM local_scan_attempts_queue WHERE is_synced = 0 ORDER BY id ASC LIMIT 100`);
+    return res.values || [];
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetUnsyncedScanAttempts Error]:', err?.message || err);
+    return [];
+  }
+}
+
+export async function sqliteRemoveSyncedScanAttempts(ids: number[]): Promise<void> {
+  const db = await waitForConnection();
+  if (!db || !ids || ids.length === 0) return;
+  try {
+    const placeholders = ids.map(() => '?').join(',');
+    await db.run(`DELETE FROM local_scan_attempts_queue WHERE id IN (${placeholders})`, ids);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteRemoveSyncedScanAttempts Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteSaveEmployeeFaceThumb(
+  employeeId: string,
+  thumbBase64: string,
+  photoVersion: number = 1,
+  photoChecksum: string | null = null
+): Promise<void> {
+  const db = await waitForConnection();
+  if (!db || !employeeId) return;
+  try {
+    const now = new Date().toISOString();
+    await db.run(
+      `INSERT INTO local_employee_face_thumbs (employee_id, thumb_base64, captured_at, photo_version, photo_checksum, updated_at, is_synced)
+       VALUES (?, ?, ?, ?, ?, ?, 0)
+       ON CONFLICT(employee_id) DO UPDATE SET
+         thumb_base64 = EXCLUDED.thumb_base64,
+         captured_at = EXCLUDED.captured_at,
+         photo_version = EXCLUDED.photo_version,
+         photo_checksum = EXCLUDED.photo_checksum,
+         updated_at = EXCLUDED.updated_at,
+         is_synced = 0`,
+      [String(employeeId), thumbBase64, now, photoVersion, photoChecksum, now]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSaveEmployeeFaceThumb Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteSaveEmployeeFaceThumbsBatch(
+  thumbs: Array<{
+    employee_id: string | number;
+    thumb_base64: string;
+    photo_version?: number;
+    photo_checksum?: string | null;
+    captured_at?: string;
+    updated_at?: string;
+    is_synced?: number;
+  }>
+): Promise<void> {
+  const db = await waitForConnection();
+  if (!db || !thumbs || thumbs.length === 0) return;
+  try {
+    const now = new Date().toISOString();
+    for (const t of thumbs) {
+      if (!t.employee_id || !t.thumb_base64) continue;
+      await db.run(
+        `INSERT INTO local_employee_face_thumbs (employee_id, thumb_base64, captured_at, photo_version, photo_checksum, updated_at, is_synced)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(employee_id) DO UPDATE SET
+           thumb_base64 = EXCLUDED.thumb_base64,
+           captured_at = EXCLUDED.captured_at,
+           photo_version = EXCLUDED.photo_version,
+           photo_checksum = EXCLUDED.photo_checksum,
+           updated_at = EXCLUDED.updated_at,
+           is_synced = EXCLUDED.is_synced`,
+        [
+          String(t.employee_id),
+          t.thumb_base64,
+          t.captured_at || now,
+          t.photo_version || 1,
+          t.photo_checksum || null,
+          t.updated_at || now,
+          t.is_synced !== undefined ? t.is_synced : 1
+        ]
+      );
+    }
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSaveEmployeeFaceThumbsBatch Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteGetEmployeeFaceThumb(employeeId: string): Promise<string | null> {
+  const db = await waitForConnection();
+  if (!db || !employeeId) return null;
+  try {
+    const res = await db.query(`SELECT thumb_base64 FROM local_employee_face_thumbs WHERE employee_id = ? LIMIT 1`, [String(employeeId)]);
+    if (res.values && res.values.length > 0) {
+      return res.values[0].thumb_base64;
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetEmployeeFaceThumb Error]:', err?.message || err);
+    return null;
+  }
+}
+
+export async function sqliteGetEmployeeFaceThumbInfo(employeeId: string): Promise<any | null> {
+  const db = await waitForConnection();
+  if (!db || !employeeId) return null;
+  try {
+    const res = await db.query(
+      `SELECT employee_id, thumb_base64, captured_at, photo_version, photo_checksum, updated_at
+       FROM local_employee_face_thumbs
+       WHERE employee_id = ? LIMIT 1`,
+      [String(employeeId)]
+    );
+    if (res.values && res.values.length > 0) {
+      return res.values[0];
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetEmployeeFaceThumbInfo Error]:', err?.message || err);
+    return null;
+  }
+}
+
+export async function sqliteGetUnsyncedEmployeeFaceThumbs(): Promise<any[]> {
+  const db = await waitForConnection();
+  if (!db) return [];
+  try {
+    const res = await db.query(`SELECT * FROM local_employee_face_thumbs WHERE is_synced = 0 LIMIT 50`);
+    return res.values || [];
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetUnsyncedEmployeeFaceThumbs Error]:', err?.message || err);
+    return [];
+  }
+}
+
+export async function sqliteMarkSyncedEmployeeFaceThumbs(employeeIds: string[]): Promise<void> {
+  const db = await waitForConnection();
+  if (!db || !employeeIds || employeeIds.length === 0) return;
+  try {
+    const placeholders = employeeIds.map(() => '?').join(',');
+    await db.run(`UPDATE local_employee_face_thumbs SET is_synced = 1 WHERE employee_id IN (${placeholders})`, employeeIds);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteMarkSyncedEmployeeFaceThumbs Error]:', err?.message || err);
   }
 }

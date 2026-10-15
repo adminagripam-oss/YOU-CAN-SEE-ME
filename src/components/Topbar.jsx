@@ -85,13 +85,13 @@ export default function Topbar({
             </button>
           )}
 
-          {/* OTA Update Button (Theme-Adaptive for Light & Dark Mode) */}
-          {isOnline && onCheckUpdate && (
+          {/* OTA Update Button — only rendered when background poller confirmed a new version */}
+          {hasOTAUpdate && onCheckUpdate && (
             <button
               type="button"
               className="topbar-sync-btn"
               onClick={onCheckUpdate}
-              title={hasOTAUpdate ? 'Pembaruan Tersedia!' : 'Cek Pembaruan Aplikasi (OTA)'}
+              title="Pembaruan Tersedia! Ketuk untuk memperbarui."
               style={{
                 background: 'var(--bg-card)',
                 color: 'var(--text-main)',
@@ -108,13 +108,11 @@ export default function Topbar({
               }}
             >
               <CloudDownload size={13} style={{ color: 'var(--accent-primary)' }} />
-              <span style={{ marginLeft: '4px' }}>{hasOTAUpdate ? 'Update Baru!' : 'Cek Update'}</span>
-              {hasOTAUpdate && (
-                <span style={{ position: 'absolute', top: '-4px', right: '-4px', display: 'flex', height: '12px', width: '12px' }}>
-                  <span style={{ animation: 'ping 1s cubic-bezier(0,0,0.2,1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: '#f87171', opacity: 0.75 }} />
-                  <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '12px', width: '12px', backgroundColor: '#ef4444' }} />
-                </span>
-              )}
+              <span style={{ marginLeft: '4px' }}>Update Baru!</span>
+              <span style={{ position: 'absolute', top: '-4px', right: '-4px', display: 'flex', height: '12px', width: '12px' }}>
+                <span style={{ animation: 'ping 1s cubic-bezier(0,0,0.2,1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: '#f87171', opacity: 0.75 }} />
+                <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '12px', width: '12px', backgroundColor: '#ef4444' }} />
+              </span>
             </button>
           )}
 
