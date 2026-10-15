@@ -4,8 +4,9 @@ import { RouterProvider } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
-import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes } from './db';
-import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener } from './syncEngine';
+import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray } from './db';
+import { vectorChecksum } from './biometrics';
+import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener, syncPullEmployeeFacePhotos } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
@@ -344,20 +345,78 @@ function AppContent() {
             let allMasters = [];
             try {
               allMasters = await getAllMasterVectors();
-              const cachedEmpIds = new Set(allMasters.map(m => String(m.employee_id)));
-              const missingEmpIds = data.filter(e => e.has_master_biometric && !cachedEmpIds.has(String(e.id))).map(e => e.id);
+              const localMasterMap = new Map(allMasters.map(m => [String(m.employee_id), m]));
+              const bioEmpIds = data.filter(e => e.has_master_biometric).map(e => e.id);
 
-              if (missingEmpIds.length > 0) {
-                console.log(`[Sync Pull] Mengunduh biometrics untuk ${missingEmpIds.length} karyawan baru/belum ter-cache dari cloud...`);
+              let neededEmpIds = [];
+              if (bioEmpIds.length > 0) {
+                const { data: remoteMeta, error: metaErr } = await supabase
+                  .from('master_descriptors')
+                  .select('employee_id, vector_checksum, updated_at')
+                  .in('employee_id', bioEmpIds);
+
+                if (!metaErr && remoteMeta) {
+                  for (const rm of remoteMeta) {
+                    const localM = localMasterMap.get(String(rm.employee_id));
+                    if (!localM || !localM.descriptor_json) {
+                      neededEmpIds.push(rm.employee_id);
+                    } else if (rm.vector_checksum && localM.vector_checksum !== rm.vector_checksum) {
+                      neededEmpIds.push(rm.employee_id);
+                    }
+                  }
+                } else {
+                  neededEmpIds = data.filter(e => e.has_master_biometric && !localMasterMap.has(String(e.id))).map(e => e.id);
+                }
+              }
+
+              if (neededEmpIds.length > 0) {
+                console.log(`[Sync Pull] Mengunduh biometrics untuk ${neededEmpIds.length} karyawan (baru/terupdate) dari cloud...`);
                 const { data: d, error: descErr } = await supabase
                   .from('master_descriptors')
-                  .select('employee_id, descriptor_json, geometric_descriptor_json')
-                  .in('employee_id', missingEmpIds);
+                  .select('employee_id, descriptor_json, geometric_descriptor_json, template_version, vector_checksum, updated_at')
+                  .in('employee_id', neededEmpIds);
                 if (!descErr && d) {
                   descData = d;
+                  for (const desc of d) {
+                    const empInfo = data.find(e => String(e.id) === String(desc.employee_id)) || {};
+                    let calculatedChecksum = desc.vector_checksum;
+                    if (!calculatedChecksum && desc.descriptor_json) {
+                      const arr = toVectorArray(desc.descriptor_json);
+                      if (arr) {
+                        calculatedChecksum = vectorChecksum(arr);
+                        // Lazy backfill ke Supabase jika cloud belum punya checksum (A3)
+                        supabase
+                          .from('master_descriptors')
+                          .update({
+                            vector_checksum: calculatedChecksum,
+                            template_version: desc.template_version || 1
+                          })
+                          .eq('employee_id', desc.employee_id)
+                          .then(({ error: backfillErr }) => {
+                            if (!backfillErr) {
+                              console.log(`[Lazy Backfill Checksum] Berhasil update checksum untuk karyawan #${desc.employee_id}`);
+                            }
+                          })
+                          .catch(() => {});
+                      }
+                    }
+
+                    await cacheUserMasterVector({
+                      ...empInfo,
+                      employee_id: desc.employee_id,
+                      descriptor_json: desc.descriptor_json,
+                      geometric_descriptor_json: desc.geometric_descriptor_json,
+                      template_version: desc.template_version || 1,
+                      vector_checksum: calculatedChecksum,
+                      updated_at: desc.updated_at
+                    }).catch(() => {});
+                  }
                 }
               } else {
-                console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal (0 byte diunduh).');
+                console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal & up-to-date (0 byte diunduh).');
+              }
+              if (bioEmpIds && bioEmpIds.length > 0) {
+                syncPullEmployeeFacePhotos(bioEmpIds).catch(() => {});
               }
             } catch (e) {
               console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
@@ -925,10 +984,25 @@ function AppContent() {
     setLogs(finalLogs);
   }, [user, employees]);
 
-  // Check Unsynced Count from local Database (Logs + Employees)
+  // Check unsynced count from local database (logs + employees + deletions)
   const refreshUnsyncedCount = useCallback(async () => {
     try {
       const logsList = await getUnsyncedLogs();
+
+      // Clean up records in IndexedDB whose sync is already finished
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          const { dexieDb, removeSyncedLogs } = await import('./db');
+          const allQueue = await dexieDb.attendance_sync_queue.toArray();
+          const doneIds = allQueue
+            .filter((item) => item.status_sync_teks === 'done' || item.is_synced === true)
+            .map((item) => item.id);
+          if (doneIds.length > 0) {
+            await removeSyncedLogs(doneIds);
+          }
+        } catch {}
+      }
+
       let empCount = 0;
       if (Capacitor.isNativePlatform()) {
         try {
@@ -941,7 +1015,7 @@ function AppContent() {
       } else {
         try {
           const emps = await db.employee_sync_queue.toArray();
-          empCount = emps ? emps.length : 0;
+          empCount = emps ? emps.filter((e) => !e.is_synced || e.is_synced === 0).length : 0;
         } catch {
           empCount = 0;
         }
@@ -1066,6 +1140,11 @@ function AppContent() {
       }
 
       await refreshUnsyncedCount();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('refresh_logs'));
+        window.dispatchEvent(new CustomEvent('sync_completed'));
+        window.dispatchEvent(new CustomEvent('refresh_employees'));
+      }
       showToast('Sinkronisasi Selesai', 'Data berhasil diselaraskan secara penuh dengan cloud.', 'success');
     } catch (fatalError) {
       console.error('[Manual Sync Fatal Error]:', fatalError);
@@ -1135,11 +1214,18 @@ function AppContent() {
         syncCallbacksRef.current.refreshUnsyncedCount();
       }
     };
+    const handleRefreshEmployees = (e) => {
+      if (syncCallbacksRef.current?.fetchEmployees) {
+        syncCallbacksRef.current.fetchEmployees(e.detail?.fullSync || false);
+      }
+    };
     window.addEventListener('refresh_logs', handleRefreshLogs);
     window.addEventListener('new_attendance_log', handleNewLog);
+    window.addEventListener('refresh_employees', handleRefreshEmployees);
     return () => {
       window.removeEventListener('refresh_logs', handleRefreshLogs);
       window.removeEventListener('new_attendance_log', handleNewLog);
+      window.removeEventListener('refresh_employees', handleRefreshEmployees);
     };
   }, []);
 

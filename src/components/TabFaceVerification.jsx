@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 
-import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray } from '../db';
+import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray, queueScanAttempt } from '../db';
 import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
-import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median } from '../biometrics';
+import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median, vectorChecksum } from '../biometrics';
 import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -593,6 +593,7 @@ export default function TabFaceVerification({
   const [livenessStatusMsg, setLivenessStatusMsg] = useState('Harap posisikan wajah Anda di tengah layar');
   const [currentEAR, setCurrentEAR] = useState(0.3);
   const [capturedBase64Image, setCapturedBase64Image] = useState(null);
+  const capturedBase64ImageRef = useRef(null);
 
   const [headTurnState, setHeadTurnState] = useState({ left: false, right: false });
   const [livenessVerified, setLivenessVerified] = useState(false);
@@ -636,6 +637,13 @@ export default function TabFaceVerification({
   const livenessChallengeRef = useRef('');
   const scoreHistoryRef = useRef([]);
   const [debugAiInfo, setDebugAiInfo] = useState({ backend: 'webgl', faces: 0, nodes: 0 });
+  const masterChecksumRef = useRef(null);
+  const masterVersionRef = useRef(1);
+  const vectorSourceRef = useRef(null);
+  const lastMedianCosRef = useRef(0);
+  const scanSessionEvaluatedRef = useRef(0);
+  const highestCosineRef = useRef(0);
+  const scanTimeoutTimerRef = useRef(null);
 
   // ── Mobile Performance Optimization Refs ─────────────────────────────────
   // [TASK 3] Riwayat timestamp tiap frame untuk menghitung FPS aktual
@@ -738,12 +746,18 @@ export default function TabFaceVerification({
     lastProcessedDetectionRef.current = null;
     isStableRef.current = false;
     currentDescRef.current = null;
+    scanSessionEvaluatedRef.current = 0;
+    highestCosineRef.current = 0;
+    lastMedianCosRef.current = 0;
+    vectorSourceRef.current = null;
     frameStateRef.current = { state: 'idle', progress: 0 };
     setIsStable(false);
     setLivenessVerified(false);
     setIsLiveHuman(false);
     setMatchRate(0);
     setIsMatched(false);
+    capturedBase64ImageRef.current = null;
+    setCapturedBase64Image(null);
     setLivenessStatusMsg('Harap posisikan wajah Anda di tengah layar');
     setLightingWarning('');
   }, []);
@@ -765,11 +779,82 @@ export default function TabFaceVerification({
     setScannerOpen(true);
   }, [selectedEmployeeId, modelsLoaded, showToast, resetScanSession]);
 
+  // 15-second automatic timeout for attendance scan session
+  useEffect(() => {
+    if (!scannerOpen) {
+      if (scanTimeoutTimerRef.current) {
+        clearTimeout(scanTimeoutTimerRef.current);
+        scanTimeoutTimerRef.current = null;
+      }
+      return;
+    }
+
+    scanTimeoutTimerRef.current = setTimeout(() => {
+      if (!isMatchedRef.current && !hasAutoSubmittedRef.current && scannerOpen) {
+        if (selectedEmployeeIdRef.current) {
+          queueScanAttempt({
+            attempt_type: 'ATTENDANCE-SCAN',
+            employee_id: selectedEmployeeIdRef.current,
+            matched_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
+            max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
+            median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
+            threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+            template_version: masterVersionRef.current || 1,
+            master_checksum: masterChecksumRef.current || null,
+            vector_source: vectorSourceRef.current || null,
+            facing_mode: facingMode,
+            backend: human.tf?.getBackend?.() || 'webgl',
+            frames_evaluated: scanSessionEvaluatedRef.current,
+            frames_used: scanSessionEvaluatedRef.current,
+            outcome: 'TIMEOUT',
+            created_at: new Date().toISOString()
+          }).catch(() => {});
+        }
+        if (showToast) {
+          const topCos = highestCosineRef.current ? highestCosineRef.current.toFixed(3) : '0';
+          showToast('Waktu Scan Habis', `Wajah belum cocok (Cosine tertinggi: ${topCos}). Pastikan posisi wajah lurus dan pencahayaan cukup.`, 'warning');
+        }
+        setScannerOpen(false);
+        resetScanSession();
+      }
+    }, 15000);
+
+    return () => {
+      if (scanTimeoutTimerRef.current) {
+        clearTimeout(scanTimeoutTimerRef.current);
+        scanTimeoutTimerRef.current = null;
+      }
+    };
+  }, [scannerOpen, facingMode, showToast, resetScanSession]);
+
   const closeScanner = useCallback(() => {
     if (isSubmitting) return;
+    if (scanTimeoutTimerRef.current) {
+      clearTimeout(scanTimeoutTimerRef.current);
+      scanTimeoutTimerRef.current = null;
+    }
+    if (!isMatchedRef.current && scanSessionEvaluatedRef.current > 0 && selectedEmployeeIdRef.current) {
+      queueScanAttempt({
+        attempt_type: 'ATTENDANCE-SCAN',
+        employee_id: selectedEmployeeIdRef.current,
+        matched_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
+        max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
+        median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
+        threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+        template_version: masterVersionRef.current || 1,
+        master_checksum: masterChecksumRef.current || null,
+        vector_source: vectorSourceRef.current || null,
+        facing_mode: facingMode,
+        backend: human.tf?.getBackend?.() || 'webgl',
+        frames_evaluated: scanSessionEvaluatedRef.current,
+        frames_used: scanSessionEvaluatedRef.current,
+        outcome: 'CANCELLED',
+        created_at: new Date().toISOString()
+      }).catch(() => {});
+    }
     setScannerOpen(false);
     resetScanSession();
-  }, [isSubmitting, resetScanSession]);
+  }, [isSubmitting, facingMode, resetScanSession]);
 
   // Select employee
   const handleEmployeeSelect = async (e) => {
@@ -803,7 +888,7 @@ export default function TabFaceVerification({
     }
   };
 
-  // Load stored vector for selected employee (4-Tier Fetch: IndexedDB -> Server API -> Supabase Direct -> Props)
+  // Load stored vector for selected employee (3-Tier Fetch: Local Cache -> Cloud Supabase -> Props Fallback)
   const loadMasterVectors = async (empId) => {
     if (!empId || empId === '' || empId === 'null' || empId === 'undefined') return;
 
@@ -812,41 +897,26 @@ export default function TabFaceVerification({
     try {
       let vec = null;
       let cached = null;
+      let resolvedSource = null;
+      let resolvedChecksum = null;
+      let resolvedVersion = 1;
 
-      // Helper to validate vector
-      const isValidVector = (v) => {
-        return !!toVectorArray(v);
-      };
-
-      // ── Tier 0: Offline Employees (off_* / tmp_*) → langsung dari props ──────
-      // Untuk karyawan yang didaftarkan offline, descriptor_json sudah ada di employees props
-      // (di-merge dari SQLite local_employee_sync_queue oleh App.jsx).
-      // Ini adalah jalur tercepat dan paling andal untuk karyawan offline.
-      const isOfflineId = String(empIdKey).startsWith('off_') || String(empIdKey).startsWith('tmp_');
-      if (isOfflineId) {
-        const empObj = employees.find((it) => String(it.id) === String(empIdKey));
-        const rawPropVec = empObj?.descriptor_json || empObj?.face_vector || empObj?.facial_descriptor;
-        const propArr = toVectorArray(rawPropVec);
-        if (propArr) {
-          vec = propArr;
-          console.log('[LOAD MASTER T0-OFFLINE PROPS] Vektor offline employee ditemukan di props, panjang:', propArr.length, 'employee:', empIdKey);
+      // ── Tier 1: Local IndexedDB / SQLite Cache (PRIORITAS UTAMA) ─────────────────────────
+      // Selalu cek SQLite local_master_descriptors / Dexie terlebih dahulu!
+      // Ini memastikan rescan lokal sore hari langsung dipakai saat check-out,
+      // tanpa tertimpa oleh props karyawan lama yang ada di memori.
+      cached = await getCachedUserMasterVector(empIdKey);
+      if (cached) {
+        const tempVec = cached.descriptor_json || cached.face_vector;
+        const validArr = toVectorArray(tempVec);
+        if (validArr) {
+          vec = validArr;
+          resolvedSource = 'local_cache';
+          resolvedChecksum = cached.vector_checksum || vectorChecksum(validArr);
+          resolvedVersion = cached.template_version || 1;
+          console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid, panjang:', validArr.length, 'checksum:', resolvedChecksum, 'employee:', empIdKey);
         } else {
-          console.warn('[LOAD MASTER T0-OFFLINE PROPS] Tidak ada vektor di props untuk offline employee:', empIdKey, '| descriptor_json:', rawPropVec ? 'ADA (invalid)' : 'NULL');
-        }
-      }
-
-      // ── Tier 1: Local IndexedDB / SQLite Cache ─────────────────────────
-      if (!vec) {
-        cached = await getCachedUserMasterVector(empIdKey);
-        if (cached) {
-          const tempVec = cached.descriptor_json || cached.face_vector;
-          const validArr = toVectorArray(tempVec);
-          if (validArr) {
-            vec = validArr;
-            console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid, panjang:', validArr.length, 'employee:', empIdKey);
-          } else {
-            console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (descriptor null/kosong), employee:', empIdKey);
-          }
+          console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (descriptor null/kosong), employee:', empIdKey);
         }
       }
 
@@ -857,7 +927,7 @@ export default function TabFaceVerification({
           try {
             const { data: masterData, error: masterErr } = await supabase
               .from('master_descriptors')
-              .select('descriptor_json')
+              .select('descriptor_json, template_version, vector_checksum')
               .eq('employee_id', empIdInt)
               .maybeSingle();
 
@@ -868,6 +938,9 @@ export default function TabFaceVerification({
               const validArr = toVectorArray(tempVec);
               if (validArr) {
                 vec = validArr;
+                resolvedSource = 'supabase_cloud';
+                resolvedChecksum = masterData.vector_checksum || vectorChecksum(validArr);
+                resolvedVersion = masterData.template_version || 1;
                 console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
               } else {
                 console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid');
@@ -881,21 +954,25 @@ export default function TabFaceVerification({
         }
       }
 
-      // ── Tier 4: Fallback ke props employees (kolom legacy) ────────────
+      // ── Tier 3: Fallback ke props employees (offline queue / legacy memory) ────────────
       if (!vec) {
+        const isOfflineId = String(empIdKey).startsWith('off_') || String(empIdKey).startsWith('tmp_');
         const empObj = employees.find((it) => String(it.id) === String(empIdKey) || (it.nik && String(it.nik) === String(empIdKey)));
-        const tempVec = empObj?.face_vector || empObj?.descriptor_json || empObj?.facial_descriptor;
-        const validArr = toVectorArray(tempVec);
+        const rawPropVec = empObj?.descriptor_json || empObj?.face_vector || empObj?.facial_descriptor;
+        const validArr = toVectorArray(rawPropVec);
         if (validArr) {
           vec = validArr;
-          console.log('[LOAD MASTER T4-PROPS] Vektor ditemukan valid di employees props');
+          resolvedSource = isOfflineId ? 'offline_props' : 'employee_props';
+          resolvedChecksum = vectorChecksum(validArr);
+          resolvedVersion = empObj?.template_version || 1;
+          console.log('[LOAD MASTER T3-PROPS] Vektor ditemukan valid di employees props, source:', resolvedSource);
         } else {
-          console.warn('[LOAD MASTER T4-PROPS] Tidak ada vektor valid di props. Employee ID:', empIdKey);
+          console.warn('[LOAD MASTER T3-PROPS] Tidak ada vektor valid di props. Employee ID:', empIdKey);
         }
       }
 
       // Parse & Store in Refs
-      masterGFVRef.current = null; // No longer used
+      masterGFVRef.current = null;
       setGfvMode(false);
 
       if (vec) {
@@ -916,14 +993,19 @@ export default function TabFaceVerification({
           if (parsedArray.length !== 1024 || hasNaN || isAllZeros) {
              console.warn(`[LOAD MASTER VECTORS] Template rusak terdeteksi (Dim: ${parsedArray.length}, NaN: ${hasNaN}, Zeros: ${isAllZeros}). Perlu daftar ulang.`);
              masterVectorRef.current = null;
+             vectorSourceRef.current = null;
+             masterChecksumRef.current = null;
              if (showToast) showToast('Template Biometrik Rusak', 'Data wajah rusak atau menggunakan versi lama. Silakan Re-Scan wajah melalui Edit Karyawan.', 'error');
              return;
           }
 
           masterVectorRef.current = parsedArray;
+          masterChecksumRef.current = resolvedChecksum || vectorChecksum(parsedArray);
+          masterVersionRef.current = resolvedVersion || cached?.template_version || 1;
+          vectorSourceRef.current = resolvedSource || 'unknown';
           scoreHistoryRef.current = []; // flush any zeros accumulated before master loaded
 
-          // Cache locally if it was fetched from Tier 0, 2 or 4 (not Tier 1)
+          // Cache locally if it was fetched from Cloud or Props (not already from Tier 1 cache)
           if (!cached) {
             const empObj = employees.find((it) => String(it.id) === String(empIdKey)) || {};
             await cacheUserMasterVector({
@@ -936,21 +1018,29 @@ export default function TabFaceVerification({
               status_tk: empObj.status_tk || null,
               jabatan: empObj.jabatan || null,
               status_perkawinan: empObj.status_perkawinan || null,
-              descriptor_json: parsedArray
+              descriptor_json: parsedArray,
+              template_version: masterVersionRef.current,
+              vector_checksum: masterChecksumRef.current
             }).catch(err => console.warn('[LOAD MASTER CACHE] Failed to cache vector locally:', err));
           }
         } else {
           masterVectorRef.current = null;
+          vectorSourceRef.current = null;
+          masterChecksumRef.current = null;
           console.warn('[LOAD MASTER VECTORS] Vektor tidak valid setelah unwrap');
         }
       } else {
         masterVectorRef.current = null;
+        vectorSourceRef.current = null;
+        masterChecksumRef.current = null;
       }
 
-      console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | Vector: ${masterVectorRef.current ? masterVectorRef.current.length + '-dim' : 'NO'}`);
+      console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | Source: ${vectorSourceRef.current} | Vector: ${masterVectorRef.current ? masterVectorRef.current.length + '-dim' : 'NO'}`);
     } catch (err) {
       console.error('[LOAD MASTER VECTORS ERROR]:', err);
       masterVectorRef.current = null;
+      vectorSourceRef.current = null;
+      masterChecksumRef.current = null;
     }
   };
 
@@ -1191,7 +1281,10 @@ export default function TabFaceVerification({
         setIsLiveHuman(true);
         setLivenessStatusMsg('Liveness Terverifikasi!');
         const base64Str = captureVideoFrameBase64(videoRef.current);
-        if (base64Str) setCapturedBase64Image(base64Str);
+        if (base64Str) {
+          capturedBase64ImageRef.current = base64Str;
+          setCapturedBase64Image(base64Str);
+        }
       }
     }
 
@@ -1249,6 +1342,11 @@ export default function TabFaceVerification({
           scanNaNCount = currentDescRef.current.filter(Number.isNaN).length;
         }
 
+        scanSessionEvaluatedRef.current += 1;
+        if (cosSimRaw > highestCosineRef.current) {
+          highestCosineRef.current = cosSimRaw;
+        }
+
         const logData = {
           cosSim: parseFloat(cosSimRaw.toFixed(4)),
           yaw: parseFloat((detection.rotation?.angle?.yaw || 0).toFixed(3)),
@@ -1264,10 +1362,13 @@ export default function TabFaceVerification({
           fallbackVideo: false
         };
 
-        if (phase0DebugMode) {
-          console.table(logData);
-        } else {
-          console.log('[FASE 0 LOG]', JSON.stringify(logData));
+        const isDebugLogging = (typeof window !== 'undefined' && localStorage.getItem('agriface_debug') === '1');
+        if (isDebugLogging) {
+          if (phase0DebugMode) {
+            console.table(logData);
+          } else {
+            console.log('[FASE 0 LOG]', JSON.stringify(logData));
+          }
         }
 
         // Skip frames where master isn't loaded yet — cosSimRaw=0 skews the median.
@@ -1280,6 +1381,7 @@ export default function TabFaceVerification({
       }
 
       const medianCos = median(scoreHistoryRef.current);
+      lastMedianCosRef.current = medianCos;
       const matched = scoreHistoryRef.current.length >= BIOMETRIC_CONFIG.SCAN_SAMPLE_COUNT && medianCos >= BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD;
       const rawPct = displayScore(medianCos);
 
@@ -1290,6 +1392,11 @@ export default function TabFaceVerification({
       setFrame('scanning', matched ? 1 : Math.min(1, scoreHistoryRef.current.length / BIOMETRIC_CONFIG.SCAN_SAMPLE_COUNT));
 
       if (matched) {
+        const snap = captureVideoFrameBase64(videoRef.current);
+        if (snap) {
+          capturedBase64ImageRef.current = snap;
+          setCapturedBase64Image(snap);
+        }
         if (!hasBeepedRef.current) {
           hasBeepedRef.current = true;
           playBeepSound();
@@ -1559,22 +1666,23 @@ export default function TabFaceVerification({
     // SyncEngine di latar belakang yang bertugas mengirimkannya secara asinkron.
 
     let pathFotoLokal = null;
-    if (capturedBase64Image) {
+    const freshSnapshot = captureVideoFrameBase64(videoRef.current);
+    const photoToSave = freshSnapshot || capturedBase64ImageRef.current || capturedBase64Image;
+    if (photoToSave) {
+      capturedBase64ImageRef.current = photoToSave;
       try {
         if (Capacitor.isNativePlatform()) {
           const fileName = `attendance_${targetEmp.nik}_${Date.now()}.jpg`;
-          // PERHATIAN UNTUK AI: Hapus prefix 'data:image/jpeg;base64,' jika ada agar file tidak korup
-          const base64Data = capturedBase64Image.replace(/^data:image\/\w+;base64,/, "");
+          const base64Data = photoToSave.replace(/^data:image\/\w+;base64,/, "");
           const result = await Filesystem.writeFile({
             path: fileName,
             data: base64Data,
             directory: Directory.Data
           });
-          pathFotoLokal = result.uri;
+          pathFotoLokal = result.uri || fileName;
           console.log('[FRONTEND] Saved photo locally to native filesystem:', pathFotoLokal);
         } else {
-          // Di browser laptop (Web platform), gunakan data Base64 langsung agar tidak bergantung pada Filesystem native
-          pathFotoLokal = capturedBase64Image;
+          pathFotoLokal = photoToSave;
           console.log('[FRONTEND] Saved photo base64 locally for web platform');
         }
       } catch (err) {
@@ -1597,11 +1705,36 @@ export default function TabFaceVerification({
         attendance_type: attendanceTypeDash,
         status: selectedStatus === 'Hadir' ? 'Hadir (Verified)' : selectedStatus,
         status_sync_teks: "pending",
-        status_sync_foto: "pending",
+        status_sync_foto: pathFotoLokal ? "pending" : "none",
         euclidean_distance: euclideanDist,
         path_foto_lokal: pathFotoLokal,
+        match_cosine: lastMedianCosRef.current || null,
+        match_threshold: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+        template_version: masterVersionRef.current || 1,
+        vector_checksum_used: masterChecksumRef.current || null,
+        vector_source: vectorSourceRef.current || null,
+        facing_mode: facingMode,
         ...(durasiDetik !== null && { durasi: durasiDetik }),
       });
+
+      // Log successful verification attempt to scan telemetry queue
+      queueScanAttempt({
+        attempt_type: 'ATTENDANCE-SCAN',
+        employee_id: targetEmp.id,
+        matched_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
+        median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
+        max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : (lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null),
+        threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+        template_version: masterVersionRef.current || 1,
+        master_checksum: masterChecksumRef.current || null,
+        vector_source: vectorSourceRef.current || null,
+        facing_mode: facingMode,
+        backend: human.tf?.getBackend?.() || 'webgl',
+        frames_evaluated: scanSessionEvaluatedRef.current,
+        frames_used: scanSessionEvaluatedRef.current,
+        outcome: 'MATCHED',
+        created_at: new Date().toISOString()
+      }).catch(() => {});
 
       isSuccess = true;
       successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;

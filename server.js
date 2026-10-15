@@ -80,6 +80,14 @@ apiRouter.post('/attendance/logs/delete', async (req, res) => {
   }
 });
 
+// Decommissioned legacy endpoints (410 Gone)
+apiRouter.all(['/attendance/verify', '/biometrics/register', '/biometrics/master/:id'], (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Endpoint decommissioned. AgriFace uses client-side on-device biometric verification and direct Supabase sync.'
+  });
+});
+
 app.use('/api', apiRouter);
 app.use('/YOU-CAN-SEE-ME/api', apiRouter);
 
