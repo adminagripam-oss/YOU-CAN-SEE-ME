@@ -4,9 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { BIOMETRIC_CONFIG, vectorChecksum, toVectorArray } from './biometrics';
-import versionData from '../version.json';
-
-const CURRENT_APP_VERSION = versionData?.version || '3.2.7';
+import { CURRENT_APP_VERSION } from './config/version';
 
 export function stripAttendanceTelemetry(payload) {
   if (Array.isArray(payload)) {
@@ -951,7 +949,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               jabatan: emp.jabatan,
               status_perkawinan: emp.status_perkawinan,
               descriptor_json: normalizedVec,
-              template_version: queueTemplateVer !== null ? queueTemplateVer : 1,
+              template_version: queueTemplateVer,
               vector_checksum: checksumVal
             });
           }
@@ -1162,6 +1160,17 @@ export async function syncPendingEmployeeDeletes() {
   }
 }
 
+let lastTelemetrySyncStatus = {
+  pendingCount: 0,
+  lastError: null,
+  lastErrorCode: null,
+  lastAttemptAt: null
+};
+
+export function getTelemetrySyncStatus() {
+  return lastTelemetrySyncStatus;
+}
+
 export async function syncPendingScanAttempts() {
   const isOnline = await checkOnline();
   if (!isOnline) return { count: 0 };
@@ -1169,7 +1178,15 @@ export async function syncPendingScanAttempts() {
   try {
     const { getUnsyncedScanAttempts, removeSyncedScanAttempts } = await import('./db');
     const pendingAttempts = await getUnsyncedScanAttempts();
-    if (!pendingAttempts || pendingAttempts.length === 0) return { count: 0 };
+    if (!pendingAttempts || pendingAttempts.length === 0) {
+      lastTelemetrySyncStatus = {
+        pendingCount: 0,
+        lastError: null,
+        lastErrorCode: null,
+        lastAttemptAt: new Date().toISOString()
+      };
+      return { count: 0 };
+    }
 
     console.log(`[Auto-Sync] Syncing ${pendingAttempts.length} scan attempts telemetry to Supabase...`);
 
@@ -1198,17 +1215,31 @@ export async function syncPendingScanAttempts() {
 
     const { error } = await supabase.from('scan_attempts').insert(rows);
     if (error) {
-      console.warn('[Auto-Sync Scan Attempts Error]:', error.message);
-      return { count: 0 };
+      console.warn(`[Auto-Sync Scan Attempts Error]: ${error.message} (code: ${error.code || 'unknown'})`);
+      lastTelemetrySyncStatus = {
+        pendingCount: pendingAttempts.length,
+        lastError: error.message,
+        lastErrorCode: error.code || '42501',
+        lastAttemptAt: new Date().toISOString()
+      };
+      // TEMUAN 7: JANGAN hapus baris lokal yang gagal terkirim.
+      // Kembalikan status error secara anggun agar sinkronisasi langkah lain tidak terganggu.
+      return { count: 0, error: { code: error.code, message: error.message } };
     }
 
     const idsToRemove = pendingAttempts.map(a => a.id).filter(Boolean);
     await removeSyncedScanAttempts(idsToRemove);
+    lastTelemetrySyncStatus = {
+      pendingCount: 0,
+      lastError: null,
+      lastErrorCode: null,
+      lastAttemptAt: new Date().toISOString()
+    };
     console.log(`[Auto-Sync] Successfully synced and purged ${idsToRemove.length} scan attempts.`);
     return { count: idsToRemove.length };
   } catch (err) {
     console.error('[Auto-Sync Scan Attempts Exception]:', err);
-    return { count: 0 };
+    return { count: 0, error: err };
   }
 }
 
@@ -1517,65 +1548,6 @@ export async function triggerAutoSync(showToast, onSyncComplete) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('refresh_logs'));
   }
-}
-
-let reactiveSyncTimer = null;
-let isReactiveSyncing = false;
-
-/**
- * Menjadwalkan sinkronisasi otomatis dengan debouncing agar rentetan aktivitas
- * (mis. absensi berturut-turut atau pendaftaran) hanya memicu satu siklus sinkronisasi.
- */
-export function scheduleReactiveSync(delayMs = 3000) {
-  if (reactiveSyncTimer) {
-    clearTimeout(reactiveSyncTimer);
-  }
-  reactiveSyncTimer = setTimeout(async () => {
-    reactiveSyncTimer = null;
-    const online = await checkOnline();
-    if (!online) {
-      console.log('[Reactive Sync] Perangkat offline, sinkronisasi otomatis ditunda.');
-      return;
-    }
-    if (isReactiveSyncing) {
-      console.log('[Reactive Sync] Siklus sinkronisasi sedang berjalan, pemanggilan berikutnya dilewati.');
-      return;
-    }
-    try {
-      isReactiveSyncing = true;
-      console.log('[Reactive Sync] Menjalankan sinkronisasi reaktif otomatis...');
-      await syncPendingEmployeeDeletes();
-      await syncPendingEmployees();
-      await syncPendingAttendanceLogs();
-      await syncPendingEmployeeFaceThumbs();
-      await syncPendingScanAttempts();
-      console.log('[Reactive Sync] Siklus sinkronisasi reaktif selesai.');
-    } catch (err) {
-      console.warn('[Reactive Sync Exception]:', err);
-    } finally {
-      isReactiveSyncing = false;
-    }
-  }, delayMs);
-}
-
-/**
- * Setup Realtime Online Network Listener for Sequential 3-Tier Auto-Sync
- */
-export function initAutoSyncListener(showToast, onSyncComplete) {
-  const handleOnline = () => {
-    console.log('[Network Status] Jaringan online terdeteksi, menjadwalkan sinkronisasi reaktif...');
-    scheduleReactiveSync(1000);
-  };
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('online', handleOnline);
-  }
-
-  return () => {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('online', handleOnline);
-    }
-  };
 }
 
 /**

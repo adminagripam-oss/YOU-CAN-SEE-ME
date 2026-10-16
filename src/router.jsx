@@ -121,9 +121,10 @@ function LoginRoute() {
 }
 
 function AbsensiRoute() {
-  const { employees, modelsLoaded, modelStatusText, showToast, fetchLogs, fetchEmployees } = useAppData();
+  const { isOnline, employees, modelsLoaded, modelStatusText, showToast, fetchLogs, fetchEmployees } = useAppData();
   return wrap(
     <AbsensiPage
+      isOnline={isOnline}
       employees={employees}
       modelsLoaded={modelsLoaded}
       modelStatusText={modelStatusText}

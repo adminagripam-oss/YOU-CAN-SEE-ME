@@ -2,6 +2,8 @@ import { Capacitor } from '@capacitor/core';
 import { SQLiteConnection, SQLiteDBConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
 // @ts-ignore
 import { vectorChecksum, BIOMETRIC_CONFIG, toVectorArray } from '../biometrics';
+// @ts-ignore
+import { CURRENT_APP_VERSION } from '../config/version';
 
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbConnection: SQLiteDBConnection | null = null;
@@ -241,6 +243,7 @@ export async function initSQLite(): Promise<void> {
         master_checksum TEXT,
         master_updated_at TEXT,
         template_version INTEGER,
+        vector_source TEXT,
         app_version TEXT,
         platform TEXT,
         created_at TEXT,
@@ -1053,18 +1056,67 @@ export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
 
 /**
  * Membersihkan cache kehadiran sesi saat Logout.
- * Tetap mempertahankan local_employees dan local_master_descriptors agar pemindai offline tetap siap.
+ * Menghitung batas awal hari lokal (local midnight ISO) sehingga log absensi pagi (termasuk sebelum 07.00 WIB)
+ * dan log yang belum tersinkron (is_synced = 0) tetap dipertahankan.
  */
 export async function sqliteClearAll(): Promise<void> {
-    const db = await waitForConnection();
-    if (!db) return;
+  const db = await waitForConnection();
+  if (!db) return;
   try {
-    await db.execute(`DELETE FROM local_today_attendance_cache`);
-    await db.execute(`DELETE FROM local_attendance_logs`);
-    await db.execute(`DELETE FROM local_attendance_requests`);
-    console.log('[SQLite Service] Cleared session attendance caches for logout (preserved employee & biometric templates).');
+    const d = new Date();
+    const localMidnightISO = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    // 1. Bersihkan today_attendance_cache tanggal selain hari ini
+    await db.run(`DELETE FROM local_today_attendance_cache WHERE cached_date != ?`, [todayStr]);
+
+    // 2. Bersihkan HANYA log lama (sebelum hari ini lokal) yang SUDAH TERSINKRON
+    await db.run(
+      `DELETE FROM local_attendance_logs 
+       WHERE timestamp < ? 
+         AND is_synced = 1 
+         AND id NOT IN (SELECT id FROM local_attendance_queue)`,
+      [localMidnightISO]
+    );
+
+    // 3. Bersihkan HANYA request yang sudah tersinkron
+    await db.run(`DELETE FROM local_attendance_requests WHERE is_synced = 1`);
+
+    console.log('[SQLite Service] Cleared past attendance caches for logout (preserved employee, biometric templates, and today/unsynced attendance logs).');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAll Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Menghapus log absensi tersinkronisasi yang dibuat sebelum batas waktu ISO tertentu.
+ */
+export async function sqliteDeleteAttendanceLogsBefore(beforeISO: string): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    await db.run(
+      `DELETE FROM local_attendance_logs 
+       WHERE timestamp < ? 
+         AND is_synced = 1 
+         AND id NOT IN (SELECT id FROM local_attendance_queue)`,
+      [beforeISO]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteDeleteAttendanceLogsBefore Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Menghapus permintaan kehadiran (attendance requests) yang sudah tersinkronisasi.
+ */
+export async function sqliteClearSyncedAttendanceRequests(): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    await db.run(`DELETE FROM local_attendance_requests WHERE is_synced = 1`);
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteClearSyncedAttendanceRequests Error]:', err?.message || err);
   }
 }
 
@@ -2244,13 +2296,13 @@ export async function sqliteQueueScanAttempt(attempt: any): Promise<number | nul
       `INSERT INTO local_scan_attempts_queue (
         employee_id, nik, attempt_type, outcome, median_cosine, min_cosine, max_cosine,
         frames_used, threshold_used, facing_mode, canvas_w, canvas_h, brightness,
-        master_checksum, master_updated_at, template_version, app_version, platform, created_at, is_synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        master_checksum, master_updated_at, template_version, vector_source, app_version, platform, created_at, is_synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         attempt.employee_id ? String(attempt.employee_id) : null,
         attempt.nik || null,
         attempt.attempt_type || 'CHECK-IN',
-        attempt.outcome || 'NOT_MATCHED',
+        attempt.failure_reason || attempt.outcome || 'NOT_MATCHED',
         attempt.median_cosine !== undefined ? attempt.median_cosine : null,
         attempt.min_cosine !== undefined ? attempt.min_cosine : null,
         maxCos,
@@ -2262,8 +2314,9 @@ export async function sqliteQueueScanAttempt(attempt: any): Promise<number | nul
         attempt.brightness !== undefined ? attempt.brightness : null,
         attempt.master_checksum || null,
         attempt.master_updated_at || null,
-        attempt.template_version || 1,
-        attempt.app_version || '3.2.1',
+        (attempt.template_version !== undefined && attempt.template_version !== null && attempt.template_version !== '') ? Number(attempt.template_version) : null,
+        attempt.vector_source || null,
+        attempt.app_version || CURRENT_APP_VERSION,
         attempt.platform || (Capacitor.isNativePlatform() ? 'android' : 'web'),
         attempt.created_at || new Date().toISOString(),
         0
@@ -2296,6 +2349,29 @@ export async function sqliteRemoveSyncedScanAttempts(ids: number[]): Promise<voi
     await db.run(`DELETE FROM local_scan_attempts_queue WHERE id IN (${placeholders})`, ids);
   } catch (err: any) {
     console.error('[SQLite Service sqliteRemoveSyncedScanAttempts Error]:', err?.message || err);
+  }
+}
+
+export async function sqliteGetRecentScanAttempts(employeeId?: string | number, limit: number = 50): Promise<any[]> {
+  const db = await waitForConnection();
+  if (!db) return [];
+  try {
+    if (employeeId) {
+      const res = await db.query(
+        `SELECT * FROM local_scan_attempts_queue WHERE employee_id = ? ORDER BY id DESC LIMIT ?`,
+        [String(employeeId), limit]
+      );
+      return res.values || [];
+    } else {
+      const res = await db.query(
+        `SELECT * FROM local_scan_attempts_queue ORDER BY id DESC LIMIT ?`,
+        [limit]
+      );
+      return res.values || [];
+    }
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteGetRecentScanAttempts Error]:', err?.message || err);
+    return [];
   }
 }
 

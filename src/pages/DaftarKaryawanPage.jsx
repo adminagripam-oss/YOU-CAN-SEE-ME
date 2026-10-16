@@ -266,7 +266,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         const templateResult = {
           vector: res.vector,
           consistency: res.consistency,
-          template_version: res.template_version || 1
+          template_version: (res.template_version !== undefined && res.template_version !== null && res.template_version !== '') ? Number(res.template_version) : null
         };
         queueScanAttempt({
           attempt_type: 'ENROLL',
@@ -544,11 +544,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       setScanModalOpen(false);
       refreshEmployees();
       window.dispatchEvent(new CustomEvent('refresh_employees'));
-
-      // Jadwalkan sinkronisasi otomatis reaktif
-      import('../syncEngine').then(({ scheduleReactiveSync }) => {
-        scheduleReactiveSync(2000);
-      }).catch(() => {});
     } catch (err) {
       showToast('Error', err.message, 'error');
     } finally {

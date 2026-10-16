@@ -118,7 +118,7 @@ export default function TabEmployeeManagement({
         const templateResult = {
           vector: res.vector,
           consistency: res.consistency,
-          template_version: res.template_version || 1
+          template_version: (res.template_version !== undefined && res.template_version !== null && res.template_version !== '') ? Number(res.template_version) : null
         };
         queueScanAttempt({
           attempt_type: 'ENROLL',
@@ -443,11 +443,6 @@ export default function TabEmployeeManagement({
           vector_checksum: cs
         });
       }
-
-      // Jadwalkan sinkronisasi otomatis reaktif
-      import('../syncEngine').then(({ scheduleReactiveSync }) => {
-        scheduleReactiveSync(2000);
-      }).catch(() => {});
 
       showToast(
         'Karyawan Berhasil Disimpan',
