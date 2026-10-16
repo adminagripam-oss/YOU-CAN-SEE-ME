@@ -235,14 +235,13 @@ export function AuthProvider({ children }) {
         }
       }
 
-      // DESTROY LOCAL DATA on successful logout to prevent sticky data
+      // Bersihkan cache kehadiran sesi saat logout, namun pertahankan data karyawan dan master biometrik offline
       try {
-        console.log('[LOGOUT] Destroying local session data (Caches, Logs, Employees)...');
+        console.log('[LOGOUT] Membersihkan cache kehadiran sesi...');
         if (Capacitor.isNativePlatform()) {
           const { sqliteClearAll } = await import('../services/sqliteService');
           await sqliteClearAll();
         }
-        await db.employees_cache.clear(); // This also clears user_master in db.js
         await db.today_attendance_cache.clear();
         await db.attendance_logs.clear();
         await db.attendance_requests.clear();

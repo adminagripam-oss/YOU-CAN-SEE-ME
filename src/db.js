@@ -46,7 +46,11 @@ import {
   sqliteGetEmployeeFaceThumb,
   sqliteGetEmployeeFaceThumbInfo,
   sqliteGetUnsyncedEmployeeFaceThumbs,
-  sqliteMarkSyncedEmployeeFaceThumbs
+  sqliteMarkSyncedEmployeeFaceThumbs,
+  sqliteSetPendingEmployeeProcessing,
+  sqliteHeartbeatPendingEmployee,
+  sqliteUpdatePendingEmployeeStepProgress,
+  sqliteRecoverStuckProcessingEmployees
 } from './services/sqliteService';
 import { vectorChecksum, toVectorArray } from './biometrics';
 export { toVectorArray };
@@ -155,6 +159,20 @@ dexieDb.version(11).stores({
   attendance_requests: 'id, request_type, log_id, status, is_synced',
   employee_delete_queue: 'id',
   employee_sync_queue: 'id, nik, name, template_version, is_synced, created_at',
+  scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
+  employee_face_thumbs: 'employee_id, captured_at, is_synced'
+});
+
+dexieDb.version(12).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric, is_synced',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced',
+  employee_delete_queue: 'id',
+  employee_sync_queue: 'id, nik, name, template_version, sync_status, is_synced, created_at',
   scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
   employee_face_thumbs: 'employee_id, captured_at, is_synced'
 });
@@ -550,19 +568,134 @@ export const db = {
         try {
           const existing = await this.get(id);
           if (existing) {
+            const nextAttempts = (existing.attempt_count || 0) + 1;
             const updated = {
               ...existing,
               id: String(existing.id),
+              sync_status: errorData.sync_status || (nextAttempts >= 5 ? 'needs_attention' : 'failed'),
               last_error_code: errorData.last_error_code || null,
               last_error_message: errorData.last_error_message || null,
+              last_error_hint: errorData.last_error_hint || null,
               last_error_step: errorData.last_error_step || null,
-              attempt_count: (existing.attempt_count || 0) + 1,
+              attempt_count: nextAttempts,
               last_attempt_at: new Date().toISOString()
             };
             await dexieDb.employee_sync_queue.put(updated);
           }
         } catch (e) {
           console.warn('[Dexie Employee Sync Queue UpdateError Error]:', e);
+        }
+      }
+    },
+    async setProcessing(id, runId) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteSetPendingEmployeeProcessing(id, runId);
+      } else {
+        try {
+          const existing = await this.get(id);
+          if (existing) {
+            const nowIso = new Date().toISOString();
+            await dexieDb.employee_sync_queue.put({
+              ...existing,
+              id: String(existing.id),
+              sync_status: 'processing',
+              processing_run_id: runId,
+              processing_started_at: nowIso,
+              processing_heartbeat_at: nowIso
+            });
+          }
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue setProcessing Error]:', e);
+        }
+      }
+    },
+    async heartbeat(id, runId) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteHeartbeatPendingEmployee(id, runId);
+      } else {
+        try {
+          const existing = await this.get(id);
+          if (existing && existing.processing_run_id === runId) {
+            await dexieDb.employee_sync_queue.put({
+              ...existing,
+              id: String(existing.id),
+              processing_heartbeat_at: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue heartbeat Error]:', e);
+        }
+      }
+    },
+    async updateProgress(id, progress = {}) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteUpdatePendingEmployeeStepProgress(id, progress);
+      } else {
+        try {
+          const existing = await this.get(id);
+          if (existing) {
+            const updated = { ...existing, id: String(existing.id) };
+            if (progress.core_done !== undefined) updated.core_done = progress.core_done ? 1 : 0;
+            if (progress.descriptor_done !== undefined) updated.descriptor_done = progress.descriptor_done ? 1 : 0;
+            if (progress.photo_done !== undefined) updated.photo_done = progress.photo_done ? 1 : 0;
+            if (progress.server_employee_id !== undefined) updated.server_employee_id = progress.server_employee_id ? String(progress.server_employee_id) : null;
+            await dexieDb.employee_sync_queue.put(updated);
+          }
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue updateProgress Error]:', e);
+        }
+      }
+    },
+    async recoverStuckProcessing(currentRunId) {
+      if (Capacitor.isNativePlatform()) {
+        return await sqliteRecoverStuckProcessingEmployees(currentRunId);
+      } else {
+        try {
+          const all = await dexieDb.employee_sync_queue.toArray();
+          const processingItems = (all || []).filter(item => item.sync_status === 'processing');
+          if (processingItems.length === 0) return 0;
+          let recoveredCount = 0;
+          const now = Date.now();
+          for (const item of processingItems) {
+            let shouldRecover = false;
+            const isOtherProcess = item.processing_run_id && item.processing_run_id !== currentRunId;
+            if (isOtherProcess) {
+              shouldRecover = true;
+            } else {
+              const hbTime = item.processing_heartbeat_at ? new Date(item.processing_heartbeat_at).getTime() : 0;
+              const startTime = item.processing_started_at ? new Date(item.processing_started_at).getTime() : 0;
+              const isHeartbeatStale = hbTime > 0 && (now - hbTime) > 120000;
+              const isAbsoluteTimeout = startTime > 0 && (now - startTime) > 300000;
+              if (isHeartbeatStale || isAbsoluteTimeout || !item.processing_run_id) {
+                shouldRecover = true;
+              }
+            }
+            if (shouldRecover) {
+              const nextAttempts = (item.attempt_count || 0) + 1;
+              const nextStatus = nextAttempts >= 5 ? 'needs_attention' : 'pending';
+              await dexieDb.employee_sync_queue.put({
+                ...item,
+                id: String(item.id),
+                sync_status: nextStatus,
+                processing_run_id: null,
+                processing_started_at: null,
+                processing_heartbeat_at: null,
+                last_error_code: 'STALE_PROCESSING',
+                last_error_message: `Sinkronisasi terputus sebelum selesai. Dipulihkan ke status ${nextStatus}`,
+                last_error_step: 'lease_recovery',
+                attempt_count: nextAttempts,
+                last_attempt_at: new Date().toISOString()
+              });
+              recoveredCount++;
+            }
+          }
+          if (recoveredCount > 0) {
+            console.log(`[Dexie] Dipulihkan ${recoveredCount} antrean pendaftaran yang macet di status processing.`);
+          }
+          return recoveredCount;
+        } catch (e) {
+          console.warn('[Dexie Employee Sync Queue recoverStuckProcessing Error]:', e);
+          return 0;
         }
       }
     }
@@ -762,7 +895,7 @@ export async function getCachedUserMasterVector(employeeId) {
           ...existing,
           descriptor_json: vec,
           face_vector: vec,
-          template_version: existing.template_version || 1,
+          template_version: (existing.template_version !== undefined && existing.template_version !== null && existing.template_version !== '') ? Number(existing.template_version) : null,
           vector_checksum: existing.vector_checksum || null
         };
       }
@@ -779,7 +912,7 @@ export async function getCachedUserMasterVector(employeeId) {
           employee_id: offlineRegistered.id,
           descriptor_json: vec,
           face_vector: vec,
-          template_version: offlineRegistered.template_version || 1,
+          template_version: (offlineRegistered.template_version !== undefined && offlineRegistered.template_version !== null && offlineRegistered.template_version !== '') ? Number(offlineRegistered.template_version) : null,
           vector_checksum: offlineRegistered.vector_checksum || null
         };
       }
@@ -796,7 +929,7 @@ export async function getCachedUserMasterVector(employeeId) {
           employee_id: cachedEmp.id,
           descriptor_json: vec,
           face_vector: vec,
-          template_version: cachedEmp.template_version || 1,
+          template_version: (cachedEmp.template_version !== undefined && cachedEmp.template_version !== null && cachedEmp.template_version !== '') ? Number(cachedEmp.template_version) : null,
           vector_checksum: cachedEmp.vector_checksum || null
         };
       }
@@ -989,7 +1122,7 @@ export async function getAllMasterVectors() {
           name: m.name,
           descriptor_json: vec,
           vector_checksum: cs,
-          template_version: m.template_version || 1,
+          template_version: (m.template_version !== undefined && m.template_version !== null && m.template_version !== '') ? Number(m.template_version) : null,
           updated_at: m.updated_at || null,
         });
       }
@@ -1008,7 +1141,7 @@ export async function getAllMasterVectors() {
             name: q.name,
             descriptor_json: vec,
             vector_checksum: cs,
-            template_version: q.template_version || 1,
+            template_version: (q.template_version !== undefined && q.template_version !== null && q.template_version !== '') ? Number(q.template_version) : null,
             updated_at: q.updated_at || null,
           });
         }
@@ -1453,5 +1586,10 @@ export async function normalizeEmployeeFaceThumbKeys() {
     return { converted: 0, error: err?.message || err };
   }
 }
+
+export async function recoverStuckProcessingEmployees(currentRunId) {
+  return await db.employee_sync_queue.recoverStuckProcessing(currentRunId);
+}
+
 
 

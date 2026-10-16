@@ -1710,7 +1710,7 @@ export default function TabFaceVerification({
         path_foto_lokal: pathFotoLokal,
         match_cosine: lastMedianCosRef.current || null,
         match_threshold: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: masterVersionRef.current !== undefined && masterVersionRef.current !== null ? Number(masterVersionRef.current) : 1,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
         vector_checksum_used: masterChecksumRef.current || null,
         vector_source: vectorSourceRef.current || null,
         facing_mode: facingMode,
@@ -1725,7 +1725,7 @@ export default function TabFaceVerification({
         median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
         max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : (lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null),
         threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: masterVersionRef.current !== undefined && masterVersionRef.current !== null ? Number(masterVersionRef.current) : 1,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
         master_checksum: masterChecksumRef.current || null,
         vector_source: vectorSourceRef.current || null,
         facing_mode: facingMode,
@@ -1738,6 +1738,11 @@ export default function TabFaceVerification({
 
       isSuccess = true;
       successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;
+
+      // Jadwalkan sinkronisasi otomatis reaktif
+      import('../syncEngine').then(({ scheduleReactiveSync }) => {
+        scheduleReactiveSync(3000);
+      }).catch(() => {});
 
       // Optimistic row so the log table updates without waiting for fetchLogs.
       // The background refresh triggered by onVerificationSuccess replaces it.

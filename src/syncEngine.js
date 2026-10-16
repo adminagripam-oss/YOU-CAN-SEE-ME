@@ -4,6 +4,9 @@ import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { BIOMETRIC_CONFIG, vectorChecksum, toVectorArray } from './biometrics';
+import versionData from '../version.json';
+
+const CURRENT_APP_VERSION = versionData?.version || '3.2.7';
 
 export function stripAttendanceTelemetry(payload) {
   if (Array.isArray(payload)) {
@@ -24,6 +27,7 @@ export function isAttendanceMissingColumnError(err) {
     msg.includes('facing_mode');
 }
 
+export const APP_RUN_ID = 'run_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 let isSyncing = false;
 
 /**
@@ -56,7 +60,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
   try {
     let pendingLogsRaw = await getUnsyncedLogs();
-    
+
     // --- LOGIKA CUT-OFF 22:00 ---
     const waktuCutOff = new Date();
     waktuCutOff.setHours(22, 0, 0, 0);
@@ -72,7 +76,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       return { count: 0 };
     }
     // ----------------------------
-    
+
     // PRE-PROCESSING: Auto-Recovery untuk "Orphaned Logs" (Log yang karyawannya hilang dari antrean lokal)
     try {
       const isNative = Capacitor.isNativePlatform();
@@ -88,7 +92,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
       for (let i = 0; i < pendingLogs.length; i++) {
         const log = pendingLogs[i];
         const empIdStr = String(log.employee_id);
-        
+
         if (isNaN(Number(empIdStr))) {
           // Log ini offline. Apakah karyawannya masih ada di antrean?
           if (!pendingEmpIds.has(empIdStr)) {
@@ -99,27 +103,27 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
                 .select('id')
                 .eq('nik', log.nik)
                 .single();
-                
+
               if (existingEmp) {
-                 log.employee_id = existingEmp.id; // Auto fix
-                 if (isNative) {
-                   const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
-                   await sqliteUpdatePendingAttendanceEmployeeId(empIdStr, existingEmp.id);
-                 } else {
-                   await db.attendance_sync_queue.put(log);
-                 }
-                 console.log(`[Auto-Sync] Auto-recovery berhasil! ID log diupdate ke: ${existingEmp.id}`);
+                log.employee_id = existingEmp.id; // Auto fix
+                if (isNative) {
+                  const { sqliteUpdatePendingAttendanceEmployeeId } = await import('./services/sqliteService');
+                  await sqliteUpdatePendingAttendanceEmployeeId(empIdStr, existingEmp.id);
+                } else {
+                  await db.attendance_sync_queue.put(log);
+                }
+                console.log(`[Auto-Sync] Auto-recovery berhasil! ID log diupdate ke: ${existingEmp.id}`);
               } else {
-                 console.warn(`[Auto-Sync] Karyawan dgn NIK ${log.nik} tidak ada di server. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
-                 log.needs_resolution = true;
-                 log.sync_notes = 'Membutuhkan Resolusi NIK';
-                 await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
+                console.warn(`[Auto-Sync] Karyawan dgn NIK ${log.nik} tidak ada di server. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
+                log.needs_resolution = true;
+                log.sync_notes = 'Membutuhkan Resolusi NIK';
+                await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
               }
             } else {
-               console.warn(`[Auto-Sync] Log offline tanpa NIK tidak bisa di-recovery. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
-               log.needs_resolution = true;
-               log.sync_notes = 'Membutuhkan Resolusi NIK';
-               await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
+              console.warn(`[Auto-Sync] Log offline tanpa NIK tidak bisa di-recovery. Menandai log butuh resolusi NIK (TIDAK DIHAPUS).`);
+              log.needs_resolution = true;
+              log.sync_notes = 'Membutuhkan Resolusi NIK';
+              await updateSyncStatus(log.id, 'pending', null, 'Membutuhkan Resolusi NIK');
             }
           }
         }
@@ -148,9 +152,9 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
     // Pisahkan logs untuk Step A (Text Push) dan Step B (Photo Push)
     const textPendingLogs = pendingLogs.filter(log => log.status_sync_teks !== 'done');
-    const photoPendingLogs = pendingLogsRaw.filter(log => 
-      (log.status_sync_teks === 'done' || !textPendingLogs.find(t => t.id === log.id)) && 
-      log.status_sync_foto !== 'done' && 
+    const photoPendingLogs = pendingLogsRaw.filter(log =>
+      (log.status_sync_teks === 'done' || !textPendingLogs.find(t => t.id === log.id)) &&
+      log.status_sync_foto !== 'done' &&
       log.path_foto_lokal
     );
 
@@ -188,171 +192,171 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
         };
       });
 
-    let syncedIds = [];
-    let successfulData = [];
-    let telemetryExcluded = false;
+      let syncedIds = [];
+      let successfulData = [];
+      let telemetryExcluded = false;
 
-    let { data, error } = await supabase
-      .from('attendance_logs')
-      .insert(logsToInsert)
-      .select();
-
-    // Adaptive schema matching: if telemetry columns not yet migrated on attendance_logs (42703)
-    if (error && isAttendanceMissingColumnError(error)) {
-      telemetryExcluded = true;
-      console.warn('[Auto-Sync] attendance_logs server belum memiliki kolom telemetri (42703). Mencoba insert ulang tanpa kolom telemetri...');
-      if (typeof window !== 'undefined') {
-        window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
-      }
-      const retryRes = await supabase
+      let { data, error } = await supabase
         .from('attendance_logs')
-        .insert(stripAttendanceTelemetry(logsToInsert))
+        .insert(logsToInsert)
         .select();
-      data = retryRes.data;
-      error = retryRes.error;
-    }
 
-    if (error) {
-      console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to sequential for...of insert:', error.message || error);
-      
-      // Requirement 2: Sekuensial lambat (for...of) dengan try...catch per iterasi individu
-      for (let i = 0; i < textPendingLogs.length; i++) {
-        let singleLogPayload = logsToInsert[i];
-        if (telemetryExcluded) {
-          singleLogPayload = stripAttendanceTelemetry(singleLogPayload);
+      // Adaptive schema matching: if telemetry columns not yet migrated on attendance_logs (42703)
+      if (error && isAttendanceMissingColumnError(error)) {
+        telemetryExcluded = true;
+        console.warn('[Auto-Sync] attendance_logs server belum memiliki kolom telemetri (42703). Mencoba insert ulang tanpa kolom telemetri...');
+        if (typeof window !== 'undefined') {
+          window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
         }
-        const originalLog = textPendingLogs[i];
+        const retryRes = await supabase
+          .from('attendance_logs')
+          .insert(stripAttendanceTelemetry(logsToInsert))
+          .select();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
 
-        try {
-          let { data: singleData, error: singleError } = await supabase
-            .from('attendance_logs')
-            .insert([singleLogPayload])
-            .select();
-          
-          // Adaptive fallback retry for individual item if 42703 occurs
-          if (singleError && isAttendanceMissingColumnError(singleError)) {
-            telemetryExcluded = true;
-            console.warn(`[Auto-Sync Fallback] attendance_logs missing telemetry columns (42703) on log #${originalLog.id}. Retrying without telemetry...`);
-            if (typeof window !== 'undefined') {
-              window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
-            }
+      if (error) {
+        console.warn('[Auto-Sync] Bulk insert failed (likely due to FK violation/409 Conflict). Falling back to sequential for...of insert:', error.message || error);
+
+        // Requirement 2: Sekuensial lambat (for...of) dengan try...catch per iterasi individu
+        for (let i = 0; i < textPendingLogs.length; i++) {
+          let singleLogPayload = logsToInsert[i];
+          if (telemetryExcluded) {
             singleLogPayload = stripAttendanceTelemetry(singleLogPayload);
-            const singleRetry = await supabase
+          }
+          const originalLog = textPendingLogs[i];
+
+          try {
+            let { data: singleData, error: singleError } = await supabase
               .from('attendance_logs')
               .insert([singleLogPayload])
               .select();
-            singleData = singleRetry.data;
-            singleError = singleRetry.error;
-          }
 
-          if (singleError) {
-            console.error(`[Auto-Sync Fallback Error] Gagal insert log ID #${originalLog.id} (employee_id: ${singleLogPayload.employee_id}):`, singleError.message || singleError);
-            
-            // Requirement 1: Jika FK violation (23503), JANGAN HAPUS LOG. Tandai butuh resolusi NIK
-            if (singleError.code === '23503') {
-              console.warn(`[Auto-Sync Fallback] FK violation 23503 untuk log #${originalLog.id}. Menandai butuh resolusi NIK manual.`);
-              originalLog.needs_resolution = true;
-              originalLog.sync_notes = 'Membutuhkan Resolusi NIK';
-              await updateSyncStatus(originalLog.id, 'pending', null, 'Membutuhkan Resolusi NIK');
-            } else if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
-              // Jika log sudah ada di server (duplikat), status diubah ke 'done' agar tidak menggantung
-              console.warn(`[Auto-Sync Fallback] Log #${originalLog.id} sudah ada di server (duplicate key). Memperbarui status lokal ke done.`);
-              
-              // Coba dapatkan real ID dari server untuk duplicate key ini
-              const { data: dupData } = await supabase.from('attendance_logs')
-                .select('id')
-                .eq('employee_id', singleLogPayload.employee_id)
-                .eq('timestamp', singleLogPayload.timestamp)
-                .limit(1);
-                
-              if (dupData && dupData.length > 0) {
-                localToRealIdMap[originalLog.id] = dupData[0].id;
+            // Adaptive fallback retry for individual item if 42703 occurs
+            if (singleError && isAttendanceMissingColumnError(singleError)) {
+              telemetryExcluded = true;
+              console.warn(`[Auto-Sync Fallback] attendance_logs missing telemetry columns (42703) on log #${originalLog.id}. Retrying without telemetry...`);
+              if (typeof window !== 'undefined') {
+                window.__attendanceLogsSchemaWarning = 'Kolom telemetri attendance_logs belum dimigrasi di server (42703). Log absensi dikirim tanpa kolom telemetri.';
               }
-              
-              await updateSyncStatus(originalLog.id, 'done', null);
+              singleLogPayload = stripAttendanceTelemetry(singleLogPayload);
+              const singleRetry = await supabase
+                .from('attendance_logs')
+                .insert([singleLogPayload])
+                .select();
+              singleData = singleRetry.data;
+              singleError = singleRetry.error;
+            }
+
+            if (singleError) {
+              console.error(`[Auto-Sync Fallback Error] Gagal insert log ID #${originalLog.id} (employee_id: ${singleLogPayload.employee_id}):`, singleError.message || singleError);
+
+              // Requirement 1: Jika FK violation (23503), JANGAN HAPUS LOG. Tandai butuh resolusi NIK
+              if (singleError.code === '23503') {
+                console.warn(`[Auto-Sync Fallback] FK violation 23503 untuk log #${originalLog.id}. Menandai butuh resolusi NIK manual.`);
+                originalLog.needs_resolution = true;
+                originalLog.sync_notes = 'Membutuhkan Resolusi NIK';
+                await updateSyncStatus(originalLog.id, 'pending', null, 'Membutuhkan Resolusi NIK');
+              } else if (singleError.code === '23505' || singleError.message?.includes('duplicate key')) {
+                // Jika log sudah ada di server (duplikat), status diubah ke 'done' agar tidak menggantung
+                console.warn(`[Auto-Sync Fallback] Log #${originalLog.id} sudah ada di server (duplicate key). Memperbarui status lokal ke done.`);
+
+                // Coba dapatkan real ID dari server untuk duplicate key ini
+                const { data: dupData } = await supabase.from('attendance_logs')
+                  .select('id')
+                  .eq('employee_id', singleLogPayload.employee_id)
+                  .eq('timestamp', singleLogPayload.timestamp)
+                  .limit(1);
+
+                if (dupData && dupData.length > 0) {
+                  localToRealIdMap[originalLog.id] = dupData[0].id;
+                }
+
+                await updateSyncStatus(originalLog.id, 'done', null);
+                syncedIds.push(originalLog.id);
+              } else {
+                // Requirement 4: Lempar error jika gagal (No Silent Failures)
+                throw singleError;
+              }
+            } else if (singleData && Array.isArray(singleData) && singleData.length > 0) {
+              // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
+              console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
+              localToRealIdMap[originalLog.id] = singleData[0].id;
+              const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
+              await updateSyncStatus(originalLog.id, 'done', null, syncNote);
               syncedIds.push(originalLog.id);
-            } else {
-              // Requirement 4: Lempar error jika gagal (No Silent Failures)
-              throw singleError;
+              successfulData.push(singleData[0]);
             }
-          } else if (singleData && Array.isArray(singleData) && singleData.length > 0) {
-            // Requirement 3: Validasi Keberhasilan Absolut (response.data valid & response.error null)
-            console.log(`[Auto-Sync Fallback Success] Berhasil insert log #${originalLog.id} ke Supabase.`);
-            localToRealIdMap[originalLog.id] = singleData[0].id;
-            const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
-            await updateSyncStatus(originalLog.id, 'done', null, syncNote);
-            syncedIds.push(originalLog.id);
-            successfulData.push(singleData[0]);
+          } catch (singleCatchErr) {
+            console.error(`[Auto-Sync Fallback Exception] Exception saat insert log #${originalLog.id}:`, singleCatchErr);
+            // Biarkan data tetap berstatus 'pending' di DB lokal untuk di-retry nanti
           }
-        } catch (singleCatchErr) {
-          console.error(`[Auto-Sync Fallback Exception] Exception saat insert log #${originalLog.id}:`, singleCatchErr);
-          // Biarkan data tetap berstatus 'pending' di DB lokal untuk di-retry nanti
+        }
+      } else {
+        // Requirement 3: Validasi Keberhasilan Absolut untuk Bulk Insert
+        if (data && Array.isArray(data) && data.length > 0) {
+          syncedIds = textPendingLogs.map(log => log.id);
+          successfulData = data;
+          const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
+          for (let i = 0; i < syncedIds.length; i++) {
+            if (data[i]) {
+              localToRealIdMap[syncedIds[i]] = data[i].id;
+            }
+            await updateSyncStatus(syncedIds[i], 'done', null, syncNote);
+          }
         }
       }
-    } else {
-      // Requirement 3: Validasi Keberhasilan Absolut untuk Bulk Insert
-      if (data && Array.isArray(data) && data.length > 0) {
-        syncedIds = textPendingLogs.map(log => log.id);
-        successfulData = data;
-        const syncNote = telemetryExcluded ? 'Log tersimpan (telemetri 42703 dilewati)' : null;
-        for (let i = 0; i < syncedIds.length; i++) {
-          if (data[i]) {
-            localToRealIdMap[syncedIds[i]] = data[i].id;
-          }
-          await updateSyncStatus(syncedIds[i], 'done', null, syncNote);
-        }
-      }
-    }
 
-    // Requirement 5 (Bug Fix Asymmetric Sync untuk Request):
-    // Remap log_id pada antrean attendance_requests jika log_id sementara ('offline_x') mendapat ID asli dari Supabase
-    const remappedIds = Object.keys(localToRealIdMap);
-    if (remappedIds.length > 0) {
-      try {
-        const localRequests = await db.attendance_requests.toArray();
-        for (const localId of remappedIds) {
-          const realId = localToRealIdMap[localId];
-          if (String(localId) !== String(realId)) {
-            const reqsToUpdate = localRequests.filter(req => 
-              String(req.log_id) === String(localId) || 
-              (req.old_value && String(req.old_value.logId) === String(localId)) ||
-              (req.old_value && String(req.old_value.inLogId) === String(localId))
-            );
+      // Requirement 5 (Bug Fix Asymmetric Sync untuk Request):
+      // Remap log_id pada antrean attendance_requests jika log_id sementara ('offline_x') mendapat ID asli dari Supabase
+      const remappedIds = Object.keys(localToRealIdMap);
+      if (remappedIds.length > 0) {
+        try {
+          const localRequests = await db.attendance_requests.toArray();
+          for (const localId of remappedIds) {
+            const realId = localToRealIdMap[localId];
+            if (String(localId) !== String(realId)) {
+              const reqsToUpdate = localRequests.filter(req =>
+                String(req.log_id) === String(localId) ||
+                (req.old_value && String(req.old_value.logId) === String(localId)) ||
+                (req.old_value && String(req.old_value.inLogId) === String(localId))
+              );
 
-            for (let req of reqsToUpdate) {
-              req.log_id = realId;
-              if (req.old_value && req.old_value.logId === localId) req.old_value.logId = realId;
-              if (req.old_value && req.old_value.inLogId === localId) req.old_value.inLogId = realId;
-              await db.attendance_requests.put(req);
-              console.log(`[Auto-Sync Remap] Request #${req.id} diperbarui: log_id dari ${localId} menjadi ${realId}`);
+              for (let req of reqsToUpdate) {
+                req.log_id = realId;
+                if (req.old_value && req.old_value.logId === localId) req.old_value.logId = realId;
+                if (req.old_value && req.old_value.inLogId === localId) req.old_value.inLogId = realId;
+                await db.attendance_requests.put(req);
+                console.log(`[Auto-Sync Remap] Request #${req.id} diperbarui: log_id dari ${localId} menjadi ${realId}`);
+              }
             }
           }
+        } catch (remapErr) {
+          console.error('[Auto-Sync Remap] Gagal me-remap log_id untuk request:', remapErr);
         }
-      } catch (remapErr) {
-        console.error('[Auto-Sync Remap] Gagal me-remap log_id untuk request:', remapErr);
       }
-    }
 
-    syncedTextIds = syncedIds;
+      syncedTextIds = syncedIds;
 
-    if (syncedTextIds.length > 0) {
-      console.log(`[Auto-Sync Step A] Successfully synced ${syncedTextIds.length} text records!`);
-      const noPhotoIds = [];
-      for (const id of syncedTextIds) {
-        const logToPhoto = textPendingLogs.find(l => l.id === id);
-        if (logToPhoto && logToPhoto.path_foto_lokal) {
-          if (!photoPendingLogs.some(p => p.id === logToPhoto.id)) {
-            photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+      if (syncedTextIds.length > 0) {
+        console.log(`[Auto-Sync Step A] Successfully synced ${syncedTextIds.length} text records!`);
+        const noPhotoIds = [];
+        for (const id of syncedTextIds) {
+          const logToPhoto = textPendingLogs.find(l => l.id === id);
+          if (logToPhoto && logToPhoto.path_foto_lokal) {
+            if (!photoPendingLogs.some(p => p.id === logToPhoto.id)) {
+              photoPendingLogs.push(logToPhoto); // Push to photo queue for Step B
+            }
+          } else {
+            noPhotoIds.push(id);
           }
-        } else {
-          noPhotoIds.push(id);
+        }
+
+        if (noPhotoIds.length > 0) {
+          await removeSyncedLogs(noPhotoIds);
         }
       }
-      
-      if (noPhotoIds.length > 0) {
-        await removeSyncedLogs(noPhotoIds);
-      }
-    }
     } // end if textPendingLogs.length > 0
 
     // Step B: Sequential Photo Push
@@ -394,7 +398,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
 
           const response = await fetch(dataUrl);
           const blob = await response.blob();
-          
+
           const uuid = log.id + '_' + Date.now();
           const storagePath = `absensi_harian/${log.nik}/${uuid}.jpg`;
 
@@ -414,7 +418,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
           const { data: publicUrlData } = supabase.storage
             .from('attendance-photos')
             .getPublicUrl(storagePath);
-          
+
           const publicUrl = publicUrlData.publicUrl;
 
           // Requirement 3: Update text log in server with photo url and verify response
@@ -456,7 +460,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
             // Step C: Garbage Collection (Delete local file and set status_sync_foto = 'done' ONLY upon verified response)
             await updateSyncStatus(log.id, null, 'done');
             await removeSyncedLogs([log.id]);
-            
+
             if (Capacitor.isNativePlatform() && log.path_foto_lokal && !log.path_foto_lokal.startsWith('data:image/')) {
               try {
                 await Filesystem.deleteFile({
@@ -491,7 +495,7 @@ export async function syncPendingAttendanceLogs(showToast = null, onSyncComplete
     if (syncedTextIds.length > 0) {
       await removeSyncedLogs(syncedTextIds);
     }
-    
+
     // Write sync action to public backup log
     if (Capacitor.isNativePlatform() && (syncedTextIds.length > 0 || syncedPhotoCount > 0)) {
       const timestamp = new Date().toISOString();
@@ -569,14 +573,14 @@ export async function syncPendingAttendanceRequests() {
             const inLogId = r.old_value?.inLogId || r.old_value?.logId || r.log_id;
             const outLogId = r.old_value?.outLogId;
             const idsToDelete = [inLogId, outLogId].filter(Boolean);
-            
+
             if (idsToDelete.length > 0) {
               const { error: delErr } = await supabase.from('attendance_logs').delete().in('id', idsToDelete);
               if (delErr) {
                 console.warn(`[Auto-Sync] Gagal execute delete untuk request ${r.id}:`, delErr.message);
                 continue; // Skip, don't mark as synced
               }
-              
+
               // Skenario Resolution (Success): Execute local Hard Delete
               const { db } = await import('./db');
               for (const id of idsToDelete) {
@@ -586,13 +590,13 @@ export async function syncPendingAttendanceRequests() {
           } else if (r.request_type === 'EDIT' && r.new_value) {
             let editSuccess = true;
             const newVal = r.new_value;
-            
+
             if (newVal.inLogId && newVal.checkIn) {
               const [hours, minutes, seconds] = newVal.checkIn.split(':');
               const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.inLogId).single();
               if (logData) {
                 const oldDate = new Date(logData.timestamp);
-                oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+                oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
                 let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
                 newStatus = `[CHECK-IN BERHASIL] - ${newStatus}`;
                 const { error: updErr } = await supabase.from('attendance_logs').update({ timestamp: oldDate.toISOString(), status: newStatus }).eq('id', newVal.inLogId);
@@ -604,7 +608,7 @@ export async function syncPendingAttendanceRequests() {
               const { data: logData } = await supabase.from('attendance_logs').select('timestamp').eq('id', newVal.outLogId).single();
               if (logData) {
                 const oldDate = new Date(logData.timestamp);
-                oldDate.setHours(parseInt(hours||0), parseInt(minutes||0), parseInt(seconds||0));
+                oldDate.setHours(parseInt(hours || 0), parseInt(minutes || 0), parseInt(seconds || 0));
                 let newStatus = newVal.keterangan === 'Hadir' ? 'Hadir (Verified)' : newVal.keterangan;
                 newStatus = `[CHECK-OUT BERHASIL] - ${newStatus}`;
                 const { error: updErr } = await supabase.from('attendance_logs').update({ timestamp: oldDate.toISOString(), status: newStatus }).eq('id', newVal.outLogId);
@@ -639,9 +643,9 @@ export async function syncPendingAttendanceRequests() {
 
       const { error: insErr } = await supabase.from('attendance_requests').upsert([reqPayload]);
       if (insErr && !insErr.message.includes('relation "public.attendance_requests" does not exist')) {
-         console.warn(`[Auto-Sync] Failed to insert audit trail for ${r.id}:`, insErr.message);
+        console.warn(`[Auto-Sync] Failed to insert audit trail for ${r.id}:`, insErr.message);
       }
-      
+
       await db.attendance_requests.put({ ...r, is_synced: true });
       syncedCount++;
     }
@@ -663,6 +667,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
   const isOnline = await checkOnline();
   if (!isOnline) return { count: 0 };
 
+  // 1. Pemulihan instan crash/stale processing saat siklus sinkronisasi dipicu
+  try {
+    const { recoverStuckProcessingEmployees } = await import('./db');
+    await recoverStuckProcessingEmployees(APP_RUN_ID);
+  } catch (recErr) {
+    console.warn('[Auto-Sync Employees] Failed to run recoverStuckProcessingEmployees:', recErr);
+  }
+
   try {
     const isNative = Capacitor.isNativePlatform();
     let pendingEmpsRaw = [];
@@ -679,19 +691,36 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
 
     // Master employee records are not constrained by shift checkout cut-off (PRD 3.3).
     // They should sync whenever network connectivity is available.
-    const pendingEmps = pendingEmpsRaw;
+    // Filter hanya item yang belum tersinkron dan bukan 'processing' milik proses aktif lain (jika ada)
+    const pendingEmps = pendingEmpsRaw.filter(emp => (!emp.is_synced || emp.is_synced === 0) && emp.sync_status !== 'processing');
+    if (pendingEmps.length === 0) return { count: 0 };
 
     const { cacheUserMasterVector, db } = await import('./db');
 
     console.log(`[Auto-Sync Employees] Attempting to sync ${pendingEmps.length} offline registered employees...`);
-    
+
     // FETCH PENDING LOGS ONCE OUTSIDE THE LOOP! (Massive performance boost)
     const allPendingLogs = await getUnsyncedLogs();
 
     const employeePromises = pendingEmps.map(async (emp) => {
+      let heartbeatTimer = null;
       try {
-        let realEmpId = null;
         const tempIdStr = String(emp.id);
+
+        // Pasang lease pemrosesan pada item
+        if (db.employee_sync_queue.setProcessing) {
+          await db.employee_sync_queue.setProcessing(emp.id, APP_RUN_ID);
+        }
+
+        // Jalankan heartbeat tiap 15 detik selama item diproses
+        if (db.employee_sync_queue.heartbeat) {
+          heartbeatTimer = setInterval(() => {
+            db.employee_sync_queue.heartbeat(emp.id, APP_RUN_ID).catch(() => {});
+          }, 15000);
+        }
+
+        let realEmpId = emp.server_employee_id ? Number(emp.server_employee_id) : null;
+        let isCoreDone = Boolean(emp.core_done && realEmpId);
 
         let finalNik = emp.nik ?? '';
         if (finalNik === '' || finalNik === '-' || finalNik === 'Tanpa NIK') {
@@ -700,82 +729,154 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           finalNik = 'OFF_NIK_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
         }
 
-        // 1. Call RPC for conflict resolution
-        const payload = {
-          nik: finalNik,
-          name: emp.name ?? '',
-          department: emp.department ?? emp.jabatan ?? '',
-          afdeling: emp.afdeling ?? '',
-          nama_kebun: emp.nama_kebun ?? '',
-          status_tk: emp.status_tk ?? '',
-          jabatan: emp.jabatan ?? '',
-          status_perkawinan: emp.status_perkawinan ?? '',
-          has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
-        };
+        // --- LANGKAH 1: Core Employee Insert/RPC ---
+        if (!isCoreDone) {
+          const payload = {
+            nik: finalNik,
+            name: emp.name ?? '',
+            department: emp.department ?? emp.jabatan ?? '',
+            afdeling: emp.afdeling ?? '',
+            nama_kebun: emp.nama_kebun ?? '',
+            status_tk: emp.status_tk ?? '',
+            jabatan: emp.jabatan ?? '',
+            status_perkawinan: emp.status_perkawinan ?? '',
+            has_master_biometric: !!emp.descriptor_json || emp.has_master_biometric === true || emp.has_master_biometric === 1
+          };
 
-        const { data: rpcData, error: rpcError } = await supabase.rpc('sync_offline_employee', { payload });
+          const { data: rpcData, error: rpcError } = await supabase.rpc('sync_offline_employee', { payload });
 
-        if (rpcError) {
-          console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, rpcError.message);
-          await db.employee_sync_queue.updateError(emp.id, {
-            last_error_code: rpcError.code || 'RPC_ERROR',
-            last_error_message: rpcError.message,
-            last_error_step: 'employees_rpc'
-          });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('agriface-toast', {
-              detail: { title: 'Error Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: [${rpcError.code || 'RPC'}] ${rpcError.message}`, type: 'error' }
-            }));
-          }
-          return false;
-        }
+          if (rpcError) {
+            // Skenario 23505 (Duplikat NIK): Server sebenarnya sudah punya NIK ini (mis. dari percobaan sebelumnya)
+            // Lakukan rekonsiliasi otomatis: ambil ID server dan lanjut ke langkah berikutnya
+            const isDuplicate = rpcError.code === '23505' ||
+              String(rpcError.message || '').includes('duplicate key') ||
+              String(rpcError.message || '').includes('already exists');
 
-        if (rpcData && rpcData.status === 'rejected_deleted') {
-          console.warn(`[Sync Employee Edge Case] Edit ditolak! Karyawan ${emp.nik} sudah dihapus secara permanen di server (Soft Deleted).`);
-          // Skip updating server, but we must purge this local ghost edit
-          const { deleteLocalEmployee } = await import('./db');
-          await deleteLocalEmployee(emp.id);
-          if (isNative) {
-            const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
-            await sqliteRemovePendingEmployee(emp.id);
+            if (isDuplicate) {
+              console.warn(`[Sync Employee] NIK ${finalNik} terdeteksi duplikat (23505). Mengambil data server untuk rekonsiliasi aman...`);
+              const queryRes = supabase.from('employees').select('id, name, nama_kebun, deleted_at').eq('nik', finalNik);
+              const { data: existingData } = typeof queryRes.limit === 'function'
+                ? await queryRes.limit(1)
+                : (typeof queryRes.maybeSingle === 'function' ? await queryRes.maybeSingle() : await queryRes);
+              const existingEmp = Array.isArray(existingData) ? existingData[0] : existingData;
+
+              const isSafeNameMatch = existingEmp?.name && emp.name &&
+                existingEmp.name.trim().toLowerCase() === emp.name.trim().toLowerCase();
+              const isSafeKebunMatch = !emp.nama_kebun || !existingEmp?.nama_kebun ||
+                existingEmp.nama_kebun.trim().toLowerCase() === emp.nama_kebun.trim().toLowerCase();
+              const isNotDeleted = existingEmp && existingEmp.deleted_at === null;
+
+              if (existingEmp?.id && isSafeNameMatch && isSafeKebunMatch && isNotDeleted) {
+                realEmpId = existingEmp.id;
+                isCoreDone = true;
+                if (db.employee_sync_queue.updateProgress) {
+                  await db.employee_sync_queue.updateProgress(emp.id, { core_done: 1, server_employee_id: realEmpId });
+                }
+                console.log(`[Sync Employee Rekonsiliasi 23505 Sukses] Menggunakan ID server: ${realEmpId} untuk ${emp.name}`);
+              } else {
+                const mismatchReason = !existingEmp?.id
+                  ? 'Karyawan dengan NIK tersebut tidak ditemukan di server saat rekonsiliasi'
+                  : (!isNotDeleted
+                    ? `Karyawan dengan NIK ${finalNik} di server berstatus nonaktif/terhapus (deleted_at: ${existingEmp.deleted_at})`
+                    : `Nama di server ('${existingEmp.name}') berbeda dengan data lokal ('${emp.name}')`);
+                console.warn(`[Sync Employee Rekonsiliasi 23505 Ditolak] ${mismatchReason}`);
+                await db.employee_sync_queue.updateError(emp.id, {
+                  last_error_code: 'RECONCILIATION_MISMATCH',
+                  last_error_message: `Konflik NIK 23505: ${mismatchReason}`,
+                  last_error_hint: 'Periksa NIK di server atau ubah NIK agar tidak menimpa biometrik karyawan lain.',
+                  last_error_step: 'reconcile_23505'
+                });
+                return false;
+              }
+            } else {
+              console.warn(`[Sync Employee Fail] Gagal sync karyawan ${emp.name}:`, rpcError.message);
+              await db.employee_sync_queue.updateError(emp.id, {
+                last_error_code: rpcError.code || 'RPC_ERROR',
+                last_error_message: rpcError.message,
+                last_error_hint: rpcError.hint || null,
+                last_error_step: 'employees_rpc'
+              });
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('agriface-toast', {
+                  detail: { title: 'Error Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: [${rpcError.code || 'RPC'}] ${rpcError.message}`, type: 'error' }
+                }));
+              }
+              return false;
+            }
+          } else if (rpcData && rpcData.status === 'rejected_deleted') {
+            console.warn(`[Sync Employee Edge Case] Edit ditolak! Karyawan ${emp.nik} sudah dihapus secara permanen di server (Soft Deleted).`);
+            const { deleteLocalEmployee } = await import('./db');
+            await deleteLocalEmployee(emp.id);
+            if (isNative) {
+              const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
+              await sqliteRemovePendingEmployee(emp.id);
+            } else {
+              await db.employee_sync_queue.delete(emp.id);
+            }
+            return true;
+          } else if (rpcData && rpcData.status === 'error') {
+            const isRpcDuplicate = String(rpcData.message || '').includes('duplicate') || String(rpcData.message || '').includes('already exists');
+            if (isRpcDuplicate) {
+              const queryRes = supabase.from('employees').select('id').eq('nik', finalNik);
+              const { data: existingData } = typeof queryRes.limit === 'function'
+                ? await queryRes.limit(1)
+                : (typeof queryRes.maybeSingle === 'function' ? await queryRes.maybeSingle() : await queryRes);
+              const existingEmp = Array.isArray(existingData) ? existingData[0] : existingData;
+              if (existingEmp?.id) {
+                realEmpId = existingEmp.id;
+                isCoreDone = true;
+                if (db.employee_sync_queue.updateProgress) {
+                  await db.employee_sync_queue.updateProgress(emp.id, { core_done: 1, server_employee_id: realEmpId });
+                }
+                console.log(`[Sync Employee Rekonsiliasi 23505 Sukses] Menggunakan ID server: ${realEmpId}`);
+              } else {
+                await db.employee_sync_queue.updateError(emp.id, {
+                  last_error_code: 'RPC_RETURN_ERROR',
+                  last_error_message: rpcData.message || 'RPC menolak data karyawan',
+                  last_error_hint: null,
+                  last_error_step: 'employees_rpc'
+                });
+                return false;
+              }
+            } else {
+              console.warn(`[Sync Employee Error] Error dari RPC:`, rpcData.message);
+              await db.employee_sync_queue.updateError(emp.id, {
+                last_error_code: 'RPC_RETURN_ERROR',
+                last_error_message: rpcData.message || 'RPC menolak data karyawan',
+                last_error_hint: null,
+                last_error_step: 'employees_rpc'
+              });
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('agriface-toast', {
+                  detail: { title: 'Error RPC Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcData.message}`, type: 'error' }
+                }));
+              }
+              return false;
+            }
+          } else if (rpcData && (rpcData.status === 'merged' || rpcData.status === 'inserted')) {
+            realEmpId = rpcData.id;
+            isCoreDone = true;
+            if (db.employee_sync_queue.updateProgress) {
+              await db.employee_sync_queue.updateProgress(emp.id, { core_done: 1, server_employee_id: realEmpId });
+            }
+            console.log(`[Sync Employee] Sukses (${rpcData.status}) data karyawan ${emp.nik} dengan ID server: ${realEmpId}`);
           } else {
-            await db.employee_sync_queue.delete(emp.id);
+            console.warn(`[Sync Employee] Status RPC tidak dikenali:`, rpcData);
+            await db.employee_sync_queue.updateError(emp.id, {
+              last_error_code: 'UNKNOWN_RPC_STATUS',
+              last_error_message: `Status RPC tidak dikenali: ${JSON.stringify(rpcData)}`,
+              last_error_hint: null,
+              last_error_step: 'employees_rpc'
+            });
+            return false;
           }
-          return true; // Return true to mark as "processed" so it doesn't block queue
         }
 
-        if (rpcData && rpcData.status === 'error') {
-           console.warn(`[Sync Employee Error] Error dari RPC:`, rpcData.message);
-           await db.employee_sync_queue.updateError(emp.id, {
-             last_error_code: 'RPC_RETURN_ERROR',
-             last_error_message: rpcData.message || 'RPC menolak data karyawan',
-             last_error_step: 'employees_rpc'
-           });
-           if (typeof window !== 'undefined') {
-             window.dispatchEvent(new CustomEvent('agriface-toast', {
-               detail: { title: 'Error RPC Sinkronisasi', message: `Gagal mengirim karyawan ${emp.name}.\nError: ${rpcData.message}`, type: 'error' }
-             }));
-           }
-           return false;
-        }
-
-        if (rpcData && (rpcData.status === 'merged' || rpcData.status === 'inserted')) {
-          realEmpId = rpcData.id;
-          console.log(`[Sync Employee] Sukses (${rpcData.status}) data karyawan ${emp.nik}`);
-        } else {
-          console.warn(`[Sync Employee] Status RPC tidak dikenali:`, rpcData);
-          await db.employee_sync_queue.updateError(emp.id, {
-            last_error_code: 'UNKNOWN_RPC_STATUS',
-            last_error_message: `Status RPC tidak dikenali: ${JSON.stringify(rpcData)}`,
-            last_error_step: 'employees_rpc'
-          });
-          return false;
-        }
-
-        // 2. Insert master biometrics descriptor if present
+        // --- LANGKAH 2: Master Descriptors Upsert ---
+        let isDescriptorDone = Boolean(emp.descriptor_done);
         const normalizedVec = toVectorArray(emp.descriptor_json);
 
-        if (normalizedVec && Array.isArray(normalizedVec)) {
+        if (!isDescriptorDone && normalizedVec && Array.isArray(normalizedVec) && realEmpId) {
           const checksumVal = vectorChecksum(normalizedVec);
           let descUpsertOk = false;
 
@@ -813,6 +914,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
                 await db.employee_sync_queue.updateError(emp.id, {
                   last_error_code: fallbackErr.code || 'DESC_FALLBACK_ERR',
                   last_error_message: fallbackErr.message,
+                  last_error_hint: fallbackErr.hint || null,
                   last_error_step: 'master_descriptors'
                 });
                 return false;
@@ -824,6 +926,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               await db.employee_sync_queue.updateError(emp.id, {
                 last_error_code: descErr.code || 'DESC_ERR',
                 last_error_message: descErr.message,
+                last_error_hint: descErr.hint || null,
                 last_error_step: 'master_descriptors'
               });
               return false;
@@ -833,6 +936,10 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           }
 
           if (descUpsertOk) {
+            isDescriptorDone = true;
+            if (db.employee_sync_queue.updateProgress) {
+              await db.employee_sync_queue.updateProgress(emp.id, { descriptor_done: 1 });
+            }
             await cacheUserMasterVector({
               employee_id: realEmpId,
               nik: emp.nik,
@@ -850,7 +957,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           }
         }
 
-        // 3. Update any pending offline attendance logs that used this temporary employee ID
+        // --- LANGKAH 3: Pembaruan Foreign Key (FK) Lokal ---
         try {
           const logsToUpdate = allPendingLogs.filter(log => String(log.employee_id) === String(emp.id));
           const updateLogPromises = logsToUpdate.map(async (pendingLog) => {
@@ -901,14 +1008,14 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           console.warn('[Sync Engine Secondary FK Mapping Error]:', secFkErr);
         }
 
-        // 4. Remove temp ID from local employee sync queue
+        // --- LANGKAH 4: Pembersihan Antrean Inti Sukses ---
         if (isNative) {
           const { sqliteRemovePendingEmployee } = await import('./services/sqliteService');
           await sqliteRemovePendingEmployee(emp.id);
         } else {
           await db.employee_sync_queue.delete(emp.id);
         }
-        
+
         // PURGE ghost employee dari local cache HANYA jika ID-nya adalah temporary offline ID.
         // Karyawan real (ID numerik dari Supabase) TIDAK boleh dihapus di sini.
         if (tempIdStr.startsWith('offline_') || tempIdStr.startsWith('off_emp_') || tempIdStr.startsWith('tmp_') || isNaN(Number(tempIdStr))) {
@@ -935,7 +1042,7 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
               descriptor_json: emp.descriptor_json || null,
               geometric_descriptor_json: emp.geometric_descriptor_json || null
             };
-            
+
             if (isNative) {
               const { sqliteBulkPutEmployeesCache } = await import('./services/sqliteService');
               await sqliteBulkPutEmployeesCache([realEmpEntry]);
@@ -972,10 +1079,15 @@ export async function syncPendingEmployees(showToast = null, onSyncComplete = nu
           await db.employee_sync_queue.updateError(emp.id, {
             last_error_code: singleErr.code || 'EXCEPTION',
             last_error_message: singleErr.message || String(singleErr),
+            last_error_hint: singleErr.hint || null,
             last_error_step: 'exception'
           });
-        } catch (_) {}
+        } catch (_) { }
         return false;
+      } finally {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+        }
       }
     });
 
@@ -1039,7 +1151,7 @@ export async function syncPendingEmployeeDeletes() {
         console.warn(`[Auto-Sync] Exception saat sync delete karyawan ${id}:`, err);
       }
     }
-    
+
     if (syncedCount > 0) {
       console.log(`[Auto-Sync] Berhasil sync ${syncedCount} penghapusan karyawan.`);
     }
@@ -1077,8 +1189,9 @@ export async function syncPendingScanAttempts() {
       brightness: a.brightness != null ? Number(a.brightness) : null,
       master_checksum: a.master_checksum || a.vector_checksum_used || null,
       master_updated_at: a.master_updated_at || null,
-      template_version: a.template_version || 1,
-      app_version: a.app_version || '3.2.1',
+      template_version: (a.template_version !== undefined && a.template_version !== null && a.template_version !== '') ? Number(a.template_version) : null,
+      vector_source: a.vector_source || null,
+      app_version: a.app_version || CURRENT_APP_VERSION,
       platform: a.platform || (Capacitor.isNativePlatform() ? 'android' : 'web'),
       created_at: a.created_at || new Date().toISOString()
     }));
@@ -1118,7 +1231,7 @@ export async function syncPendingEmployeeFaceThumbs() {
     let cachedEmps = [];
     try {
       cachedEmps = await db.employees_cache.toArray();
-    } catch (_) {}
+    } catch (_) { }
 
     for (const item of pendingThumbs) {
       let empId = item.employee_id;
@@ -1212,10 +1325,11 @@ export async function syncPendingEmployeeFaceThumbs() {
               await db.employee_sync_queue.updateError(empId, {
                 last_error_code: uploadErr.statusCode || uploadErr.code || 'STORAGE_ERR',
                 last_error_message: uploadErr.message || 'Gagal mengunggah foto ke storage',
+                last_error_hint: `Gagal upload ke bucket attendance-photos (${uploadErr.message || 'Error'}). Thumbnail base64 tetap dicoba simpan ke database.`,
                 last_error_step: 'photo'
               });
             }
-          } catch (_) {}
+          } catch (_) { }
         } else {
           storageUploadSuccess = true;
         }
@@ -1239,19 +1353,30 @@ export async function syncPendingEmployeeFaceThumbs() {
           try {
             const qItem = await db.employee_sync_queue.get(String(empId));
             if (qItem) {
+              const upsertHint = upsertErr.code === '42P01'
+                ? 'Tabel employee_face_photos belum ada di Supabase. Jalankan migrasi 20261015_create_employee_face_photos.sql.'
+                : (upsertErr.message || 'Gagal upsert metadata foto');
               await db.employee_sync_queue.updateError(empId, {
                 last_error_code: upsertErr.code || 'DB_UPSERT_ERR',
                 last_error_message: upsertErr.message || 'Gagal menyimpan metadata foto di database',
+                last_error_hint: upsertHint,
                 last_error_step: 'photo'
               });
             }
-          } catch (_) {}
+          } catch (_) { }
           continue;
         }
 
         // Berhasil: tandai tersinkron dan bersihkan catatan kegagalan
         syncedEmpIds.push(empId);
         photoUploadFailures.delete(String(empId));
+
+        try {
+          const qItem = await db.employee_sync_queue.get(String(empId));
+          if (qItem) {
+            await db.employee_sync_queue.updateProgress(empId, { photo_done: 1 });
+          }
+        } catch (_) { }
       } catch (thumbErr) {
         console.warn(`[Sync Face Thumb Exception for ${item.employee_id}]:`, thumbErr);
         photoUploadFailures.set(String(empId), { count: failCount + 1, timestamp: Date.now() });
@@ -1262,10 +1387,11 @@ export async function syncPendingEmployeeFaceThumbs() {
             await db.employee_sync_queue.updateError(empId, {
               last_error_code: thumbErr.code || 'PHOTO_EXCEPTION',
               last_error_message: thumbErr.message || String(thumbErr),
+              last_error_hint: 'Terjadi exception saat pemrosesan thumbnail foto.',
               last_error_step: 'photo'
             });
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     }
 
@@ -1386,23 +1512,309 @@ export async function triggerAutoSync(showToast, onSyncComplete) {
   // Tier 6: Upload diagnostic scan attempts telemetry
   await syncPendingScanAttempts();
   // Tier 7: Download updated master face thumbnails for offline caching
-  await syncPullEmployeeFacePhotos().catch(() => {});
+  await syncPullEmployeeFacePhotos().catch(() => { });
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('refresh_logs'));
   }
 }
 
+let reactiveSyncTimer = null;
+let isReactiveSyncing = false;
+
+/**
+ * Menjadwalkan sinkronisasi otomatis dengan debouncing agar rentetan aktivitas
+ * (mis. absensi berturut-turut atau pendaftaran) hanya memicu satu siklus sinkronisasi.
+ */
+export function scheduleReactiveSync(delayMs = 3000) {
+  if (reactiveSyncTimer) {
+    clearTimeout(reactiveSyncTimer);
+  }
+  reactiveSyncTimer = setTimeout(async () => {
+    reactiveSyncTimer = null;
+    const online = await checkOnline();
+    if (!online) {
+      console.log('[Reactive Sync] Perangkat offline, sinkronisasi otomatis ditunda.');
+      return;
+    }
+    if (isReactiveSyncing) {
+      console.log('[Reactive Sync] Siklus sinkronisasi sedang berjalan, pemanggilan berikutnya dilewati.');
+      return;
+    }
+    try {
+      isReactiveSyncing = true;
+      console.log('[Reactive Sync] Menjalankan sinkronisasi reaktif otomatis...');
+      await syncPendingEmployeeDeletes();
+      await syncPendingEmployees();
+      await syncPendingAttendanceLogs();
+      await syncPendingEmployeeFaceThumbs();
+      await syncPendingScanAttempts();
+      console.log('[Reactive Sync] Siklus sinkronisasi reaktif selesai.');
+    } catch (err) {
+      console.warn('[Reactive Sync Exception]:', err);
+    } finally {
+      isReactiveSyncing = false;
+    }
+  }, delayMs);
+}
+
 /**
  * Setup Realtime Online Network Listener for Sequential 3-Tier Auto-Sync
  */
 export function initAutoSyncListener(showToast, onSyncComplete) {
-  // DINONAKTIFKAN: Berdasarkan instruksi "Offline-First", dilarang keras menggunakan Network Listener
-  // atau interval berkala untuk sinkronisasi otomatis saat online.
-  // Sinkronisasi hanya akan dipanggil secara MANUAL via dashboard (Cut-Off) atau OS Background Task.
-  console.log('[Network Status] Auto-Sync Listener telah dinonaktifkan (Mode Offline-First aktif).');
-  
+  const handleOnline = () => {
+    console.log('[Network Status] Jaringan online terdeteksi, menjadwalkan sinkronisasi reaktif...');
+    scheduleReactiveSync(1000);
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', handleOnline);
+  }
+
   return () => {
-    // No-op cleanup
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', handleOnline);
+    }
   };
 }
+
+/**
+ * Diagnostic tool for registration sync: inspects local queue, Supabase tables, and storage buckets.
+ * Purely read-only, does not mutate user data or queues.
+ */
+export async function diagnoseRegistrationSync() {
+  const result = {
+    timestamp: new Date().toISOString(),
+    isOnline: false,
+    queueStats: {
+      total: 0,
+      pending: 0,
+      processing: 0,
+      failed: 0,
+      needs_attention: 0,
+      faceThumbsPending: 0,
+      scanAttemptsPending: 0,
+      items: []
+    },
+    tableChecks: [],
+    bucketChecks: [],
+    recommendedMigrations: [],
+    markdownTable: ''
+  };
+
+  try {
+    result.isOnline = await checkOnline();
+  } catch (_) {
+    result.isOnline = false;
+  }
+
+  // 1. Inspect local queues
+  try {
+    const { db, getUnsyncedEmployeeFaceThumbs, getUnsyncedScanAttempts } = await import('./db');
+    const queue = await db.employee_sync_queue.toArray();
+    result.queueStats.total = (queue || []).length;
+    for (const item of (queue || [])) {
+      const status = item.sync_status || (item.last_error_message ? 'failed' : 'pending');
+      if (status === 'processing') result.queueStats.processing++;
+      else if (status === 'needs_attention') result.queueStats.needs_attention++;
+      else if (status === 'failed') result.queueStats.failed++;
+      else result.queueStats.pending++;
+
+      result.queueStats.items.push({
+        id: item.id,
+        name: item.name,
+        nik: item.nik,
+        sync_status: status,
+        core_done: !!item.core_done,
+        descriptor_done: !!item.descriptor_done,
+        photo_done: !!item.photo_done,
+        attempt_count: item.attempt_count || 0,
+        last_error_code: item.last_error_code || null,
+        last_error_step: item.last_error_step || null,
+        last_error_message: item.last_error_message || null,
+        last_error_hint: item.last_error_hint || null,
+        last_attempt_at: item.last_attempt_at || null
+      });
+    }
+
+    try {
+      const thumbs = await getUnsyncedEmployeeFaceThumbs();
+      result.queueStats.faceThumbsPending = (thumbs || []).length;
+    } catch (_) { }
+
+    try {
+      const attempts = await getUnsyncedScanAttempts();
+      result.queueStats.scanAttemptsPending = (attempts || []).length;
+    } catch (_) { }
+  } catch (qErr) {
+    console.warn('[Diagnose] Local queue read error:', qErr);
+  }
+
+  // 2. Inspect Supabase tables (select limit 1)
+  const tablesToInspect = [
+    {
+      name: 'employees',
+      cols: 'id, nik, name, department, nama_kebun, deleted_at',
+      migrationNotice: 'Tabel inti karyawan'
+    },
+    {
+      name: 'master_descriptors',
+      cols: 'id, employee_id, descriptor_json, geometric_descriptor_json, vector_checksum, template_version, updated_at',
+      migrationNotice: 'supabase/migrations/20261015_alter_master_descriptors.sql'
+    },
+    {
+      name: 'employee_face_photos',
+      cols: 'id, employee_id, storage_path, thumbnail_base64, photo_version, photo_checksum, updated_at',
+      migrationNotice: 'supabase/migrations/20261015_create_employee_face_photos.sql'
+    },
+    {
+      name: 'scan_attempts',
+      cols: 'id, employee_id, nik, attempt_type, outcome, max_cosine, frames_used, threshold_used, created_at',
+      migrationNotice: 'supabase/migrations/20261015_create_scan_attempts.sql'
+    }
+  ];
+
+  for (const t of tablesToInspect) {
+    if (!result.isOnline) {
+      result.tableChecks.push({
+        table: t.name,
+        status: 'SKIPPED_OFFLINE',
+        code: null,
+        message: 'Perangkat offline: kueri dilewati',
+        hint: null
+      });
+      continue;
+    }
+
+    try {
+      const { data, error } = await supabase.from(t.name).select(t.cols).limit(1);
+      if (error) {
+        let hint = error.hint || '';
+        if (error.code === '42P01') {
+          hint = `Tabel '${t.name}' belum ada di database Supabase. Jalankan file migrasi: ${t.migrationNotice}`;
+          result.recommendedMigrations.push(t.migrationNotice);
+        } else if (error.code === '42703') {
+          hint = `Kolom baru pada tabel '${t.name}' belum ada. Jalankan file migrasi: ${t.migrationNotice}`;
+          result.recommendedMigrations.push(t.migrationNotice);
+        } else if (error.code === '42501') {
+          hint = `RLS Policy menolak SELECT. Pastikan policy SELECT untuk role anon/authenticated aktif pada '${t.name}'.`;
+        }
+        result.tableChecks.push({
+          table: t.name,
+          status: 'ERROR',
+          code: error.code || 'UNKNOWN',
+          message: error.message || 'Error querying table',
+          hint
+        });
+      } else {
+        result.tableChecks.push({
+          table: t.name,
+          status: 'OK',
+          code: null,
+          message: `Tabel dan kolom tersedia (baris dicek: ${data?.length || 0})`,
+          hint: null
+        });
+      }
+    } catch (tblEx) {
+      result.tableChecks.push({
+        table: t.name,
+        status: 'EXCEPTION',
+        code: tblEx.code || 'EXCEPTION',
+        message: tblEx.message || String(tblEx),
+        hint: null
+      });
+    }
+  }
+
+  // 3. Inspect Storage Buckets
+  const bucketsToCheck = [
+    { name: 'attendance-photos', role: 'Bucket aktif untuk foto absensi dan foto master faces/' },
+    { name: 'employee-faces', role: 'Referensi legacy pada skema awal' },
+    { name: 'employee-face-photos', role: 'Referensi alternatif di beberapa dokumentasi' }
+  ];
+
+  for (const b of bucketsToCheck) {
+    if (!result.isOnline) {
+      result.bucketChecks.push({
+        bucket: b.name,
+        role: b.role,
+        status: 'SKIPPED_OFFLINE',
+        message: 'Perangkat offline'
+      });
+      continue;
+    }
+
+    try {
+      const { data, error } = await supabase.storage.from(b.name).list('', { limit: 1 });
+      if (error) {
+        result.bucketChecks.push({
+          bucket: b.name,
+          role: b.role,
+          status: 'ERROR',
+          message: error.message || 'Gagal mengakses bucket'
+        });
+      } else {
+        result.bucketChecks.push({
+          bucket: b.name,
+          role: b.role,
+          status: 'OK',
+          message: `Bucket dapat diakses (item: ${data?.length || 0})`
+        });
+      }
+    } catch (bErr) {
+      result.bucketChecks.push({
+        bucket: b.name,
+        role: b.role,
+        status: 'EXCEPTION',
+        message: bErr.message || String(bErr)
+      });
+    }
+  }
+
+  // 4. Generate formatted Markdown Table for easy clipboard copying
+  const mdRows = [];
+  mdRows.push(`# Laporan Diagnosa Sinkronisasi Pendaftaran`);
+  mdRows.push(`- Waktu: ${result.timestamp}`);
+  mdRows.push(`- Status Jaringan: ${result.isOnline ? 'ONLINE' : 'OFFLINE'}`);
+  mdRows.push(`- Antrean Karyawan: Total ${result.queueStats.total} (Pending: ${result.queueStats.pending}, Processing: ${result.queueStats.processing}, Failed: ${result.queueStats.failed}, Needs Attention: ${result.queueStats.needs_attention})`);
+  mdRows.push(`- Antrean Foto: ${result.queueStats.faceThumbsPending}`);
+  mdRows.push(`- Antrean Scan Attempts: ${result.queueStats.scanAttemptsPending}\n`);
+
+  mdRows.push(`### Ketersediaan Tabel Supabase`);
+  mdRows.push(`| Tabel | Status | Kode | Pesan / Petunjuk |`);
+  mdRows.push(`| --- | --- | --- | --- |`);
+  for (const tc of result.tableChecks) {
+    mdRows.push(`| \`${tc.table}\` | **${tc.status}** | ${tc.code || '-'} | ${tc.hint ? `${tc.message} (${tc.hint})` : tc.message} |`);
+  }
+  mdRows.push(``);
+
+  mdRows.push(`### Ketersediaan Storage Bucket`);
+  mdRows.push(`| Bucket | Peran | Status | Detail |`);
+  mdRows.push(`| --- | --- | --- | --- |`);
+  for (const bc of result.bucketChecks) {
+    mdRows.push(`| \`${bc.bucket}\` | ${bc.role} | **${bc.status}** | ${bc.message} |`);
+  }
+  mdRows.push(``);
+
+  if (result.recommendedMigrations.length > 0) {
+    mdRows.push(`### Rekomendasi Migrasi SQL`);
+    const uniqueMigs = [...new Set(result.recommendedMigrations)];
+    for (const mig of uniqueMigs) {
+      mdRows.push(`- Jalankan di Supabase SQL Editor: \`${mig}\``);
+    }
+    mdRows.push(``);
+  }
+
+  if (result.queueStats.items.length > 0) {
+    mdRows.push(`### Rincian Antrean Pendaftaran`);
+    mdRows.push(`| ID | Nama | NIK | Status | Core | Vector | Photo | Attempt | Error Code | Error Message |`);
+    mdRows.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
+    for (const it of result.queueStats.items) {
+      mdRows.push(`| ${it.id} | ${it.name} | ${it.nik} | ${it.sync_status} | ${it.core_done ? 'OK' : '-'} | ${it.descriptor_done ? 'OK' : '-'} | ${it.photo_done ? 'OK' : '-'} | ${it.attempt_count} | ${it.last_error_code || '-'} | ${it.last_error_message || '-'} |`);
+    }
+  }
+
+  result.markdownTable = mdRows.join('\n');
+  return result;
+}
+

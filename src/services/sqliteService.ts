@@ -187,9 +187,18 @@ export async function initSQLite(): Promise<void> {
         geometric_descriptor_json TEXT,
         template_version INTEGER,
         is_synced INTEGER DEFAULT 0,
+        sync_status TEXT DEFAULT 'pending',
+        processing_run_id TEXT,
+        processing_started_at TEXT,
+        processing_heartbeat_at TEXT,
+        core_done INTEGER DEFAULT 0,
+        descriptor_done INTEGER DEFAULT 0,
+        photo_done INTEGER DEFAULT 0,
+        server_employee_id TEXT,
         created_at TEXT,
         last_error_code TEXT,
         last_error_message TEXT,
+        last_error_hint TEXT,
         last_error_step TEXT,
         attempt_count INTEGER DEFAULT 0,
         last_attempt_at TEXT
@@ -435,6 +444,10 @@ export async function initSQLite(): Promise<void> {
         console.log('[SQLite Service] Adding missing last_error_message column to local_employee_sync_queue...');
         await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_message TEXT;`);
       }
+      if (!cols.has('last_error_hint')) {
+        console.log('[SQLite Service] Adding missing last_error_hint column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_hint TEXT;`);
+      }
       if (!cols.has('last_error_step')) {
         console.log('[SQLite Service] Adding missing last_error_step column to local_employee_sync_queue...');
         await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_error_step TEXT;`);
@@ -446,6 +459,38 @@ export async function initSQLite(): Promise<void> {
       if (!cols.has('last_attempt_at')) {
         console.log('[SQLite Service] Adding missing last_attempt_at column to local_employee_sync_queue...');
         await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN last_attempt_at TEXT;`);
+      }
+      if (!cols.has('sync_status')) {
+        console.log('[SQLite Service] Adding missing sync_status column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN sync_status TEXT DEFAULT 'pending';`);
+      }
+      if (!cols.has('processing_run_id')) {
+        console.log('[SQLite Service] Adding missing processing_run_id column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN processing_run_id TEXT;`);
+      }
+      if (!cols.has('processing_started_at')) {
+        console.log('[SQLite Service] Adding missing processing_started_at column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN processing_started_at TEXT;`);
+      }
+      if (!cols.has('processing_heartbeat_at')) {
+        console.log('[SQLite Service] Adding missing processing_heartbeat_at column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN processing_heartbeat_at TEXT;`);
+      }
+      if (!cols.has('core_done')) {
+        console.log('[SQLite Service] Adding missing core_done column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN core_done INTEGER DEFAULT 0;`);
+      }
+      if (!cols.has('descriptor_done')) {
+        console.log('[SQLite Service] Adding missing descriptor_done column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN descriptor_done INTEGER DEFAULT 0;`);
+      }
+      if (!cols.has('photo_done')) {
+        console.log('[SQLite Service] Adding missing photo_done column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN photo_done INTEGER DEFAULT 0;`);
+      }
+      if (!cols.has('server_employee_id')) {
+        console.log('[SQLite Service] Adding missing server_employee_id column to local_employee_sync_queue...');
+        await dbConnection.execute(`ALTER TABLE local_employee_sync_queue ADD COLUMN server_employee_id TEXT;`);
       }
     } catch (e) {
       console.warn('[SQLite Service] Migration local_employee_sync_queue add columns warning:', e);
@@ -781,7 +826,7 @@ export async function sqliteCacheUserMasterVector(user: any): Promise<void> {
       ]
     );
 
-    const templateVersion = user.template_version !== undefined && user.template_version !== null ? Number(user.template_version) : 1;
+    const templateVersion = (user.template_version !== undefined && user.template_version !== null && user.template_version !== '') ? Number(user.template_version) : null;
     const vectorChecksumVal = user.vector_checksum || (normArr ? vectorChecksum(normArr) : null);
 
     // 2. Cache to local_master_descriptors
@@ -866,7 +911,7 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
             face_vector: toVectorArray(row.descriptor_json),
             geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
             updated_at: row.created_at,
-            template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
+            template_version: (row.template_version !== undefined && row.template_version !== null && row.template_version !== '') ? Number(row.template_version) : null,
             vector_checksum: row.vector_checksum || null
           };
         }
@@ -889,7 +934,7 @@ export async function sqliteGetCachedUserMasterVector(employeeId: number | strin
       face_vector: toVectorArray(row.descriptor_json),
       geometric_descriptor_json: row.geometric_descriptor_json ? (typeof row.geometric_descriptor_json === 'string' ? JSON.parse(row.geometric_descriptor_json) : row.geometric_descriptor_json) : null,
       updated_at: row.updated_at,
-      template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
+      template_version: (row.template_version !== undefined && row.template_version !== null && row.template_version !== '') ? Number(row.template_version) : null,
       vector_checksum: row.vector_checksum || null
     };
   } catch (err: any) {
@@ -938,7 +983,7 @@ export async function sqliteQueueOfflineAttendance(logData: any): Promise<any> {
         logData.durasi !== undefined && logData.durasi !== null ? Number(logData.durasi) : null,
         logData.match_cosine !== undefined && logData.match_cosine !== null ? Number(logData.match_cosine) : null,
         logData.match_threshold !== undefined && logData.match_threshold !== null ? Number(logData.match_threshold) : null,
-        logData.template_version !== undefined && logData.template_version !== null ? Number(logData.template_version) : 1,
+        (logData.template_version !== undefined && logData.template_version !== null && logData.template_version !== '') ? Number(logData.template_version) : null,
         logData.facing_mode || null,
         logData.vector_checksum_used || logData.master_checksum || null,
         logData.vector_source || null
@@ -1007,20 +1052,17 @@ export async function sqliteRemoveSyncedLogs(ids: number[]): Promise<void> {
 }
 
 /**
- * Clear ALL local caches on Logout to prevent sticky data.
- * This ensures the next user logs into a clean slate.
- * We DO NOT clear sync queues or admin tables.
+ * Membersihkan cache kehadiran sesi saat Logout.
+ * Tetap mempertahankan local_employees dan local_master_descriptors agar pemindai offline tetap siap.
  */
 export async function sqliteClearAll(): Promise<void> {
     const db = await waitForConnection();
     if (!db) return;
   try {
-    await db.execute(`DELETE FROM local_employees`);
     await db.execute(`DELETE FROM local_today_attendance_cache`);
     await db.execute(`DELETE FROM local_attendance_logs`);
     await db.execute(`DELETE FROM local_attendance_requests`);
-    await db.execute(`DELETE FROM local_master_descriptors`);
-    console.log('[SQLite Service] Cleared all local caches for logout.');
+    console.log('[SQLite Service] Cleared session attendance caches for logout (preserved employee & biometric templates).');
   } catch (err: any) {
     console.error('[SQLite Service sqliteClearAll Error]:', err?.message || err);
   }
@@ -1170,7 +1212,7 @@ export async function sqliteGetAllMasterVectors(): Promise<any[]> {
         name: row.name,
         descriptor_json: parsedDesc,
         vector_checksum: cs,
-        template_version: row.template_version !== undefined && row.template_version !== null ? Number(row.template_version) : 1,
+        template_version: (row.template_version !== undefined && row.template_version !== null && row.template_version !== '') ? Number(row.template_version) : null,
         updated_at: row.updated_at || null,
       };
     });
@@ -1335,7 +1377,7 @@ export async function sqliteSaveAttendanceLog(log: any): Promise<void> {
         log.durasi !== undefined && log.durasi !== null ? Number(log.durasi) : null,
         log.match_cosine !== undefined && log.match_cosine !== null ? Number(log.match_cosine) : null,
         log.match_threshold !== undefined && log.match_threshold !== null ? Number(log.match_threshold) : null,
-        log.template_version !== undefined && log.template_version !== null ? Number(log.template_version) : 1,
+        (log.template_version !== undefined && log.template_version !== null && log.template_version !== '') ? Number(log.template_version) : null,
         log.facing_mode || null
       ]
     );
@@ -1681,8 +1723,8 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
     // 1. Simpan ke Antrean Sync (Outbox)
     const sql = `
       INSERT INTO local_employee_sync_queue 
-      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, template_version, is_synced, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      (id, nik, name, department, afdeling, nama_kebun, status_tk, jabatan, status_perkawinan, has_master_biometric, region, descriptor_json, geometric_descriptor_json, template_version, is_synced, sync_status, core_done, descriptor_done, photo_done, server_employee_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
          nik = COALESCE(NULLIF(EXCLUDED.nik, ''), local_employee_sync_queue.nik),
          name = COALESCE(NULLIF(EXCLUDED.name, ''), local_employee_sync_queue.name),
@@ -1697,6 +1739,11 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
          geometric_descriptor_json = COALESCE(NULLIF(EXCLUDED.geometric_descriptor_json, ''), local_employee_sync_queue.geometric_descriptor_json),
          template_version = COALESCE(EXCLUDED.template_version, local_employee_sync_queue.template_version),
          has_master_biometric = EXCLUDED.has_master_biometric,
+         sync_status = COALESCE(EXCLUDED.sync_status, local_employee_sync_queue.sync_status),
+         core_done = CASE WHEN EXCLUDED.core_done = 1 THEN 1 ELSE local_employee_sync_queue.core_done END,
+         descriptor_done = CASE WHEN EXCLUDED.descriptor_done = 1 THEN 1 ELSE local_employee_sync_queue.descriptor_done END,
+         photo_done = CASE WHEN EXCLUDED.photo_done = 1 THEN 1 ELSE local_employee_sync_queue.photo_done END,
+         server_employee_id = COALESCE(EXCLUDED.server_employee_id, local_employee_sync_queue.server_employee_id),
          is_synced = 0
     `;
     const pendingTemplateVer = empData.template_version !== undefined && empData.template_version !== null ? Number(empData.template_version) : null;
@@ -1715,6 +1762,11 @@ export async function sqliteSavePendingEmployee(empData: any): Promise<void> {
       descJson,
       geomJson,
       pendingTemplateVer,
+      empData.sync_status || 'pending',
+      empData.core_done ? 1 : 0,
+      empData.descriptor_done ? 1 : 0,
+      empData.photo_done ? 1 : 0,
+      empData.server_employee_id ? String(empData.server_employee_id) : null,
       empData.created_at || new Date().toISOString()
     ];
     await db.run(sql, params);
@@ -1835,7 +1887,9 @@ export async function sqliteUpdatePendingEmployeeError(
   errorData: {
     last_error_code?: string | null;
     last_error_message?: string | null;
+    last_error_hint?: string | null;
     last_error_step?: string | null;
+    sync_status?: string | null;
   }
 ): Promise<void> {
   const db = await waitForConnection();
@@ -1846,14 +1900,18 @@ export async function sqliteUpdatePendingEmployeeError(
       `UPDATE local_employee_sync_queue
        SET last_error_code = ?,
            last_error_message = ?,
+           last_error_hint = ?,
            last_error_step = ?,
+           sync_status = ?,
            attempt_count = COALESCE(attempt_count, 0) + 1,
            last_attempt_at = ?
        WHERE id = ? OR CAST(id AS TEXT) = ?`,
       [
         errorData.last_error_code || null,
         errorData.last_error_message || null,
+        errorData.last_error_hint || null,
         errorData.last_error_step || null,
+        errorData.sync_status || 'failed',
         new Date().toISOString(),
         idStr,
         idStr
@@ -1861,6 +1919,160 @@ export async function sqliteUpdatePendingEmployeeError(
     );
   } catch (err: any) {
     console.error('[SQLite Service sqliteUpdatePendingEmployeeError Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Mark a pending employee item as processing with a run lease
+ */
+export async function sqliteSetPendingEmployeeProcessing(id: string | number, runId: string): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    const idStr = String(id);
+    const nowIso = new Date().toISOString();
+    await db.run(
+      `UPDATE local_employee_sync_queue
+       SET sync_status = 'processing',
+           processing_run_id = ?,
+           processing_started_at = ?,
+           processing_heartbeat_at = ?
+       WHERE id = ? OR CAST(id AS TEXT) = ?`,
+      [runId, nowIso, nowIso, idStr, idStr]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteSetPendingEmployeeProcessing Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Update the heartbeat of an active processing lease
+ */
+export async function sqliteHeartbeatPendingEmployee(id: string | number, runId: string): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    const idStr = String(id);
+    const nowIso = new Date().toISOString();
+    await db.run(
+      `UPDATE local_employee_sync_queue
+       SET processing_heartbeat_at = ?
+       WHERE (id = ? OR CAST(id AS TEXT) = ?) AND processing_run_id = ?`,
+      [nowIso, idStr, idStr, runId]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteHeartbeatPendingEmployee Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Update step progress flags (core_done, descriptor_done, photo_done, server_employee_id)
+ */
+export async function sqliteUpdatePendingEmployeeStepProgress(
+  id: string | number,
+  progress: {
+    core_done?: boolean | number;
+    descriptor_done?: boolean | number;
+    photo_done?: boolean | number;
+    server_employee_id?: string | number | null;
+  }
+): Promise<void> {
+  const db = await waitForConnection();
+  if (!db) return;
+  try {
+    const idStr = String(id);
+    const updates: string[] = [];
+    const params: any[] = [];
+    if (progress.core_done !== undefined) {
+      updates.push('core_done = ?');
+      params.push(progress.core_done ? 1 : 0);
+    }
+    if (progress.descriptor_done !== undefined) {
+      updates.push('descriptor_done = ?');
+      params.push(progress.descriptor_done ? 1 : 0);
+    }
+    if (progress.photo_done !== undefined) {
+      updates.push('photo_done = ?');
+      params.push(progress.photo_done ? 1 : 0);
+    }
+    if (progress.server_employee_id !== undefined) {
+      updates.push('server_employee_id = ?');
+      params.push(progress.server_employee_id ? String(progress.server_employee_id) : null);
+    }
+    if (updates.length === 0) return;
+    params.push(idStr, idStr);
+    await db.run(
+      `UPDATE local_employee_sync_queue SET ${updates.join(', ')} WHERE id = ? OR CAST(id AS TEXT) = ?`,
+      params
+    );
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteUpdatePendingEmployeeStepProgress Error]:', err?.message || err);
+  }
+}
+
+/**
+ * Instant & safe recovery for stuck processing employees (lease-based)
+ */
+export async function sqliteRecoverStuckProcessingEmployees(currentRunId: string): Promise<number> {
+  const db = await waitForConnection();
+  if (!db) return 0;
+  try {
+    const res = await db.query(
+      `SELECT id, attempt_count, processing_run_id, processing_started_at, processing_heartbeat_at
+       FROM local_employee_sync_queue
+       WHERE is_synced = 0 AND sync_status = 'processing'`
+    );
+    const rows = res.values || [];
+    if (rows.length === 0) return 0;
+
+    let recoveredCount = 0;
+    const now = Date.now();
+
+    for (const row of rows) {
+      let shouldRecover = false;
+      const isOtherProcess = row.processing_run_id && row.processing_run_id !== currentRunId;
+      if (isOtherProcess) {
+        // Proses sebelumnya mati mendadak saat sync: pulihkan seketika
+        shouldRecover = true;
+      } else {
+        // Proses aktif saat ini: periksa apakah heartbeat usang (> 2 menit) atau waktu mulai > 5 menit
+        const hbTime = row.processing_heartbeat_at ? new Date(row.processing_heartbeat_at).getTime() : 0;
+        const startTime = row.processing_started_at ? new Date(row.processing_started_at).getTime() : 0;
+        const isHeartbeatStale = hbTime > 0 && (now - hbTime) > 120000;
+        const isAbsoluteTimeout = startTime > 0 && (now - startTime) > 300000;
+        if (isHeartbeatStale || isAbsoluteTimeout || !row.processing_run_id) {
+          shouldRecover = true;
+        }
+      }
+
+      if (shouldRecover) {
+        const nextAttempts = (row.attempt_count || 0) + 1;
+        const nextStatus = nextAttempts >= 5 ? 'needs_attention' : 'pending';
+        await db.run(
+          `UPDATE local_employee_sync_queue
+           SET sync_status = ?,
+               processing_run_id = NULL,
+               processing_started_at = NULL,
+               processing_heartbeat_at = NULL,
+               last_error_code = 'STALE_PROCESSING',
+               last_error_message = 'Sinkronisasi terputus sebelum selesai. Dipulihkan ke status ' || ?,
+               last_error_step = 'lease_recovery',
+               attempt_count = ?,
+               last_attempt_at = ?
+           WHERE id = ?`,
+          [nextStatus, nextStatus, nextAttempts, new Date().toISOString(), String(row.id)]
+        );
+        recoveredCount++;
+      }
+    }
+
+    if (recoveredCount > 0) {
+      console.log(`[SQLite Service] Dipulihkan ${recoveredCount} antrean pendaftaran yang macet di status processing.`);
+    }
+    return recoveredCount;
+  } catch (err: any) {
+    console.error('[SQLite Service sqliteRecoverStuckProcessingEmployees Error]:', err?.message || err);
+    return 0;
   }
 }
 
