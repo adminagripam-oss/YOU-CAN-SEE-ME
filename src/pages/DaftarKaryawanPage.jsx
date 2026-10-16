@@ -544,6 +544,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
       setScanModalOpen(false);
       refreshEmployees();
       window.dispatchEvent(new CustomEvent('refresh_employees'));
+
+      // Jadwalkan sinkronisasi otomatis reaktif
+      import('../syncEngine').then(({ scheduleReactiveSync }) => {
+        scheduleReactiveSync(2000);
+      }).catch(() => {});
     } catch (err) {
       showToast('Error', err.message, 'error');
     } finally {

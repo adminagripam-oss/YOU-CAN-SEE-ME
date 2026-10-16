@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle, ChevronDown, Building2, WifiOff, Camera } from 'lucide-react';
+import { Activity, Users, Database, Clock, RefreshCw, CheckCircle2, AlertTriangle, Download, ShieldCheck, Copy, RotateCcw, AlertCircle, ChevronDown, Building2, WifiOff, Camera, Check, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 
@@ -29,6 +29,11 @@ export default function SinkronisasiPage() {
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResults, setDiagResults] = useState(null);
   const [syncingVectorId, setSyncingVectorId] = useState(null);
+
+  // Registration Sync Diagnostic States
+  const [regDiagLoading, setRegDiagLoading] = useState(false);
+  const [regDiagResult, setRegDiagResult] = useState(null);
+  const [regDiagCopied, setRegDiagCopied] = useState(false);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -113,9 +118,15 @@ export default function SinkronisasiPage() {
       nik: emp.nik,
       name: emp.name,
       department: emp.department,
+      sync_status: emp.sync_status || 'pending',
       step: emp.last_error_step || 'unknown',
       code: emp.last_error_code || 'RPC_OR_NETWORK_ERROR',
       message: emp.last_error_message || 'Tidak ada detail pesan error',
+      hint: emp.last_error_hint || null,
+      core_done: !!emp.core_done,
+      descriptor_done: !!emp.descriptor_done,
+      photo_done: !!emp.photo_done,
+      server_employee_id: emp.server_employee_id || null,
       attempt_count: emp.attempt_count || 1,
       last_attempt_at: emp.last_attempt_at || new Date().toISOString(),
       created_at: emp.created_at
@@ -123,6 +134,26 @@ export default function SinkronisasiPage() {
     navigator.clipboard?.writeText(details);
     setCopiedId(emp.id);
     setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  const handleRunRegistrationDiag = async () => {
+    setRegDiagLoading(true);
+    try {
+      const { diagnoseRegistrationSync } = await import('../syncEngine');
+      const res = await diagnoseRegistrationSync();
+      setRegDiagResult(res);
+    } catch (err) {
+      console.error('[SinkronisasiPage] Gagal menjalankan diagnosa pendaftaran:', err);
+    } finally {
+      setRegDiagLoading(false);
+    }
+  };
+
+  const handleCopyRegDiag = () => {
+    if (!regDiagResult?.markdownTable) return;
+    navigator.clipboard?.writeText(regDiagResult.markdownTable);
+    setRegDiagCopied(true);
+    setTimeout(() => setRegDiagCopied(false), 2500);
   };
 
   const loadData = async () => {
@@ -589,17 +620,164 @@ export default function SinkronisasiPage() {
                   Daftar karyawan baru atau pembaruan biometrik yang tersimpan di perangkat dan siap disinkronkan.
                 </CardDescription>
               </div>
-              <button
-                type="button"
-                onClick={handleSyncEmployees}
-                disabled={syncingEmployees || employeeQueue.length === 0}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed self-start sm:self-auto"
-              >
-                <RefreshCw size={14} className={syncingEmployees ? 'animate-spin' : ''} />
-                <span>{syncingEmployees ? 'Menyinkronkan...' : 'Sinkronkan Pendaftaran'}</span>
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleRunRegistrationDiag}
+                  disabled={regDiagLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground border border-border text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                  title="Jalankan pemeriksaan ketersediaan tabel Supabase, storage bucket, dan antrean pendaftaran"
+                >
+                  <Activity size={14} className={regDiagLoading ? 'animate-spin text-cyan-600' : 'text-cyan-600'} />
+                  <span>{regDiagLoading ? 'Mendiagnosa...' : 'Diagnosa Sistem'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncEmployees}
+                  disabled={syncingEmployees || employeeQueue.length === 0}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={14} className={syncingEmployees ? 'animate-spin' : ''} />
+                  <span>{syncingEmployees ? 'Menyinkronkan...' : 'Sinkronkan Pendaftaran'}</span>
+                </button>
+              </div>
             </CardHeader>
             <CardContent className="flex-1 p-0">
+              {regDiagResult && (
+                <div className="mx-4 md:mx-6 mb-4 p-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5 text-foreground text-xs space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-border">
+                    <div className="flex items-center gap-2">
+                      <Activity size={16} className="text-cyan-600 dark:text-cyan-400" />
+                      <span className="font-bold text-sm">Hasil Diagnosa Pendaftaran Supabase</span>
+                      <Badge variant="outline" className={regDiagResult.isOnline ? 'bg-emerald-500/10 text-emerald-600 border-emerald-300' : 'bg-red-500/10 text-red-600 border-red-300'}>
+                        {regDiagResult.isOnline ? 'Online' : 'Offline'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCopyRegDiag}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-background hover:bg-muted border border-border text-xs font-medium cursor-pointer"
+                      >
+                        {regDiagCopied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                        <span>{regDiagCopied ? 'Tersalin' : 'Salin Tabel Markdown'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRegDiagResult(null)}
+                        className="text-muted-foreground hover:text-foreground text-xs px-2 py-1 cursor-pointer"
+                      >
+                        Tutup
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Summary metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="p-2 rounded bg-background border border-border">
+                      <div className="text-[10px] text-muted-foreground">Total Antrean</div>
+                      <div className="text-sm font-bold">{regDiagResult.queueStats.total}</div>
+                    </div>
+                    <div className="p-2 rounded bg-background border border-border">
+                      <div className="text-[10px] text-muted-foreground">Pending / Memproses</div>
+                      <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                        {regDiagResult.queueStats.pending} / {regDiagResult.queueStats.processing}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-background border border-border">
+                      <div className="text-[10px] text-muted-foreground">Gagal / Butuh Perhatian</div>
+                      <div className="text-sm font-bold text-amber-600 dark:text-amber-400">
+                        {regDiagResult.queueStats.failed} / {regDiagResult.queueStats.needs_attention}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-background border border-border">
+                      <div className="text-[10px] text-muted-foreground">Antrean Foto / Telemetri</div>
+                      <div className="text-sm font-bold">
+                        {regDiagResult.queueStats.faceThumbsPending} / {regDiagResult.queueStats.scanAttemptsPending}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Table Inspections */}
+                  <div className="space-y-1">
+                    <div className="font-semibold text-xs">Pemeriksaan Tabel Supabase:</div>
+                    <div className="overflow-x-auto rounded border border-border bg-background">
+                      <table className="w-full text-[11px] text-left">
+                        <thead className="bg-muted text-muted-foreground font-semibold">
+                          <tr>
+                            <th className="p-2">Tabel</th>
+                            <th className="p-2">Status</th>
+                            <th className="p-2">Keterangan / Petunjuk</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {regDiagResult.tableChecks.map((tc) => (
+                            <tr key={tc.table}>
+                              <td className="p-2 font-mono font-semibold">{tc.table}</td>
+                              <td className="p-2">
+                                <Badge variant={tc.status === 'OK' ? 'secondary' : 'destructive'} className="text-[10px] py-0 px-1.5">
+                                  {tc.status}
+                                </Badge>
+                              </td>
+                              <td className="p-2 text-muted-foreground">
+                                <div>{tc.message}</div>
+                                {tc.hint && <div className="text-amber-600 dark:text-amber-400 text-[10px] mt-0.5 font-medium">{tc.hint}</div>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Bucket Inspections */}
+                  <div className="space-y-1">
+                    <div className="font-semibold text-xs">Pemeriksaan Storage Bucket:</div>
+                    <div className="overflow-x-auto rounded border border-border bg-background">
+                      <table className="w-full text-[11px] text-left">
+                        <thead className="bg-muted text-muted-foreground font-semibold">
+                          <tr>
+                            <th className="p-2">Bucket</th>
+                            <th className="p-2">Peran</th>
+                            <th className="p-2">Status</th>
+                            <th className="p-2">Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {regDiagResult.bucketChecks.map((bc) => (
+                            <tr key={bc.bucket}>
+                              <td className="p-2 font-mono font-semibold">{bc.bucket}</td>
+                              <td className="p-2 text-muted-foreground">{bc.role}</td>
+                              <td className="p-2">
+                                <Badge variant={bc.status === 'OK' ? 'secondary' : 'outline'} className={bc.status === 'OK' ? 'bg-emerald-500/10 text-emerald-600 text-[10px] py-0 px-1.5' : 'text-amber-600 text-[10px] py-0 px-1.5'}>
+                                  {bc.status}
+                                </Badge>
+                              </td>
+                              <td className="p-2 text-muted-foreground">{bc.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Recommended Migrations */}
+                  {regDiagResult.recommendedMigrations && regDiagResult.recommendedMigrations.length > 0 && (
+                    <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs">
+                      <div className="font-semibold flex items-center gap-1.5 mb-1">
+                        <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400" />
+                        <span>Rekomendasi Migrasi SQL Supabase (Harus dijalankan di SQL Editor):</span>
+                      </div>
+                      <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px]">
+                        {[...new Set(regDiagResult.recommendedMigrations)].map((m) => (
+                          <li key={m}>{m}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {schemaNotice && (
                 <div className="mx-4 md:mx-6 mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -644,23 +822,54 @@ export default function SinkronisasiPage() {
                             {formatDate(emp.created_at || emp.timestamp)}
                           </TableCell>
                           <TableCell>
-                            {hasError ? (
-                              <div className="flex flex-col gap-1 items-start max-w-[320px]">
+                            <div className="flex flex-col gap-1 items-start max-w-[320px]">
+                              {emp.sync_status === 'processing' ? (
+                                <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-800 font-semibold text-[10px] py-0 px-2 flex items-center gap-1">
+                                  <RefreshCw size={10} className="animate-spin" /> Memproses
+                                </Badge>
+                              ) : emp.sync_status === 'needs_attention' ? (
+                                <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800 font-semibold text-[10px] py-0 px-2 flex items-center gap-1">
+                                  <AlertTriangle size={10} /> Butuh Perhatian
+                                </Badge>
+                              ) : hasError || emp.sync_status === 'failed' ? (
                                 <Badge variant="destructive" className="font-semibold text-[10px] py-0 px-2">
                                   Gagal ({emp.last_error_step || 'RPC'})
                                 </Badge>
-                                <div className="text-[11px] text-red-600 dark:text-red-400 font-mono bg-red-50 dark:bg-red-950/40 p-1.5 rounded border border-red-200 dark:border-red-900/50 w-full break-words">
-                                  <span className="font-bold">[{emp.last_error_code || 'ERR'}]</span> {emp.last_error_message}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground">
-                                  Percobaan: {emp.attempt_count || 1} &bull; {formatDate(emp.last_attempt_at)}
-                                </div>
+                              ) : (
+                                <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 border-yellow-200 dark:border-yellow-800/50">
+                                  Menunggu
+                                </Badge>
+                              )}
+
+                              {/* Step progression indicators */}
+                              <div className="flex items-center gap-1 mt-0.5 text-[10px]">
+                                <span className={`px-1.5 py-0.2 rounded ${emp.core_done ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold' : 'bg-muted text-muted-foreground'}`}>
+                                  Core: {emp.core_done ? 'OK' : '-'}
+                                </span>
+                                <span className={`px-1.5 py-0.2 rounded ${emp.descriptor_done ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold' : 'bg-muted text-muted-foreground'}`}>
+                                  Vektor: {emp.descriptor_done ? 'OK' : '-'}
+                                </span>
+                                <span className={`px-1.5 py-0.2 rounded ${emp.photo_done ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold' : 'bg-muted text-muted-foreground'}`}>
+                                  Foto: {emp.photo_done ? 'OK' : '-'}
+                                </span>
                               </div>
-                            ) : (
-                              <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 border-yellow-200 dark:border-yellow-800/50">
-                                Menunggu
-                              </Badge>
-                            )}
+
+                              {hasError && (
+                                <>
+                                  <div className="text-[11px] text-red-600 dark:text-red-400 font-mono bg-red-50 dark:bg-red-950/40 p-1.5 rounded border border-red-200 dark:border-red-900/50 w-full break-words">
+                                    <span className="font-bold">[{emp.last_error_code || 'ERR'}]</span> {emp.last_error_message}
+                                  </div>
+                                  {emp.last_error_hint && (
+                                    <div className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-900/50 w-full break-words">
+                                      <span className="font-semibold">Petunjuk:</span> {emp.last_error_hint}
+                                    </div>
+                                  )}
+                                  <div className="text-[10px] text-muted-foreground">
+                                    Percobaan: {emp.attempt_count || 1} &bull; {formatDate(emp.last_attempt_at)}
+                                  </div>
+                                </>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1.5">

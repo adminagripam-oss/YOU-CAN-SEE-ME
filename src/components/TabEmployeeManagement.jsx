@@ -444,6 +444,11 @@ export default function TabEmployeeManagement({
         });
       }
 
+      // Jadwalkan sinkronisasi otomatis reaktif
+      import('../syncEngine').then(({ scheduleReactiveSync }) => {
+        scheduleReactiveSync(2000);
+      }).catch(() => {});
+
       showToast(
         'Karyawan Berhasil Disimpan',
         `Karyawan ${empName.trim()} (${empNik.trim()}) tersimpan secara lokal dan otomatis masuk antrean sinkronisasi.`,

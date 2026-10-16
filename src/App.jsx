@@ -64,8 +64,11 @@ function AppContent() {
       try {
         await initSQLite();
         await normalizeEmployeeFaceThumbKeys();
+        const { recoverStuckProcessingEmployees } = await import('./db');
+        const { APP_RUN_ID } = await import('./syncEngine');
+        await recoverStuckProcessingEmployees(APP_RUN_ID);
       } catch (err) {
-        console.error('[App] SQLite initialization error:', err);
+        console.error('[App] Storage initialization & stuck recovery error:', err);
       } finally {
         setDbReady(true);
       }
@@ -336,61 +339,93 @@ function AppContent() {
           localStorage.setItem(lastSyncKey, freshTime);
 
           if (useDeltaSync && (!data || data.length === 0)) {
-            console.log(`[DELTA SYNC EMPLOYEES] 0 data baru dari cloud sejak ${lastSyncTime}. Menggunakan database lokal (0 byte diunduh).`);
-            empData = localCachedEmps;
-            dataSource = 'indexeddb';
+            console.log(`[DELTA SYNC EMPLOYEES] 0 karyawan baru dari cloud sejak ${lastSyncTime}. Memeriksa pembaruan biometrik...`);
           } else {
-            console.log(`[${useDeltaSync ? 'DELTA SYNC' : 'FULL SYNC'} EMPLOYEES] Diunduh ${data.length} baris data dari cloud.`);
+            console.log(`[${useDeltaSync ? 'DELTA SYNC' : 'FULL SYNC'} EMPLOYEES] Diunduh ${(data || []).length} baris data karyawan dari cloud.`);
+          }
 
-            let descData = [];
-            let allMasters = [];
-            try {
-              allMasters = await getAllMasterVectors();
-              const localMasterMap = new Map(allMasters.map(m => [String(m.employee_id), m]));
-              const bioEmpIds = data.filter(e => e.has_master_biometric).map(e => e.id);
+          const newlyFetchedEmps = data || [];
+          let combinedEmps = [];
+          if (useDeltaSync) {
+            const mergedMap = new Map(localCachedEmps.map(e => [String(e.id), e]));
+            newlyFetchedEmps.forEach(e => mergedMap.set(String(e.id), e));
+            combinedEmps = Array.from(mergedMap.values());
+          } else {
+            combinedEmps = newlyFetchedEmps;
+          }
 
-              let neededEmpIds = [];
-              if (bioEmpIds.length > 0) {
-                const { data: remoteMeta, error: metaErr } = await supabase
+          let descData = [];
+          let allMasters = [];
+          try {
+            allMasters = await getAllMasterVectors();
+            const localMasterMap = new Map(allMasters.map(m => [String(m.employee_id), m]));
+
+            const candidateEmpIds = combinedEmps
+              .map(e => e.id)
+              .filter(id => id && !String(id).startsWith('off_') && !String(id).startsWith('tmp_'));
+
+            let neededEmpIds = [];
+            if (candidateEmpIds.length > 0) {
+              const META_BATCH = 100;
+              const remoteMetas = [];
+              for (let i = 0; i < candidateEmpIds.length; i += META_BATCH) {
+                const bIds = candidateEmpIds.slice(i, i + META_BATCH).map(Number).filter(n => !isNaN(n));
+                if (bIds.length === 0) continue;
+                const { data: rMeta, error: metaErr } = await supabase
                   .from('master_descriptors')
-                  .select('employee_id, vector_checksum, updated_at')
-                  .in('employee_id', bioEmpIds);
-
-                if (!metaErr && remoteMeta) {
-                  for (const rm of remoteMeta) {
-                    const localM = localMasterMap.get(String(rm.employee_id));
-                    if (!localM || !localM.descriptor_json) {
-                      neededEmpIds.push(rm.employee_id);
-                    } else if (rm.vector_checksum && localM.vector_checksum !== rm.vector_checksum) {
-                      neededEmpIds.push(rm.employee_id);
-                    }
-                  }
-                } else {
-                  neededEmpIds = data.filter(e => e.has_master_biometric && !localMasterMap.has(String(e.id))).map(e => e.id);
+                  .select('employee_id, vector_checksum, updated_at, template_version')
+                  .in('employee_id', bIds);
+                if (!metaErr && rMeta) {
+                  remoteMetas.push(...rMeta);
                 }
               }
 
-              if (neededEmpIds.length > 0) {
-                console.log(`[Sync Pull] Mengunduh biometrics untuk ${neededEmpIds.length} karyawan (baru/terupdate) dari cloud...`);
+              for (const rm of remoteMetas) {
+                const localM = localMasterMap.get(String(rm.employee_id));
+                let needsDownload = false;
+                if (!localM || !localM.descriptor_json) {
+                  needsDownload = true;
+                } else if (rm.vector_checksum && localM.vector_checksum) {
+                  if (rm.vector_checksum !== localM.vector_checksum) {
+                    needsDownload = true;
+                  }
+                } else {
+                  if (!localM.updated_at || !rm.updated_at || String(rm.updated_at) !== String(localM.updated_at)) {
+                    needsDownload = true;
+                  }
+                }
+                if (needsDownload) {
+                  neededEmpIds.push(rm.employee_id);
+                }
+              }
+            }
+
+            if (neededEmpIds.length > 0) {
+              console.log(`[Sync Pull] Mengunduh biometrics untuk ${neededEmpIds.length} karyawan (baru/terupdate) dari cloud...`);
+              const PULL_BATCH = 50;
+              for (let i = 0; i < neededEmpIds.length; i += PULL_BATCH) {
+                const batchIds = neededEmpIds.slice(i, i + PULL_BATCH);
                 const { data: d, error: descErr } = await supabase
                   .from('master_descriptors')
                   .select('employee_id, descriptor_json, geometric_descriptor_json, template_version, vector_checksum, updated_at')
-                  .in('employee_id', neededEmpIds);
+                  .in('employee_id', batchIds);
                 if (!descErr && d) {
-                  descData = d;
+                  descData.push(...d);
                   for (const desc of d) {
-                    const empInfo = data.find(e => String(e.id) === String(desc.employee_id)) || {};
+                    const empInfo = combinedEmps.find(e => String(e.id) === String(desc.employee_id)) || {};
                     let calculatedChecksum = desc.vector_checksum;
                     if (!calculatedChecksum && desc.descriptor_json) {
                       const arr = toVectorArray(desc.descriptor_json);
                       if (arr) {
                         calculatedChecksum = vectorChecksum(arr);
-                        // Lazy backfill ke Supabase jika cloud belum punya checksum (A3)
+                        const backfillTemplateVer = (desc.template_version !== undefined && desc.template_version !== null && desc.template_version !== '')
+                          ? Number(desc.template_version)
+                          : null;
                         supabase
                           .from('master_descriptors')
                           .update({
                             vector_checksum: calculatedChecksum,
-                            template_version: desc.template_version !== undefined && desc.template_version !== null ? Number(desc.template_version) : 1
+                            template_version: backfillTemplateVer
                           })
                           .eq('employee_id', desc.employee_id)
                           .then(({ error: backfillErr }) => {
@@ -402,62 +437,61 @@ function AppContent() {
                       }
                     }
 
+                    const safeTemplateVer = (desc.template_version !== undefined && desc.template_version !== null && desc.template_version !== '')
+                      ? Number(desc.template_version)
+                      : null;
+
                     await cacheUserMasterVector({
                       ...empInfo,
                       employee_id: desc.employee_id,
                       descriptor_json: desc.descriptor_json,
                       geometric_descriptor_json: desc.geometric_descriptor_json,
-                      template_version: desc.template_version !== undefined && desc.template_version !== null ? Number(desc.template_version) : 1,
+                      template_version: safeTemplateVer,
                       vector_checksum: calculatedChecksum,
                       updated_at: desc.updated_at
                     }).catch(() => {});
                   }
                 }
-              } else {
-                console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal & up-to-date (0 byte diunduh).');
               }
-              if (bioEmpIds && bioEmpIds.length > 0) {
-                syncPullEmployeeFacePhotos(bioEmpIds).catch(() => {});
-              }
-            } catch (e) {
-              console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
-            }
-
-            const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
-
-            const fetchedMapped = data.map(emp => {
-              const biometrics = descMap.get(String(emp.id));
-              const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
-              
-              const rawHasBio = emp.has_master_biometric;
-              const isBioTrue = rawHasBio === true || rawHasBio === 1 || rawHasBio === '1' || rawHasBio === 'true';
-
-              return {
-                ...emp,
-                nama_kebun: emp.kebun || emp.nama_kebun || '',
-                kebun: emp.kebun || emp.nama_kebun || '',
-                has_master_biometric: isBioTrue || !!biometrics || !!localMaster,
-                descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
-                geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null,
-                template_version: biometrics?.template_version !== undefined && biometrics?.template_version !== null
-                  ? Number(biometrics.template_version)
-                  : (localMaster?.template_version !== undefined && localMaster?.template_version !== null ? Number(localMaster.template_version) : null)
-              };
-            });
-
-            if (useDeltaSync) {
-              const mergedMap = new Map(localCachedEmps.map(e => [String(e.id), e]));
-              fetchedMapped.forEach(e => mergedMap.set(String(e.id), e));
-              empData = Array.from(mergedMap.values());
             } else {
-              empData = fetchedMapped;
+              console.log('[Sync Pull] Seluruh biometrics karyawan sudah ter-cache secara lokal & up-to-date (0 byte diunduh).');
             }
+
+            if (candidateEmpIds && candidateEmpIds.length > 0) {
+              syncPullEmployeeFacePhotos(candidateEmpIds).catch(() => {});
+            }
+          } catch (e) {
+            console.warn('[FETCH DESCRIPTORS ERROR]:', e.message);
           }
+
+          const descMap = new Map(descData.map(d => [String(d.employee_id), d]));
+
+          empData = combinedEmps.map(emp => {
+            const biometrics = descMap.get(String(emp.id));
+            const localMaster = allMasters.find(m => String(m.employee_id) === String(emp.id));
+
+            const rawHasBio = emp.has_master_biometric;
+            const isBioTrue = rawHasBio === true || rawHasBio === 1 || rawHasBio === '1' || rawHasBio === 'true';
+
+            const safeVer = biometrics?.template_version !== undefined && biometrics?.template_version !== null && biometrics?.template_version !== ''
+              ? Number(biometrics.template_version)
+              : (localMaster?.template_version !== undefined && localMaster?.template_version !== null && localMaster?.template_version !== '' ? Number(localMaster.template_version) : null);
+
+            return {
+              ...emp,
+              nama_kebun: emp.kebun || emp.nama_kebun || '',
+              kebun: emp.kebun || emp.nama_kebun || '',
+              has_master_biometric: isBioTrue || !!biometrics || !!localMaster,
+              descriptor_json: biometrics ? biometrics.descriptor_json : (localMaster ? localMaster.descriptor_json : null),
+              geometric_descriptor_json: biometrics ? biometrics.geometric_descriptor_json : null,
+              template_version: safeVer
+            };
+          });
         }
       } catch (err) {
         const isOfflineErr = err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError');
         if (isOfflineErr) {
-          console.log('[OFFLINE MODE] Supabase Cloud tidak terjangkau (Offline) — Menggunakan database lokal.');
+          console.log('[OFFLINE MODE] Supabase Cloud tidak terjangkau (Offline) - Menggunakan database lokal.');
         } else {
           console.warn('[FETCH EMPLOYEES SUPABASE DIRECT WARN]:', err?.message || err);
         }
