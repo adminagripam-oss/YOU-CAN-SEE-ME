@@ -52,7 +52,12 @@ import {
   sqliteSetPendingEmployeeProcessing,
   sqliteHeartbeatPendingEmployee,
   sqliteUpdatePendingEmployeeStepProgress,
-  sqliteRecoverStuckProcessingEmployees
+  sqliteRecoverStuckProcessingEmployees,
+  sqliteLogVectorAudit,
+  sqliteBackupVector,
+  sqliteGetVectorAuditLogs,
+  sqliteGetVectorBackups,
+  sqliteRevertVectorBackup
 } from './services/sqliteService';
 import { vectorChecksum, toVectorArray } from './biometrics';
 export { toVectorArray };
@@ -177,6 +182,22 @@ dexieDb.version(12).stores({
   employee_sync_queue: 'id, nik, name, template_version, sync_status, is_synced, created_at',
   scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
   employee_face_thumbs: 'employee_id, captured_at, is_synced'
+});
+
+dexieDb.version(13).stores({
+  user_master: '++id, employee_id, nik, name, department, updated_at',
+  attendance_sync_queue: '++id, employee_id, nik, name, timestamp, status, attendance_type, is_synced, created_at',
+  employees_cache: 'id, nik, name, department, has_master_biometric, is_synced',
+  today_attendance_cache: 'employee_id, hasCheckedIn, hasCheckedOut, checked_in, check_in_time, check_out_time, cached_date',
+  attendance_logs: 'id, employee_id, timestamp, attendance_type, is_synced',
+  local_admins: 'username, password_hash, role, region, kebun, name, nik, last_login',
+  attendance_requests: 'id, request_type, log_id, status, is_synced',
+  employee_delete_queue: 'id',
+  employee_sync_queue: 'id, nik, name, template_version, sync_status, is_synced, created_at',
+  scan_attempts_queue: '++id, employee_id, nik, outcome, is_synced, created_at',
+  employee_face_thumbs: 'employee_id, captured_at, is_synced',
+  vector_audit_log: '++id, employee_id, nik, event_type, created_at',
+  vector_backup_local: '++id, employee_id, nik, created_at'
 });
 
 /**
@@ -1562,32 +1583,145 @@ export async function saveEmployeeFaceThumbsBatch(thumbs) {
   }
 }
 
-export async function getEmployeeFaceThumb(employeeId) {
-  if (!employeeId) return null;
-  if (Capacitor.isNativePlatform()) {
-    return await sqliteGetEmployeeFaceThumb(String(employeeId));
-  }
-  try {
-    const row = await dexieDb.employee_face_thumbs.get(String(employeeId));
-    return row ? row.thumb_base64 : null;
-  } catch (err) {
-    console.error('[IndexedDB getEmployeeFaceThumb Error]:', err);
-    return null;
-  }
+export async function getEmployeeFaceThumb(employeeId, nik = null) {
+  const info = await getEmployeeFaceThumbInfo(employeeId, nik);
+  return info?.thumb_base64 || null;
 }
 
-export async function getEmployeeFaceThumbInfo(employeeId) {
-  if (!employeeId) return null;
+export async function getEmployeeFaceThumbInfo(employeeId, nik = null) {
+  if (!employeeId && !nik) return null;
   if (Capacitor.isNativePlatform()) {
-    return await sqliteGetEmployeeFaceThumbInfo(String(employeeId));
+    return await sqliteGetEmployeeFaceThumbInfo(employeeId ? String(employeeId) : '', nik);
   }
   try {
-    const row = await dexieDb.employee_face_thumbs.get(String(employeeId));
-    return row || null;
+    const idStr = employeeId ? String(employeeId) : '';
+    const nikStr = nik ? String(nik).trim() : '';
+    if (idStr) {
+      const row = await dexieDb.employee_face_thumbs.get(idStr);
+      if (row) return row;
+    }
+    if (nikStr) {
+      const row = await dexieDb.employee_face_thumbs.filter(t => t.nik === nikStr).first();
+      if (row) return row;
+    }
+    return null;
   } catch (err) {
     console.error('[IndexedDB getEmployeeFaceThumbInfo Error]:', err);
     return null;
   }
+}
+
+/**
+ * Single Source of Truth Foto Master Wajah Karyawan.
+ * Mengembalikan foto master aktif dari penyimpanan lokal (Tier 1: SQLite/Dexie)
+ * atau Cloud Storage / Supabase (Tier 2) dengan cache-buster.
+ */
+export async function getEmployeeMasterPhoto(employeeId, nik = null) {
+  // Tier 1: Cek database lokal terlebih dahulu (Local-First Offline Ready)
+  try {
+    const localInfo = await getEmployeeFaceThumbInfo(employeeId, nik);
+    if (localInfo?.thumb_base64) {
+      return {
+        photoUrl: localInfo.thumb_base64,
+        url: localInfo.thumb_base64,
+        sourceType: 'local_thumb',
+        source: 'local_thumb',
+        photoVersion: localInfo.photo_version || 1,
+        photo_version: localInfo.photo_version || 1,
+        photoChecksum: localInfo.photo_checksum || null,
+        photo_checksum: localInfo.photo_checksum || null,
+        capturedAt: localInfo.captured_at || localInfo.updated_at || null,
+        captured_at: localInfo.captured_at || localInfo.updated_at || null,
+        isBase64: true
+      };
+    }
+  } catch (err) {
+    console.warn('[getEmployeeMasterPhoto] Local fetch failed:', err);
+  }
+
+  // Tier 2: Ambil dari Supabase Cloud Storage jika online dan memiliki ID server valid
+  const isServerId = employeeId && !String(employeeId).startsWith('off_') && !String(employeeId).startsWith('tmp_');
+  const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+  if (isServerId && isOnline) {
+    try {
+      const { supabase } = await import('./supabaseClient');
+      const targetId = !isNaN(Number(employeeId)) ? Number(employeeId) : employeeId;
+      const { data, error } = await supabase
+        .from('employee_face_photos')
+        .select('photo_url, thumbnail_base64, storage_path, photo_checksum, photo_version, updated_at')
+        .eq('employee_id', targetId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        if (data.thumbnail_base64) {
+          const srcUrl = data.thumbnail_base64.startsWith('data:')
+            ? data.thumbnail_base64
+            : `data:image/jpeg;base64,${data.thumbnail_base64}`;
+
+          // Simpan ke cache lokal agar langsung tersedia saat offline
+          saveEmployeeFaceThumb(
+            String(employeeId),
+            srcUrl,
+            data.photo_version || 1,
+            data.photo_checksum || null,
+            nik
+          ).catch(() => {});
+
+          return {
+            photoUrl: srcUrl,
+            url: srcUrl,
+            sourceType: 'cloud_storage',
+            source: 'cloud_storage',
+            photoVersion: data.photo_version || 1,
+            photo_version: data.photo_version || 1,
+            photoChecksum: data.photo_checksum || null,
+            photo_checksum: data.photo_checksum || null,
+            capturedAt: data.updated_at || null,
+            captured_at: data.updated_at || null,
+            isBase64: true
+          };
+        }
+
+        let remoteUrl = data.photo_url;
+        if (!remoteUrl && data.storage_path) {
+          const { data: pubData } = supabase
+            .storage
+            .from('attendance-photos')
+            .getPublicUrl(data.storage_path);
+          remoteUrl = pubData?.publicUrl || null;
+        }
+
+        if (remoteUrl) {
+          const cacheBuster = data.photo_checksum
+            ? `?v=${encodeURIComponent(data.photo_checksum)}`
+            : `?t=${data.updated_at ? new Date(data.updated_at).getTime() : Date.now()}`;
+          const finalUrl = remoteUrl.includes('?')
+            ? `${remoteUrl}&v=${encodeURIComponent(data.photo_checksum || Date.now())}`
+            : `${remoteUrl}${cacheBuster}`;
+
+          return {
+            photoUrl: finalUrl,
+            url: finalUrl,
+            sourceType: 'cloud_storage',
+            source: 'cloud_storage',
+            photoVersion: data.photo_version || 1,
+            photo_version: data.photo_version || 1,
+            photoChecksum: data.photo_checksum || null,
+            photo_checksum: data.photo_checksum || null,
+            capturedAt: data.updated_at || null,
+            captured_at: data.updated_at || null,
+            isBase64: false
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[getEmployeeMasterPhoto] Cloud fetch failed:', err);
+    }
+  }
+
+  return null;
 }
 
 export async function getUnsyncedEmployeeFaceThumbs() {
@@ -1668,6 +1802,100 @@ export async function normalizeEmployeeFaceThumbKeys() {
 export async function recoverStuckProcessingEmployees(currentRunId) {
   return await db.employee_sync_queue.recoverStuckProcessing(currentRunId);
 }
+
+export async function logVectorAudit(entry) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteLogVectorAudit(entry);
+  }
+  try {
+    const id = await dexieDb.vector_audit_log.add({
+      ...entry,
+      created_at: entry.created_at || new Date().toISOString()
+    });
+    return id;
+  } catch (err) {
+    console.warn('[IndexedDB logVectorAudit Error]:', err);
+    return null;
+  }
+}
+
+export async function backupVector(entry) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteBackupVector(entry);
+  }
+  try {
+    const id = await dexieDb.vector_backup_local.add({
+      ...entry,
+      created_at: new Date().toISOString()
+    });
+    return id;
+  } catch (err) {
+    console.warn('[IndexedDB backupVector Error]:', err);
+    return null;
+  }
+}
+
+export async function getVectorAuditLogs(employeeId, limit = 50) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetVectorAuditLogs(employeeId, limit);
+  }
+  try {
+    const all = await dexieDb.vector_audit_log.toArray();
+    const filtered = employeeId ? all.filter(a => String(a.employee_id) === String(employeeId)) : all;
+    return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, limit);
+  } catch (err) {
+    console.warn('[IndexedDB getVectorAuditLogs Error]:', err);
+    return [];
+  }
+}
+
+export async function getVectorBackups(employeeId) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteGetVectorBackups(employeeId);
+  }
+  try {
+    const all = await dexieDb.vector_backup_local.toArray();
+    return all.filter(a => String(a.employee_id) === String(employeeId)).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 20);
+  } catch (err) {
+    console.warn('[IndexedDB getVectorBackups Error]:', err);
+    return [];
+  }
+}
+
+export async function revertVectorBackup(backupId) {
+  if (Capacitor.isNativePlatform()) {
+    return await sqliteRevertVectorBackup(backupId);
+  }
+  try {
+    const backup = await dexieDb.vector_backup_local.get(Number(backupId));
+    if (!backup) return false;
+    const cur = await dexieDb.user_master.where('employee_id').equals(String(backup.employee_id)).first();
+    await dexieDb.user_master.put({
+      employee_id: String(backup.employee_id),
+      descriptor_json: backup.descriptor_json,
+      geometric_descriptor_json: backup.geometric_descriptor_json,
+      template_version: backup.template_version,
+      vector_checksum: backup.vector_checksum,
+      updated_at: new Date().toISOString()
+    });
+    await logVectorAudit({
+      employee_id: backup.employee_id,
+      nik: backup.nik,
+      event_type: 'REVERT_BACKUP',
+      old_checksum: cur?.vector_checksum || null,
+      new_checksum: backup.vector_checksum,
+      old_version: cur?.template_version || null,
+      new_version: backup.template_version,
+      source: 'backup_manager',
+      details: `Dipulihkan dari backup snapshot #${backupId}`
+    });
+    return true;
+  } catch (err) {
+    console.warn('[IndexedDB revertVectorBackup Error]:', err);
+    return false;
+  }
+}
+
 
 
 

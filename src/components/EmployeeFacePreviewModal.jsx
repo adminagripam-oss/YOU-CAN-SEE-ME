@@ -5,21 +5,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
-import { supabase } from '../supabaseClient';
-import { getEmployeeFaceThumb, getEmployeeFaceThumbInfo, saveEmployeeFaceThumb } from '../db';
-import { User, RefreshCw, AlertCircle, Camera, CheckCircle2 } from 'lucide-react';
+import { getEmployeeMasterPhoto } from '../db';
+import { User, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function EmployeeFacePreviewModal({
   isOpen,
   onClose,
-  employee,
-  onReScan
+  employee
 }) {
   const [photoUrl, setPhotoUrl] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sourceType, setSourceType] = useState(''); // 'cloud' | 'local_thumb' | 'attendance' | 'offline_empty' | 'none'
+  const [sourceType, setSourceType] = useState(''); // 'cloud_storage' | 'local_thumb' | 'offline_empty' | 'none'
   const [savedDate, setSavedDate] = useState(null);
-  const [attendanceDate, setAttendanceDate] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Handle Android Back Button via History API
@@ -44,7 +41,6 @@ export default function EmployeeFacePreviewModal({
       setErrorMsg('');
       setSourceType('');
       setSavedDate(null);
-      setAttendanceDate(null);
       return;
     }
 
@@ -52,131 +48,26 @@ export default function EmployeeFacePreviewModal({
     setLoading(true);
     setErrorMsg('');
     setSavedDate(null);
-    setAttendanceDate(null);
 
     async function loadFacePhoto() {
       try {
-        // Tier 1: Check offline local thumbnail cache
-        const localInfo = await getEmployeeFaceThumbInfo(employee.id);
-        if (localInfo?.thumb_base64 && isMounted) {
-          setPhotoUrl(localInfo.thumb_base64);
-          setSourceType('local_thumb');
-          if (localInfo.updated_at || localInfo.captured_at) {
-            setSavedDate(localInfo.updated_at || localInfo.captured_at);
-          }
+        const res = await getEmployeeMasterPhoto(employee.id, employee.nik);
+        if (!isMounted) return;
+
+        if (res?.photoUrl) {
+          setPhotoUrl(res.photoUrl);
+          setSourceType(res.sourceType || 'local_thumb');
+          setSavedDate(res.capturedAt || null);
           setLoading(false);
-
-          // Background revalidate if online
-          if (navigator.onLine && !String(employee.id).startsWith('off_') && !String(employee.id).startsWith('tmp_')) {
-            (async () => {
-              try {
-                const { data: remoteRec } = await supabase
-                  .from('employee_face_photos')
-                  .select('thumbnail_base64, photo_version, photo_checksum, updated_at')
-                  .eq('employee_id', employee.id)
-                  .maybeSingle();
-
-                if (remoteRec?.thumbnail_base64 && remoteRec.photo_version > (localInfo.photo_version || 1)) {
-                  await saveEmployeeFaceThumb(
-                    employee.id,
-                    remoteRec.thumbnail_base64,
-                    remoteRec.photo_version,
-                    remoteRec.photo_checksum
-                  );
-                  if (isMounted) {
-                    setPhotoUrl(remoteRec.thumbnail_base64);
-                    setSavedDate(remoteRec.updated_at);
-                  }
-                }
-              } catch (_) {}
-            })();
-          }
           return;
         }
 
-        // Tier 2: Check Supabase Storage via public URL or thumbnail if online
-        const targetId = !isNaN(Number(employee.id)) ? Number(employee.id) : employee.id;
-        if (navigator.onLine && employee.id && !String(employee.id).startsWith('off_') && !String(employee.id).startsWith('tmp_')) {
-          try {
-            const { data: photoRec } = await supabase
-              .from('employee_face_photos')
-              .select('storage_path, thumbnail_base64, photo_version, photo_checksum, updated_at')
-              .eq('employee_id', targetId)
-              .maybeSingle();
-
-            if (photoRec?.thumbnail_base64) {
-              const srcUrl = photoRec.thumbnail_base64.startsWith('data:')
-                ? photoRec.thumbnail_base64
-                : `data:image/jpeg;base64,${photoRec.thumbnail_base64}`;
-
-              // Cache locally so it is available offline next time
-              await saveEmployeeFaceThumb(
-                String(employee.id),
-                srcUrl,
-                photoRec.photo_version || 1,
-                photoRec.photo_checksum || null
-              ).catch(() => {});
-
-              if (isMounted) {
-                setPhotoUrl(srcUrl);
-                setSourceType('cloud');
-                setSavedDate(photoRec.updated_at);
-                setLoading(false);
-              }
-              return;
-            }
-
-            if (photoRec?.storage_path) {
-              const { data: pubData } = supabase
-                .storage
-                .from('attendance-photos')
-                .getPublicUrl(photoRec.storage_path);
-
-              if (pubData?.publicUrl && isMounted) {
-                setPhotoUrl(pubData.publicUrl);
-                setSourceType('cloud');
-                setSavedDate(photoRec.updated_at);
-                setLoading(false);
-                return;
-              }
-            }
-          } catch (storageErr) {
-            console.warn('[FacePreview] Storage fetch error:', storageErr);
-          }
+        if (!navigator.onLine) {
+          setSourceType('offline_empty');
+        } else {
+          setSourceType('none');
         }
-
-        // Tier 3: Fallback to last verified attendance photo
-        if (navigator.onLine && employee.id && !String(employee.id).startsWith('off_') && !String(employee.id).startsWith('tmp_')) {
-          try {
-            const { data: logRec } = await supabase
-              .from('attendance_logs')
-              .select('photo_url, timestamp')
-              .eq('employee_id', targetId)
-              .not('photo_url', 'is', null)
-              .order('timestamp', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            if (logRec?.photo_url && isMounted) {
-              setPhotoUrl(logRec.photo_url);
-              setAttendanceDate(logRec.timestamp);
-              setSourceType('attendance');
-              setLoading(false);
-              return;
-            }
-          } catch (logErr) {
-            console.warn('[FacePreview] Attendance log fallback error:', logErr);
-          }
-        }
-
-        if (isMounted) {
-          if (!navigator.onLine) {
-            setSourceType('offline_empty');
-          } else {
-            setSourceType('none');
-          }
-          setLoading(false);
-        }
+        setLoading(false);
       } catch (err) {
         if (isMounted) {
           setErrorMsg(err.message || 'Gagal memuat foto');
@@ -247,33 +138,14 @@ export default function EmployeeFacePreviewModal({
                 <span className="text-xs font-semibold text-[var(--text-main)]">
                   {errorMsg || 'Foto master belum didaftarkan'}
                 </span>
-                <span className="text-[11px] text-[var(--text-muted)] max-w-[210px] leading-relaxed">
-                  Lakukan rescan dari kamera untuk mendaftarkan foto master wajah.
+                <span className="text-[11px] text-[var(--text-muted)] max-w-[220px] leading-relaxed">
+                  Silakan gunakan menu <strong>Edit</strong> pada kolom Aksi untuk mendaftarkan wajah.
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    if (onReScan) onReScan(employee);
-                  }}
-                  className="mt-1 flex items-center justify-center gap-1.5 py-1 px-3 rounded-lg bg-[var(--accent-primary)] text-white font-medium text-[11px] shadow hover:opacity-90 transition-opacity"
-                >
-                  <Camera size={13} />
-                  <span>Daftarkan Wajah</span>
-                </button>
               </div>
             )}
           </div>
 
-          {/* Source Indicator / Warning */}
-          {sourceType === 'attendance' && (
-            <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 text-center font-medium max-w-sm">
-              <AlertCircle size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
-              <span>
-                Foto Absensi Lapangan (Bukan Foto Master{attendanceDate ? ` - ${new Date(attendanceDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})
-              </span>
-            </div>
-          )}
+          {/* Source Indicator / Status Tag */}
           {sourceType === 'local_thumb' && (
             <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 font-medium">
               <CheckCircle2 size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -282,7 +154,7 @@ export default function EmployeeFacePreviewModal({
               </span>
             </div>
           )}
-          {sourceType === 'cloud' && (
+          {(sourceType === 'cloud' || sourceType === 'cloud_storage') && (
             <div className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 font-medium">
               <CheckCircle2 size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
               <span>
@@ -329,23 +201,12 @@ export default function EmployeeFacePreviewModal({
             )}
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 w-full pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                if (onReScan) onReScan(employee);
-              }}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-[var(--accent-primary)] text-white font-medium text-xs shadow hover:opacity-90 transition-opacity"
-            >
-              <Camera size={15} />
-              <span>Re-Scan Wajah</span>
-            </button>
+          {/* Action Buttons (100% Read-Only) */}
+          <div className="w-full pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="py-2.5 px-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-main)] font-medium text-xs hover:bg-[var(--bg-input)] transition-colors"
+              className="w-full py-2.5 px-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-main)] font-medium text-xs hover:bg-[var(--bg-input)] transition-colors shadow-sm"
             >
               Tutup
             </button>

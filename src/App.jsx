@@ -4,7 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import { API_BASE_URL, fetchWithTimeout } from './config';
 
 import { supabase } from './supabaseClient';
-import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray, normalizeEmployeeFaceThumbKeys } from './db';
+import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray, normalizeEmployeeFaceThumbKeys, logVectorAudit, backupVector } from './db';
 import { vectorChecksum } from './biometrics';
 import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, syncPullEmployeeFacePhotos } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -380,8 +380,53 @@ function AppContent() {
                 }
               }
 
+              // Check pending offline employee sync to avoid overwriting un-synced local changes
+              const pendingSyncList = await db.employee_sync_queue.toArray().catch(() => []);
+              const pendingSyncEmpIds = new Set(
+                (pendingSyncList || [])
+                  .flatMap(p => [String(p.id), String(p.server_employee_id || ''), String(p.nik || '')])
+                  .filter(Boolean)
+              );
+
               for (const rm of remoteMetas) {
                 const localM = localMasterMap.get(String(rm.employee_id));
+                const empMeta = combinedEmps.find(e => String(e.id) === String(rm.employee_id));
+                const isPendingSync = pendingSyncEmpIds.has(String(rm.employee_id)) ||
+                  (empMeta && empMeta.nik && pendingSyncEmpIds.has(String(empMeta.nik)));
+
+                if (isPendingSync) {
+                  logVectorAudit({
+                    employee_id: rm.employee_id,
+                    nik: empMeta?.nik || null,
+                    event_type: 'OVERWRITE_PREVENTED',
+                    old_checksum: localM?.vector_checksum || null,
+                    new_checksum: rm.vector_checksum || null,
+                    old_version: localM?.template_version || null,
+                    new_version: rm.template_version || null,
+                    source: 'fetchEmployees_pull',
+                    details: 'Server overwrite diblokir karena ada registrasi offline/rescan lokal yang belum sync'
+                  }).catch(() => {});
+                  continue;
+                }
+
+                // Anti-downgrade check: if local has multi-pose (v2+) and remote has lower version
+                const localVer = localM?.template_version ? Number(localM.template_version) : 1;
+                const remoteVer = rm.template_version ? Number(rm.template_version) : 1;
+                if (localM?.descriptor_json && localVer >= 2 && remoteVer < localVer) {
+                  logVectorAudit({
+                    employee_id: rm.employee_id,
+                    nik: empMeta?.nik || null,
+                    event_type: 'OVERWRITE_PREVENTED',
+                    old_checksum: localM.vector_checksum || null,
+                    new_checksum: rm.vector_checksum || null,
+                    old_version: localVer,
+                    new_version: remoteVer,
+                    source: 'fetchEmployees_pull',
+                    details: `Anti-downgrade: Mempertahankan multi-pose lokal v${localVer} dari overwrite server v${remoteVer}`
+                  }).catch(() => {});
+                  continue;
+                }
+
                 let needsDownload = false;
                 if (!localM || !localM.descriptor_json) {
                   needsDownload = true;
@@ -440,6 +485,31 @@ function AppContent() {
                     const safeTemplateVer = (desc.template_version !== undefined && desc.template_version !== null && desc.template_version !== '')
                       ? Number(desc.template_version)
                       : null;
+
+                    const localM = localMasterMap.get(String(desc.employee_id));
+                    if (localM && localM.descriptor_json) {
+                      await backupVector({
+                        employee_id: desc.employee_id,
+                        nik: empInfo?.nik || null,
+                        descriptor_json: localM.descriptor_json,
+                        geometric_descriptor_json: localM.geometric_descriptor_json || null,
+                        template_version: localM.template_version || null,
+                        vector_checksum: localM.vector_checksum || null,
+                        reason: 'PRE_SERVER_SYNC'
+                      }).catch(() => {});
+                    }
+
+                    await logVectorAudit({
+                      employee_id: desc.employee_id,
+                      nik: empInfo?.nik || null,
+                      event_type: 'SYNC_PULL_SERVER',
+                      old_checksum: localM?.vector_checksum || null,
+                      new_checksum: calculatedChecksum,
+                      old_version: localM?.template_version || null,
+                      new_version: safeTemplateVer,
+                      source: 'cloud_sync',
+                      details: `Vektor diunduh dari master cloud (${calculatedChecksum?.slice(0, 8)})`
+                    }).catch(() => {});
 
                     await cacheUserMasterVector({
                       ...empInfo,

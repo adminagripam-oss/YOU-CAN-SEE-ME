@@ -3312,6 +3312,7 @@ footer {
   background: rgba(21, 128, 61, 0.1);
   color: #15803d;
   border: 1px solid rgba(21, 128, 61, 0.25);
+  white-space: nowrap;
 }
 
 .badge-nonaktif {
@@ -3324,6 +3325,7 @@ footer {
   background: rgba(239, 68, 68, 0.1);
   color: #dc2626;
   border: 1px solid rgba(239, 68, 68, 0.25);
+  white-space: nowrap;
 }
 
 .filter-bar {
@@ -3895,14 +3897,18 @@ footer {
   .mobile-table-viewport .col-sticky {
     position: sticky !important;
     left: 0 !important;
-    z-index: 4 !important;
-    box-shadow: 1px 0 0 var(--border-color) !important;
+    z-index: 10 !important;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08) !important;
     background: var(--bg-card) !important;
   }
 
   .mobile-table-viewport thead th.col-sticky {
-    z-index: 7 !important;
+    z-index: 12 !important;
     background: var(--bg-secondary) !important;
+  }
+
+  .mobile-table-viewport tr:hover td.col-sticky {
+    background: var(--bg-card) !important;
   }
 
   .mobile-table-viewport .col-hide-mobile {

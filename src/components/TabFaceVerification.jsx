@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 
-import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray, queueScanAttempt, getRecentScanAttempts } from '../db';
+import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray, queueScanAttempt, getRecentScanAttempts, logVectorAudit, backupVector, getVectorAuditLogs, getVectorBackups, revertVectorBackup } from '../db';
 import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
 import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median, vectorChecksum } from '../biometrics';
-import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation, Activity } from 'lucide-react';
+import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation, Activity, ShieldCheck, RotateCcw, Database, History } from 'lucide-react';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
@@ -646,7 +646,11 @@ export default function TabFaceVerification({
   const vectorSourceRef = useRef(null);
   const vectorLoadStateRef = useRef('unknown');
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [diagnosticsActiveTab, setDiagnosticsActiveTab] = useState('telemetry');
   const [diagnosticsLogs, setDiagnosticsLogs] = useState([]);
+  const [vectorAuditLogs, setVectorAuditLogs] = useState([]);
+  const [vectorBackups, setVectorBackups] = useState([]);
+  const [currentDescriptorMeta, setCurrentDescriptorMeta] = useState(null);
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
   const lastMedianCosRef = useRef(0);
   const scanSessionEvaluatedRef = useRef(0);
@@ -757,7 +761,6 @@ export default function TabFaceVerification({
     scanSessionEvaluatedRef.current = 0;
     highestCosineRef.current = 0;
     lastMedianCosRef.current = 0;
-    vectorSourceRef.current = null;
     frameStateRef.current = { state: 'idle', progress: 0 };
     setIsStable(false);
     setLivenessVerified(false);
@@ -865,9 +868,11 @@ export default function TabFaceVerification({
             max_cosine: topCos,
             median_cosine: medCos,
             threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-            template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
-            master_checksum: masterChecksumRef.current || null,
-            vector_source: vectorSourceRef.current || null,
+            template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '')
+              ? Number(masterVersionRef.current)
+              : (masterVectorRef.current ? 1 : null),
+            master_checksum: masterChecksumRef.current || (masterVectorRef.current ? vectorChecksum(masterVectorRef.current) : null),
+            vector_source: vectorSourceRef.current || (masterVectorRef.current ? 'local_cache' : 'none'),
             facing_mode: facingMode,
             backend: human.tf?.getBackend?.() || 'webgl',
             frames_evaluated: frames,
@@ -914,9 +919,11 @@ export default function TabFaceVerification({
         max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
         median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
         threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
-        master_checksum: masterChecksumRef.current || null,
-        vector_source: vectorSourceRef.current || null,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '')
+          ? Number(masterVersionRef.current)
+          : (masterVectorRef.current ? 1 : null),
+        master_checksum: masterChecksumRef.current || (masterVectorRef.current ? vectorChecksum(masterVectorRef.current) : null),
+        vector_source: vectorSourceRef.current || (masterVectorRef.current ? 'local_cache' : 'none'),
         facing_mode: facingMode,
         backend: human.tf?.getBackend?.() || 'webgl',
         frames_evaluated: scanSessionEvaluatedRef.current,
@@ -1128,18 +1135,57 @@ export default function TabFaceVerification({
     }
   };
 
-  const handleOpenDiagnostics = async () => {
-    if (!selectedEmployeeId) {
+  const handleOpenDiagnostics = async (empId = selectedEmployeeId) => {
+    if (!empId) {
       if (showToast) showToast('Pilih Karyawan', 'Harap pilih karyawan untuk melihat riwayat diagnostik absensi.', 'warning');
       return;
     }
     setLoadingDiagnostics(true);
     setShowDiagnosticsModal(true);
     try {
-      const attempts = await getRecentScanAttempts(selectedEmployeeId, 50);
-      setDiagnosticsLogs(attempts);
+      const [attempts, audits, backups, cachedMaster] = await Promise.all([
+        getRecentScanAttempts(empId, 50).catch(() => []),
+        getVectorAuditLogs(empId, 50).catch(() => []),
+        getVectorBackups(empId).catch(() => []),
+        getCachedUserMasterVector(empId).catch(() => null)
+      ]);
+      setDiagnosticsLogs(attempts || []);
+      setVectorAuditLogs(audits || []);
+      setVectorBackups(backups || []);
+      setCurrentDescriptorMeta(cachedMaster);
     } catch (err) {
       console.error('[Diagnostics Fetch Error]:', err);
+    } finally {
+      setLoadingDiagnostics(false);
+    }
+  };
+
+  const handleRevertBackup = async (backupId) => {
+    if (!backupId || !selectedEmployeeId) return;
+    try {
+      setLoadingDiagnostics(true);
+      const success = await revertVectorBackup(backupId);
+      if (success) {
+        await loadMasterVectors(selectedEmployeeId);
+        const [audits, backups, cachedMaster] = await Promise.all([
+          getVectorAuditLogs(selectedEmployeeId, 50).catch(() => []),
+          getVectorBackups(selectedEmployeeId).catch(() => []),
+          getCachedUserMasterVector(selectedEmployeeId).catch(() => null)
+        ]);
+        setVectorAuditLogs(audits || []);
+        setVectorBackups(backups || []);
+        setCurrentDescriptorMeta(cachedMaster);
+        if (showToast) {
+          showToast('Vektor Dipulihkan', `Snapshot #${backupId} berhasil dipulihkan sebagai vektor aktif!`, 'success');
+        }
+      } else {
+        if (showToast) {
+          showToast('Gagal Memulihkan', 'Snapshot backup tidak ditemukan atau korup.', 'error');
+        }
+      }
+    } catch (err) {
+      console.error('[Revert Backup Error]:', err);
+      if (showToast) showToast('Gagal Memulihkan', err?.message || 'Terjadi kesalahan sistem.', 'error');
     } finally {
       setLoadingDiagnostics(false);
     }
@@ -1811,9 +1857,11 @@ export default function TabFaceVerification({
         path_foto_lokal: pathFotoLokal,
         match_cosine: lastMedianCosRef.current || null,
         match_threshold: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
-        vector_checksum_used: masterChecksumRef.current || null,
-        vector_source: vectorSourceRef.current || null,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '')
+          ? Number(masterVersionRef.current)
+          : (masterVectorRef.current ? 1 : null),
+        vector_checksum_used: masterChecksumRef.current || (masterVectorRef.current ? vectorChecksum(masterVectorRef.current) : null),
+        vector_source: vectorSourceRef.current || (masterVectorRef.current ? 'local_cache' : null),
         facing_mode: facingMode,
         ...(durasiDetik !== null && { durasi: durasiDetik }),
       });
@@ -1826,9 +1874,11 @@ export default function TabFaceVerification({
         median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
         max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : (lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null),
         threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
-        master_checksum: masterChecksumRef.current || null,
-        vector_source: vectorSourceRef.current || null,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '')
+          ? Number(masterVersionRef.current)
+          : (masterVectorRef.current ? 1 : null),
+        master_checksum: masterChecksumRef.current || (masterVectorRef.current ? vectorChecksum(masterVectorRef.current) : null),
+        vector_source: vectorSourceRef.current || (masterVectorRef.current ? 'local_cache' : 'none'),
         facing_mode: facingMode,
         backend: human.tf?.getBackend?.() || 'webgl',
         frames_evaluated: scanSessionEvaluatedRef.current,
@@ -2891,7 +2941,7 @@ export default function TabFaceVerification({
             >
               <div>
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                  Diagnostik Absensi (50 Percobaan Terakhir)
+                  Diagnostik & Audit Absensi
                 </h3>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                   {selectedEmployee?.name || 'Karyawan'} (NIK: {selectedEmployee?.nik || '-'})
@@ -2913,70 +2963,299 @@ export default function TabFaceVerification({
               </button>
             </div>
 
+            {/* Tab Navigation */}
+            <div
+              style={{
+                display: 'flex',
+                borderBottom: '1px solid var(--border-color)',
+                background: 'var(--bg-primary)',
+                padding: '0 16px',
+                overflowX: 'auto'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setDiagnosticsActiveTab('telemetry')}
+                style={{
+                  padding: '10px 14px',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: diagnosticsActiveTab === 'telemetry' ? '2px solid var(--text-main)' : '2px solid transparent',
+                  color: diagnosticsActiveTab === 'telemetry' ? 'var(--text-main)' : 'var(--text-muted)',
+                  fontWeight: diagnosticsActiveTab === 'telemetry' ? 700 : 500,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <Activity size={14} />
+                Telemetri Scan ({diagnosticsLogs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiagnosticsActiveTab('audit')}
+                style={{
+                  padding: '10px 14px',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: diagnosticsActiveTab === 'audit' ? '2px solid var(--text-main)' : '2px solid transparent',
+                  color: diagnosticsActiveTab === 'audit' ? 'var(--text-main)' : 'var(--text-muted)',
+                  fontWeight: diagnosticsActiveTab === 'audit' ? 700 : 500,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <ShieldCheck size={14} />
+                Audit & Backup Vektor ({vectorAuditLogs.length})
+              </button>
+            </div>
+
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
               {loadingDiagnostics ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
                   Memuat data riwayat diagnostik...
                 </div>
-              ) : diagnosticsLogs.length === 0 ? (
-                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  Belum ada catatan telemetri scan untuk karyawan ini.
-                </div>
+              ) : diagnosticsActiveTab === 'telemetry' ? (
+                diagnosticsLogs.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    Belum ada catatan telemetri scan untuk karyawan ini.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                          <th style={{ padding: '8px' }}>Waktu</th>
+                          <th style={{ padding: '8px' }}>Tipe</th>
+                          <th style={{ padding: '8px' }}>Hasil / Alasan</th>
+                          <th style={{ padding: '8px' }}>Max Cos</th>
+                          <th style={{ padding: '8px' }}>Median</th>
+                          <th style={{ padding: '8px' }}>Frames</th>
+                          <th style={{ padding: '8px' }}>Ver</th>
+                          <th style={{ padding: '8px' }}>Sumber</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnosticsLogs.map((log, idx) => {
+                          const isOk = log.outcome === 'MATCHED' || log.outcome === 'OK' || log.failure_reason === 'OK';
+                          const timeStr = log.created_at ? new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+                          const dateStr = log.created_at ? new Date(log.created_at).toLocaleDateString('id-ID') : '-';
+                          return (
+                            <tr key={log.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                                <div>{timeStr}</div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
+                              </td>
+                              <td style={{ padding: '8px', fontWeight: 600 }}>{log.attempt_type || '-'}</td>
+                              <td style={{ padding: '8px' }}>
+                                <span
+                                  style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    background: isOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                    color: isOk ? '#16a34a' : '#dc2626'
+                                  }}
+                                >
+                                  {log.failure_reason || log.outcome || 'UNKNOWN'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px', fontFamily: 'monospace' }}>
+                                {log.max_cosine != null ? Number(log.max_cosine).toFixed(3) : '-'}
+                              </td>
+                              <td style={{ padding: '8px', fontFamily: 'monospace' }}>
+                                {log.median_cosine != null ? Number(log.median_cosine).toFixed(3) : '-'}
+                              </td>
+                              <td style={{ padding: '8px' }}>{log.frames_used ?? log.frames_evaluated ?? '-'}</td>
+                              <td style={{ padding: '8px' }}>{log.template_version !== null && log.template_version !== undefined ? log.template_version : 'null'}</td>
+                              <td style={{ padding: '8px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{log.vector_source || '-'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '8px' }}>Waktu</th>
-                        <th style={{ padding: '8px' }}>Tipe</th>
-                        <th style={{ padding: '8px' }}>Hasil / Alasan</th>
-                        <th style={{ padding: '8px' }}>Max Cos</th>
-                        <th style={{ padding: '8px' }}>Median</th>
-                        <th style={{ padding: '8px' }}>Frames</th>
-                        <th style={{ padding: '8px' }}>Ver</th>
-                        <th style={{ padding: '8px' }}>Sumber</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {diagnosticsLogs.map((log, idx) => {
-                        const isOk = log.outcome === 'MATCHED' || log.outcome === 'OK' || log.failure_reason === 'OK';
-                        const timeStr = log.created_at ? new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
-                        const dateStr = log.created_at ? new Date(log.created_at).toLocaleDateString('id-ID') : '-';
-                        return (
-                          <tr key={log.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                            <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
-                              <div>{timeStr}</div>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
-                            </td>
-                            <td style={{ padding: '8px', fontWeight: 600 }}>{log.attempt_type || '-'}</td>
-                            <td style={{ padding: '8px' }}>
-                              <span
-                                style={{
-                                  padding: '2px 6px',
-                                  borderRadius: '4px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 700,
-                                  background: isOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                                  color: isOk ? '#16a34a' : '#dc2626'
-                                }}
-                              >
-                                {log.failure_reason || log.outcome || 'UNKNOWN'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '8px', fontFamily: 'monospace' }}>
-                              {log.max_cosine != null ? Number(log.max_cosine).toFixed(3) : '-'}
-                            </td>
-                            <td style={{ padding: '8px', fontFamily: 'monospace' }}>
-                              {log.median_cosine != null ? Number(log.median_cosine).toFixed(3) : '-'}
-                            </td>
-                            <td style={{ padding: '8px' }}>{log.frames_used ?? log.frames_evaluated ?? '-'}</td>
-                            <td style={{ padding: '8px' }}>{log.template_version !== null && log.template_version !== undefined ? log.template_version : 'null'}</td>
-                            <td style={{ padding: '8px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{log.vector_source || '-'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                /* Tab Audit & Backup Vektor */
+                <div>
+                  {/* Status Vektor Aktif */}
+                  <div
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
+                      borderTop: '4px solid var(--accent-primary, #16a34a)',
+                      borderRadius: '8px',
+                      padding: '14px 16px',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      Status Vektor Biometrik Aktif
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Versi Template</div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                          v{currentDescriptorMeta?.template_version || masterVersionRef.current || 1}
+                          {(currentDescriptorMeta?.template_version || masterVersionRef.current) >= 2 ? ' (Multi-Pose)' : ' (Single-Pose)'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sumber Aktif</div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                          {vectorSourceRef.current || (masterVectorRef.current ? 'local_cache' : '-')}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Checksum Vektor</div>
+                        <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-main)' }}>
+                          {currentDescriptorMeta?.vector_checksum ? currentDescriptorMeta.vector_checksum.slice(0, 10) + '...' : (masterChecksumRef.current ? masterChecksumRef.current.slice(0, 10) + '...' : '-')}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Pembaruan Terakhir</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-main)' }}>
+                          {currentDescriptorMeta?.updated_at ? new Date(currentDescriptorMeta.updated_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Riwayat Audit Vektor */}
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      <History size={14} color="var(--text-muted)" />
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                        Riwayat Perubahan & Perlindungan Overwrite
+                      </span>
+                    </div>
+                    {vectorAuditLogs.length === 0 ? (
+                      <div style={{ padding: '16px', background: 'var(--bg-primary)', borderRadius: '6px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        Belum ada catatan mutasi vektor untuk karyawan ini.
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                              <th style={{ padding: '8px' }}>Waktu</th>
+                              <th style={{ padding: '8px' }}>Event</th>
+                              <th style={{ padding: '8px' }}>Versi</th>
+                              <th style={{ padding: '8px' }}>Checksum (Lama → Baru)</th>
+                              <th style={{ padding: '8px' }}>Sumber / Detail</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {vectorAuditLogs.map((item, idx) => (
+                              <tr key={item.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                                  <div>{item.created_at ? new Date(item.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}</div>
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-'}</div>
+                                </td>
+                                <td style={{ padding: '8px' }}>
+                                  <span style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    background: item.event_type === 'OVERWRITE_PREVENTED' ? 'rgba(234,179,8,0.15)' : (item.event_type === 'REVERT_BACKUP' ? 'rgba(59,130,246,0.15)' : 'rgba(34,197,94,0.15)'),
+                                    color: item.event_type === 'OVERWRITE_PREVENTED' ? '#ca8a04' : (item.event_type === 'REVERT_BACKUP' ? '#2563eb' : '#16a34a')
+                                  }}>
+                                    {item.event_type}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                                  v{item.old_version ?? '-'} → v{item.new_version ?? '-'}
+                                </td>
+                                <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: '0.7rem' }}>
+                                  {item.old_checksum ? item.old_checksum.slice(0, 6) : '-'} → {item.new_checksum ? item.new_checksum.slice(0, 6) : '-'}
+                                </td>
+                                <td style={{ padding: '8px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                  <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{item.source}</div>
+                                  <div>{item.details || '-'}</div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Snapshot Cadangan Lokal */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      <Database size={14} color="var(--text-muted)" />
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                        Snapshot Cadangan Lokal (Rollback Safe)
+                      </span>
+                    </div>
+                    {vectorBackups.length === 0 ? (
+                      <div style={{ padding: '16px', background: 'var(--bg-primary)', borderRadius: '6px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        Belum ada snapshot cadangan lokal yang tersimpan.
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                              <th style={{ padding: '8px' }}>Waktu Cadangan</th>
+                              <th style={{ padding: '8px' }}>Versi</th>
+                              <th style={{ padding: '8px' }}>Alasan Cadangan</th>
+                              <th style={{ padding: '8px' }}>Checksum</th>
+                              <th style={{ padding: '8px', textAlign: 'right' }}>Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {vectorBackups.map((bak) => (
+                              <tr key={bak.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                                  <div>{bak.created_at ? new Date(bak.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}</div>
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{bak.created_at ? new Date(bak.created_at).toLocaleDateString('id-ID') : '-'}</div>
+                                </td>
+                                <td style={{ padding: '8px', fontWeight: 700 }}>v{bak.template_version || 1}</td>
+                                <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{bak.reason || '-'}</td>
+                                <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: '0.7rem' }}>
+                                  {bak.vector_checksum ? bak.vector_checksum.slice(0, 8) : '-'}
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'right' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevertBackup(bak.id)}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '4px',
+                                      border: '1px solid var(--border-color)',
+                                      background: 'var(--bg-card)',
+                                      color: 'var(--text-main)',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                  >
+                                    <RotateCcw size={12} />
+                                    Pulihkan
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
