@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { API_BASE_URL, fetchWithTimeout } from '../config';
 
-import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray, queueScanAttempt } from '../db';
+import { db, getCachedUserMasterVector, cacheUserMasterVector, cacheGeometricVector, queueOfflineAttendance, toVectorArray, queueScanAttempt, getRecentScanAttempts } from '../db';
 import { supabase } from '../supabaseClient';
 import { human } from '../humanSingleton'; // Singleton — SATU instance Human untuk seluruh app
 import { BIOMETRIC_CONFIG, isGoodFrame, cosine, displayScore, median, vectorChecksum } from '../biometrics';
-import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation } from 'lucide-react';
+import { CheckCircle, Mail, Power, XCircle, ChevronDown, MapPin, Navigation, Activity } from 'lucide-react';
 import { FaceFrameOverlay, getFrameRect, evaluateFaceInFrame, FRAME_HINTS } from '../FaceFrameTemplate';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import { useScanViewport } from '../hooks/useScanViewport';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import FullscreenScanShell from './FullscreenScanShell';
 import FaceScanSurface from './FaceScanSurface';
 
@@ -572,7 +573,10 @@ const MP_RIGHT_EYE = [263, 362, 385, 387, 380, 373];
 export default function TabFaceVerification({
   employees, modelsLoaded, modelStatusText, showToast, currentUser, onVerificationSuccess,
   gpsPermission = 'granted', liveCoords = null, onRefreshEmployees,
+  isOnline: isOnlineProp,
 }) {
+  const networkOnline = useOnlineStatus();
+  const isOnline = isOnlineProp !== undefined ? isOnlineProp : networkOnline;
   const { useFullscreen, canvasSize } = useScanViewport();
   const [scannerOpen, setScannerOpen] = useState(false);
   const frameRectRef = useRef(getFrameRect(canvasSize.width, canvasSize.height));
@@ -638,8 +642,12 @@ export default function TabFaceVerification({
   const scoreHistoryRef = useRef([]);
   const [debugAiInfo, setDebugAiInfo] = useState({ backend: 'webgl', faces: 0, nodes: 0 });
   const masterChecksumRef = useRef(null);
-  const masterVersionRef = useRef(1);
+  const masterVersionRef = useRef(null);
   const vectorSourceRef = useRef(null);
+  const vectorLoadStateRef = useRef('unknown');
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [diagnosticsLogs, setDiagnosticsLogs] = useState([]);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
   const lastMedianCosRef = useRef(0);
   const scanSessionEvaluatedRef = useRef(0);
   const highestCosineRef = useRef(0);
@@ -762,7 +770,7 @@ export default function TabFaceVerification({
     setLightingWarning('');
   }, []);
 
-  const openScanner = useCallback(() => {
+  const openScanner = useCallback(async () => {
     if (!selectedEmployeeId) {
       if (showToast) showToast('Pilih Karyawan', 'Harap pilih karyawan terlebih dahulu!', 'warning');
       return;
@@ -771,13 +779,61 @@ export default function TabFaceVerification({
       if (showToast) showToast('Model Belum Siap', 'Tunggu hingga AI Face Recognition selesai dimuat.', 'warning');
       return;
     }
-    if (!masterVectorRef.current) {
-      if (showToast) showToast('Template Wajah Belum Tersedia', 'Karyawan ini belum memiliki template wajah atau template rusak. Silakan daftarkan wajah terlebih dahulu.', 'error');
+
+    const currentStatus = attendanceStatusRef.current || attendanceStatus;
+    const isAlreadyComplete = currentStatus.checkInTime && currentStatus.checkOutTime;
+    if (isAlreadyComplete) {
+      if (showToast) showToast('Absensi Selesai', 'Karyawan ini sudah menyelesaikan CHECK-IN dan CHECK-OUT hari ini.', 'info');
+      queueScanAttempt({
+        attempt_type: 'ATTENDANCE-SCAN',
+        employee_id: selectedEmployeeId,
+        outcome: 'ALREADY_COMPLETE',
+        failure_reason: 'ALREADY_COMPLETE',
+        threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
+        master_checksum: masterChecksumRef.current || null,
+        vector_source: vectorSourceRef.current || null,
+        created_at: new Date().toISOString()
+      }).catch(() => {});
       return;
     }
+
+    // Jika vektor lokal belum ada di memori dan perangkat online, coba unduh terlebih dahulu
+    if (!masterVectorRef.current && isOnline) {
+      await loadMasterVectors(selectedEmployeeId);
+    }
+
+    if (!masterVectorRef.current) {
+      const isCorrupt = vectorLoadStateRef.current === 'corrupt';
+      const isNotDownloaded = vectorLoadStateRef.current === 'not_downloaded';
+      const failReason = isCorrupt ? 'CORRUPT_VECTOR' : 'NO_VECTOR';
+      const currentType = (currentStatus.checkedIn || currentStatus.checkInTime) ? 'CHECK-OUT' : 'CHECK-IN';
+
+      queueScanAttempt({
+        attempt_type: currentType,
+        employee_id: selectedEmployeeId,
+        outcome: failReason,
+        failure_reason: failReason,
+        threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
+        master_checksum: masterChecksumRef.current || null,
+        vector_source: vectorSourceRef.current || 'none',
+        created_at: new Date().toISOString()
+      }).catch(() => {});
+
+      if (isCorrupt) {
+        if (showToast) showToast('Template Biometrik Rusak', 'Data wajah rusak atau menggunakan versi lama. Silakan Re-Scan wajah melalui Edit Karyawan.', 'error');
+      } else if (!isOnline || isNotDownloaded) {
+        if (showToast) showToast('Vektor Belum Diunduh', 'Vektor belum diunduh, sinkronkan saat online.', 'warning');
+      } else {
+        if (showToast) showToast('Template Wajah Belum Tersedia', 'Karyawan ini belum memiliki template wajah. Silakan daftarkan wajah terlebih dahulu.', 'error');
+      }
+      return;
+    }
+
     resetScanSession();
     setScannerOpen(true);
-  }, [selectedEmployeeId, modelsLoaded, showToast, resetScanSession]);
+  }, [selectedEmployeeId, modelsLoaded, showToast, resetScanSession, isOnline, attendanceStatus]);
 
   // 15-second automatic timeout for attendance scan session
   useEffect(() => {
@@ -791,28 +847,45 @@ export default function TabFaceVerification({
 
     scanTimeoutTimerRef.current = setTimeout(() => {
       if (!isMatchedRef.current && !hasAutoSubmittedRef.current && scannerOpen) {
+        const topCos = highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null;
+        const medCos = lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null;
+        const frames = scanSessionEvaluatedRef.current;
+        let failReason = 'LOW_SCORE';
+        if (frames === 0) {
+          failReason = 'NO_FACE';
+        } else if (!livenessVerifiedRef.current && topCos && topCos >= BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD) {
+          failReason = 'LIVENESS_FAIL';
+        }
+
         if (selectedEmployeeIdRef.current) {
           queueScanAttempt({
-            attempt_type: 'ATTENDANCE-SCAN',
+            attempt_type: (attendanceStatusRef.current?.checkedIn || attendanceStatusRef.current?.checkInTime) ? 'CHECK-OUT' : 'CHECK-IN',
             employee_id: selectedEmployeeIdRef.current,
-            matched_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
-            max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
-            median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
+            matched_cosine: topCos,
+            max_cosine: topCos,
+            median_cosine: medCos,
             threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-            template_version: masterVersionRef.current || 1,
+            template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
             master_checksum: masterChecksumRef.current || null,
             vector_source: vectorSourceRef.current || null,
             facing_mode: facingMode,
             backend: human.tf?.getBackend?.() || 'webgl',
-            frames_evaluated: scanSessionEvaluatedRef.current,
-            frames_used: scanSessionEvaluatedRef.current,
-            outcome: 'TIMEOUT',
+            frames_evaluated: frames,
+            frames_used: frames,
+            outcome: failReason,
+            failure_reason: failReason,
             created_at: new Date().toISOString()
           }).catch(() => {});
         }
         if (showToast) {
-          const topCos = highestCosineRef.current ? highestCosineRef.current.toFixed(3) : '0';
-          showToast('Waktu Scan Habis', `Wajah belum cocok (Cosine tertinggi: ${topCos}). Pastikan posisi wajah lurus dan pencahayaan cukup.`, 'warning');
+          if (failReason === 'NO_FACE') {
+            showToast('Wajah Tidak Terdeteksi', 'Wajah tidak terdeteksi di dalam frame kamera.', 'warning');
+          } else if (failReason === 'LIVENESS_FAIL') {
+            showToast('Liveness Gagal', 'Gerakan wajah atau kedip mata tidak terverifikasi.', 'warning');
+          } else {
+            const topCosStr = topCos ? topCos.toFixed(3) : '0';
+            showToast('Waktu Scan Habis', `Wajah belum cocok (Cosine tertinggi: ${topCosStr} < 0.92). Pastikan posisi wajah lurus dan pencahayaan cukup.`, 'warning');
+          }
         }
         setScannerOpen(false);
         resetScanSession();
@@ -841,7 +914,7 @@ export default function TabFaceVerification({
         max_cosine: highestCosineRef.current ? parseFloat(highestCosineRef.current.toFixed(4)) : null,
         median_cosine: lastMedianCosRef.current ? parseFloat(lastMedianCosRef.current.toFixed(4)) : null,
         threshold_used: BIOMETRIC_CONFIG.MATCH_COSINE_THRESHOLD,
-        template_version: masterVersionRef.current || 1,
+        template_version: (masterVersionRef.current !== undefined && masterVersionRef.current !== null && masterVersionRef.current !== '') ? Number(masterVersionRef.current) : null,
         master_checksum: masterChecksumRef.current || null,
         vector_source: vectorSourceRef.current || null,
         facing_mode: facingMode,
@@ -872,6 +945,8 @@ export default function TabFaceVerification({
     eyeClosedRef.current = false;
     masterGFVRef.current = null;
     masterVectorRef.current = null;
+    masterVersionRef.current = null;
+    vectorLoadStateRef.current = 'unknown';
     setHeadTurnState({ left: false, right: false });
     setGfvMode(false);
     setLastResultMsg(null);
@@ -899,7 +974,7 @@ export default function TabFaceVerification({
       let cached = null;
       let resolvedSource = null;
       let resolvedChecksum = null;
-      let resolvedVersion = 1;
+      let resolvedVersion = null;
 
       // ── Tier 1: Local IndexedDB / SQLite Cache (PRIORITAS UTAMA) ─────────────────────────
       // Selalu cek SQLite local_master_descriptors / Dexie terlebih dahulu!
@@ -913,7 +988,7 @@ export default function TabFaceVerification({
           vec = validArr;
           resolvedSource = 'local_cache';
           resolvedChecksum = cached.vector_checksum || vectorChecksum(validArr);
-          resolvedVersion = cached.template_version !== undefined && cached.template_version !== null ? Number(cached.template_version) : 1;
+          resolvedVersion = cached.template_version !== undefined && cached.template_version !== null ? Number(cached.template_version) : null;
           console.log('[LOAD MASTER T1-LOCAL CACHE] Cache hit valid, panjang:', validArr.length, 'checksum:', resolvedChecksum, 'employee:', empIdKey);
         } else {
           console.warn('[LOAD MASTER T1-LOCAL CACHE] Cache hit invalid (descriptor null/kosong), employee:', empIdKey);
@@ -940,7 +1015,7 @@ export default function TabFaceVerification({
                 vec = validArr;
                 resolvedSource = 'supabase_cloud';
                 resolvedChecksum = masterData.vector_checksum || vectorChecksum(validArr);
-                resolvedVersion = masterData.template_version !== undefined && masterData.template_version !== null ? Number(masterData.template_version) : 1;
+                resolvedVersion = masterData.template_version !== undefined && masterData.template_version !== null ? Number(masterData.template_version) : null;
                 console.log('[LOAD MASTER T2-SUPABASE] Vektor valid ditemukan di master_descriptors');
               } else {
                 console.warn('[LOAD MASTER T2-SUPABASE] Vektor di master_descriptors tidak valid');
@@ -964,7 +1039,7 @@ export default function TabFaceVerification({
           vec = validArr;
           resolvedSource = isOfflineId ? 'offline_props' : 'employee_props';
           resolvedChecksum = vectorChecksum(validArr);
-          resolvedVersion = empObj?.template_version !== undefined && empObj?.template_version !== null ? Number(empObj.template_version) : 1;
+          resolvedVersion = empObj?.template_version !== undefined && empObj?.template_version !== null ? Number(empObj.template_version) : null;
           console.log('[LOAD MASTER T3-PROPS] Vektor ditemukan valid di employees props, source:', resolvedSource);
         } else {
           console.warn('[LOAD MASTER T3-PROPS] Tidak ada vektor valid di props. Employee ID:', empIdKey);
@@ -992,16 +1067,19 @@ export default function TabFaceVerification({
 
           if (parsedArray.length !== 1024 || hasNaN || isAllZeros) {
              console.warn(`[LOAD MASTER VECTORS] Template rusak terdeteksi (Dim: ${parsedArray.length}, NaN: ${hasNaN}, Zeros: ${isAllZeros}). Perlu daftar ulang.`);
+             vectorLoadStateRef.current = 'corrupt';
              masterVectorRef.current = null;
              vectorSourceRef.current = null;
              masterChecksumRef.current = null;
+             masterVersionRef.current = null;
              if (showToast) showToast('Template Biometrik Rusak', 'Data wajah rusak atau menggunakan versi lama. Silakan Re-Scan wajah melalui Edit Karyawan.', 'error');
              return;
           }
 
+          vectorLoadStateRef.current = 'ready';
           masterVectorRef.current = parsedArray;
           masterChecksumRef.current = resolvedChecksum || vectorChecksum(parsedArray);
-          masterVersionRef.current = resolvedVersion !== undefined && resolvedVersion !== null ? resolvedVersion : (cached?.template_version !== undefined && cached?.template_version !== null ? Number(cached.template_version) : 1);
+          masterVersionRef.current = resolvedVersion !== undefined && resolvedVersion !== null ? resolvedVersion : (cached?.template_version !== undefined && cached?.template_version !== null ? Number(cached.template_version) : null);
           vectorSourceRef.current = resolvedSource || 'unknown';
           scoreHistoryRef.current = []; // flush any zeros accumulated before master loaded
 
@@ -1027,12 +1105,16 @@ export default function TabFaceVerification({
           masterVectorRef.current = null;
           vectorSourceRef.current = null;
           masterChecksumRef.current = null;
+          masterVersionRef.current = null;
+          vectorLoadStateRef.current = 'corrupt';
           console.warn('[LOAD MASTER VECTORS] Vektor tidak valid setelah unwrap');
         }
       } else {
         masterVectorRef.current = null;
         vectorSourceRef.current = null;
         masterChecksumRef.current = null;
+        masterVersionRef.current = null;
+        vectorLoadStateRef.current = isOnline ? 'not_enrolled' : 'not_downloaded';
       }
 
       console.log(`[LOAD MASTER VECTORS OK] Employee ${empId} | Source: ${vectorSourceRef.current} | Vector: ${masterVectorRef.current ? masterVectorRef.current.length + '-dim' : 'NO'}`);
@@ -1041,6 +1123,25 @@ export default function TabFaceVerification({
       masterVectorRef.current = null;
       vectorSourceRef.current = null;
       masterChecksumRef.current = null;
+      masterVersionRef.current = null;
+      vectorLoadStateRef.current = 'error';
+    }
+  };
+
+  const handleOpenDiagnostics = async () => {
+    if (!selectedEmployeeId) {
+      if (showToast) showToast('Pilih Karyawan', 'Harap pilih karyawan untuk melihat riwayat diagnostik absensi.', 'warning');
+      return;
+    }
+    setLoadingDiagnostics(true);
+    setShowDiagnosticsModal(true);
+    try {
+      const attempts = await getRecentScanAttempts(selectedEmployeeId, 50);
+      setDiagnosticsLogs(attempts);
+    } catch (err) {
+      console.error('[Diagnostics Fetch Error]:', err);
+    } finally {
+      setLoadingDiagnostics(false);
     }
   };
 
@@ -1739,11 +1840,6 @@ export default function TabFaceVerification({
       isSuccess = true;
       successMsg = `Absensi ${typeLabel} berhasil disimpan dan masuk antrean sinkronisasi!`;
 
-      // Jadwalkan sinkronisasi otomatis reaktif
-      import('../syncEngine').then(({ scheduleReactiveSync }) => {
-        scheduleReactiveSync(3000);
-      }).catch(() => {});
-
       // Optimistic row so the log table updates without waiting for fetchLogs.
       // The background refresh triggered by onVerificationSuccess replaces it.
       window.dispatchEvent(new CustomEvent('new_attendance_log', {
@@ -2242,6 +2338,28 @@ export default function TabFaceVerification({
                         NIK: {selectedEmployee.nik || '-'} · {selectedEmployee.afdeling || selectedEmployee.department || '-'}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenDiagnostics}
+                      title="Lihat 50 Percobaan Scan Terakhir Karyawan"
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-card)',
+                        color: 'var(--text-main)',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <Activity size={13} style={{ color: 'var(--accent-primary)' }} />
+                      <span>Diagnostik</span>
+                    </button>
                   </div>
                 ) : (
                   <div
@@ -2729,6 +2847,168 @@ export default function TabFaceVerification({
             }
           />
         </FullscreenScanShell>
+      )}
+
+      {/* ── Modal Diagnostik Absensi (Admin) ────────────────────────────── */}
+      {showDiagnosticsModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            backdropFilter: 'blur(3px)'
+          }}
+          onClick={() => setShowDiagnosticsModal(false)}
+        >
+          <div
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              width: '100%',
+              maxWidth: '680px',
+              maxHeight: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+              overflow: 'hidden'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                  Diagnostik Absensi (50 Percobaan Terakhir)
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {selectedEmployee?.name || 'Karyawan'} (NIK: {selectedEmployee?.nik || '-'})
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiagnosticsModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '1.2rem',
+                  padding: '4px 8px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              {loadingDiagnostics ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Memuat data riwayat diagnostik...
+                </div>
+              ) : diagnosticsLogs.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  Belum ada catatan telemetri scan untuk karyawan ini.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px' }}>Waktu</th>
+                        <th style={{ padding: '8px' }}>Tipe</th>
+                        <th style={{ padding: '8px' }}>Hasil / Alasan</th>
+                        <th style={{ padding: '8px' }}>Max Cos</th>
+                        <th style={{ padding: '8px' }}>Median</th>
+                        <th style={{ padding: '8px' }}>Frames</th>
+                        <th style={{ padding: '8px' }}>Ver</th>
+                        <th style={{ padding: '8px' }}>Sumber</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diagnosticsLogs.map((log, idx) => {
+                        const isOk = log.outcome === 'MATCHED' || log.outcome === 'OK' || log.failure_reason === 'OK';
+                        const timeStr = log.created_at ? new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+                        const dateStr = log.created_at ? new Date(log.created_at).toLocaleDateString('id-ID') : '-';
+                        return (
+                          <tr key={log.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                              <div>{timeStr}</div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
+                            </td>
+                            <td style={{ padding: '8px', fontWeight: 600 }}>{log.attempt_type || '-'}</td>
+                            <td style={{ padding: '8px' }}>
+                              <span
+                                style={{
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  background: isOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                  color: isOk ? '#16a34a' : '#dc2626'
+                                }}
+                              >
+                                {log.failure_reason || log.outcome || 'UNKNOWN'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px', fontFamily: 'monospace' }}>
+                              {log.max_cosine != null ? Number(log.max_cosine).toFixed(3) : '-'}
+                            </td>
+                            <td style={{ padding: '8px', fontFamily: 'monospace' }}>
+                              {log.median_cosine != null ? Number(log.median_cosine).toFixed(3) : '-'}
+                            </td>
+                            <td style={{ padding: '8px' }}>{log.frames_used ?? log.frames_evaluated ?? '-'}</td>
+                            <td style={{ padding: '8px' }}>{log.template_version !== null && log.template_version !== undefined ? log.template_version : 'null'}</td>
+                            <td style={{ padding: '8px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{log.vector_source || '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: '12px 20px',
+                borderTop: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                background: 'var(--bg-primary)'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowDiagnosticsModal(false)}
+                style={{
+                  padding: '6px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text-main)',
+                  fontWeight: 600,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

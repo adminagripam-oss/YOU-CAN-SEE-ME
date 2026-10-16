@@ -6,7 +6,7 @@ import { API_BASE_URL, fetchWithTimeout } from './config';
 import { supabase } from './supabaseClient';
 import { db, getUnsyncedLogs, cacheUserMasterVector, getAllMasterVectors, getEmployeeDeletes, toVectorArray, normalizeEmployeeFaceThumbKeys } from './db';
 import { vectorChecksum } from './biometrics';
-import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, initAutoSyncListener, syncPullEmployeeFacePhotos } from './syncEngine';
+import { syncPendingAttendanceLogs, syncPendingEmployees, syncPendingAttendanceRequests, syncPullEmployeeFacePhotos } from './syncEngine';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { initSQLite } from './services/sqliteService';
 import { Capacitor } from '@capacitor/core';
@@ -1138,7 +1138,7 @@ function AppContent() {
         console.warn('[Manual Sync Employee Deletes Error]:', e);
       }
 
-      // 1B. Push pending offline employees (Tier 2)
+      // 1B. Push pending offline employees (Tier 2: Profil, status, master descriptor)
       try {
         const { syncPendingEmployees } = await import('./syncEngine');
         await syncPendingEmployees();
@@ -1146,7 +1146,15 @@ function AppContent() {
         console.warn('[Manual Sync Employees Error]:', e);
       }
 
-      // 1C. Push pending offline logs
+      // 1C. Push pending offline employee face photos & thumbnails (Tier 3)
+      try {
+        const { syncPendingEmployeeFaceThumbs } = await import('./syncEngine');
+        await syncPendingEmployeeFaceThumbs();
+      } catch (e) {
+        console.warn('[Manual Sync Face Thumbs Error]:', e);
+      }
+
+      // 1D. Push pending offline logs (Tier 4)
       try {
         const { syncPendingAttendanceLogs } = await import('./syncEngine');
         await syncPendingAttendanceLogs(showToast);
@@ -1154,7 +1162,7 @@ function AppContent() {
         console.warn('[Manual Sync Logs Error]:', e);
       }
 
-      // 1D. Push pending offline requests (edit/hapus)
+      // 1E. Push pending offline requests (edit/hapus) (Tier 5)
       try {
         const { syncPendingAttendanceRequests } = await import('./syncEngine');
         await syncPendingAttendanceRequests();
@@ -1162,16 +1170,32 @@ function AppContent() {
         console.warn('[Manual Sync Requests Error]:', e);
       }
 
+      // 1F. Push pending scan attempts telemetry (Tier 6)
+      try {
+        const { syncPendingScanAttempts } = await import('./syncEngine');
+        await syncPendingScanAttempts();
+      } catch (e) {
+        console.warn('[Manual Sync Scan Attempts Error]:', e);
+      }
+
       // ─── FASE 2: PULL DATA DARI CLOUD (Strict Sequence, ONLY after PUSH completes) ───
 
-      // 2A. Pull fresh employees & missing biometrics descriptors
+      // 2A. Pull fresh master face photos & thumbnails
+      try {
+        const { syncPullEmployeeFacePhotos } = await import('./syncEngine');
+        await syncPullEmployeeFacePhotos().catch(() => {});
+      } catch (e) {
+        console.warn('[Manual Sync Pull Photos Error]:', e);
+      }
+
+      // 2B. Pull fresh employees & missing biometrics descriptors
       try {
         await fetchEmployees(true);
       } catch (e) {
         console.warn('[Manual Sync Pull Employees Error]:', e);
       }
 
-      // 2B. Pull fresh attendance logs
+      // 2C. Pull fresh attendance logs
       try {
         await fetchLogs(true);
       } catch (e) {
@@ -1257,6 +1281,9 @@ function AppContent() {
       if (syncCallbacksRef.current?.fetchEmployees) {
         syncCallbacksRef.current.fetchEmployees(e.detail?.fullSync || false);
       }
+      if (syncCallbacksRef.current?.refreshUnsyncedCount) {
+        syncCallbacksRef.current.refreshUnsyncedCount();
+      }
     };
     window.addEventListener('refresh_logs', handleRefreshLogs);
     window.addEventListener('new_attendance_log', handleNewLog);
@@ -1330,32 +1357,13 @@ function AppContent() {
       window.addEventListener('online', handleWebOnline);
       window.addEventListener('offline', handleWebOffline);
 
-      const cleanupSync = initAutoSyncListener(
-        (t, d, type) => syncCallbacksRef.current.showToast(t, d, type),
-        async () => {
-          await syncCallbacksRef.current.fetchEmployees();
-          await syncCallbacksRef.current.fetchLogs();
-          syncCallbacksRef.current.refreshUnsyncedCount();
-        }
-      );
-
       syncCallbacksRef.current.refreshUnsyncedCount();
 
       return () => {
         window.removeEventListener('online', handleWebOnline);
         window.removeEventListener('offline', handleWebOffline);
-        cleanupSync();
       };
     }
-
-    const cleanupSync = initAutoSyncListener(
-      (t, d, type) => syncCallbacksRef.current.showToast(t, d, type),
-      async () => {
-        await syncCallbacksRef.current.fetchEmployees();
-        await syncCallbacksRef.current.fetchLogs();
-        syncCallbacksRef.current.refreshUnsyncedCount();
-      }
-    );
 
     syncCallbacksRef.current.refreshUnsyncedCount();
 
@@ -1363,7 +1371,6 @@ function AppContent() {
       if (networkListener) {
         networkListener.remove();
       }
-      cleanupSync();
     };
   }, []);
 

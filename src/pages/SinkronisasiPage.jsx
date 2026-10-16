@@ -19,6 +19,8 @@ export default function SinkronisasiPage() {
   const [syncingEmployees, setSyncingEmployees] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [schemaNotice, setSchemaNotice] = useState(null);
+  const [telemetryPendingCount, setTelemetryPendingCount] = useState(0);
+  const [telemetryStatus, setTelemetryStatus] = useState(null);
 
   // Connectivity & Scoping States
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -205,6 +207,14 @@ export default function SinkronisasiPage() {
       // Sort newest first
       setAttendanceQueue(pendingAtt.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
       setEmployeeQueue(pendingEmp.sort((a, b) => new Date(b.created_at || b.timestamp) - new Date(a.created_at || a.timestamp)));
+
+      try {
+        const { getUnsyncedScanAttempts } = await import('../db');
+        const { getTelemetrySyncStatus } = await import('../syncEngine');
+        const pendingAttempts = await getUnsyncedScanAttempts();
+        setTelemetryPendingCount(pendingAttempts?.length || 0);
+        setTelemetryStatus(getTelemetrySyncStatus?.() || null);
+      } catch (_) {}
       
       checkRegistrationSchema();
     } catch (error) {
@@ -436,7 +446,7 @@ export default function SinkronisasiPage() {
 
       let calculatedChecksum = data.vector_checksum;
       const arr = toVectorArray(data.descriptor_json);
-      const pullTemplateVer = data.template_version !== undefined && data.template_version !== null ? Number(data.template_version) : 1;
+      const pullTemplateVer = (data.template_version !== undefined && data.template_version !== null && data.template_version !== '') ? Number(data.template_version) : null;
       if (!calculatedChecksum && arr) {
         calculatedChecksum = vectorChecksum(arr);
         await supabase
@@ -563,6 +573,22 @@ export default function SinkronisasiPage() {
                 Daftar absensi yang direkam saat perangkat tidak terhubung ke internet.
               </CardDescription>
             </CardHeader>
+            {telemetryPendingCount > 0 && (
+              <div className="mx-4 md:mx-6 mb-3 p-3 rounded-lg bg-slate-500/10 border border-slate-500/20 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity size={15} className="text-slate-600 dark:text-slate-400 shrink-0" />
+                  <span>
+                    Telemetri Scan Wajah: <strong>{telemetryPendingCount} tertunda</strong>
+                    {telemetryStatus?.lastErrorCode && (
+                      <span className="text-amber-600 dark:text-amber-400 ml-1">
+                        (Terakhir gagal: kode {telemetryStatus.lastErrorCode} - RLS Server)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <span className="text-[11px] text-muted-foreground">Catatan lokal tetap aman</span>
+              </div>
+            )}
             <CardContent className="flex-1 p-0">
               {loading ? (
                 <div className="text-center py-10 text-muted-foreground">Memuat data...</div>

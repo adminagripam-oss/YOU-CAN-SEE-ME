@@ -201,16 +201,17 @@ export function AuthProvider({ children }) {
       if (summary.total > 0 && !force) {
         const isOnline = await checkOnline();
 
-        // Attempt to sync before blocking if online
-        // CATATAN: triggerAutoSync() menghormati cut-off 22:00.
-        // Data yang diabsen setelah jam 22:00 TIDAK akan dipaksa dikirim saat logout.
+        // Percobaan sinkronisasi sebelum memblokir logout jika perangkat online.
+        // CATATAN: triggerAutoSync() dipanggil hanya saat pengguna menekan logout bila ada data tertunda.
+        // Fungsi triggerAutoSync() sendiri tidak memeriksa cut-off; evaluasi cut-off 22:00 dilakukan
+        // secara internal di dalam syncPendingAttendanceLogs().
         if (isOnline) {
           if (showToast) {
-            showToast('Menyinkronkan Data', 'Mengirim data offline (sebelum cut-off 22:00) ke server...', 'info');
+            showToast('Menyinkronkan Data', 'Mengirim data offline yang tertunda ke server...', 'info');
           }
-          console.log('[LOGOUT] Attempting cut-off-aware auto-sync before logout...');
-          await triggerAutoSync(); // Cut-off 22:00 sudah diterapkan di dalam fungsi ini
-          // Re-check summary after sync attempt
+          console.log('[LOGOUT] Attempting manual-triggered sync before logout...');
+          await triggerAutoSync();
+          // Periksa kembali ringkasan antrean setelah percobaan sinkronisasi
           summary = await getUnsyncedDataSummary();
         }
 
@@ -235,18 +236,37 @@ export function AuthProvider({ children }) {
         }
       }
 
-      // Bersihkan cache kehadiran sesi saat logout, namun pertahankan data karyawan dan master biometrik offline
+      // Bersihkan cache kehadiran lampau saat logout, namun pertahankan data karyawan, master biometrik, dan log absensi hari berjalan
       try {
-        console.log('[LOGOUT] Membersihkan cache kehadiran sesi...');
+        console.log('[LOGOUT] Membersihkan cache lampau, mempertahankan log hari berjalan & data unsynced...');
+        const d = new Date();
+        const localMidnightISO = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+        const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
         if (Capacitor.isNativePlatform()) {
           const { sqliteClearAll } = await import('../services/sqliteService');
           await sqliteClearAll();
+        } else {
+          try {
+            await db.today_attendance_cache.deleteNotDate(todayStr);
+          } catch (errCache) {
+            console.error('[LOGOUT] Gagal menghapus today_attendance_cache tanggal lampau:', errCache);
+          }
+
+          try {
+            await db.attendance_logs.deleteBefore(localMidnightISO);
+          } catch (errLogs) {
+            console.error('[LOGOUT] Gagal menghapus attendance_logs sebelum batas awal hari lokal:', errLogs);
+          }
+
+          try {
+            await db.attendance_requests.deleteSynced();
+          } catch (errReqs) {
+            console.error('[LOGOUT] Gagal membersihkan attendance_requests yang tersinkron:', errReqs);
+          }
         }
-        await db.today_attendance_cache.clear();
-        await db.attendance_logs.clear();
-        await db.attendance_requests.clear();
       } catch (clearErr) {
-        console.warn('[LOGOUT DATA CLEAR WARN]:', clearErr);
+        console.error('[LOGOUT DATA CLEAR WARN]:', clearErr);
       }
 
     } catch (checkErr) {

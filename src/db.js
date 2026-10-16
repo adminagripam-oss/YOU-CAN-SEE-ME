@@ -23,6 +23,8 @@ import {
   sqliteGetTodayAttendanceLogs,
   sqliteHardDeleteAttendanceLog,
   sqliteSoftDeleteAttendanceLog,
+  sqliteDeleteAttendanceLogsBefore,
+  sqliteClearSyncedAttendanceRequests,
   sqliteClearAttendanceLogs,
   sqliteSaveAdmin,
   sqliteGetAdmin,
@@ -335,6 +337,27 @@ export const db = {
         return null;
       }
     },
+    async deleteNotDate(todayStr) {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { waitForConnection } = await import('./services/sqliteService');
+          const dbConn = await waitForConnection();
+          if (dbConn) {
+            await dbConn.run(`DELETE FROM local_today_attendance_cache WHERE cached_date != ?`, [todayStr]);
+          }
+        } catch (e) {
+          console.error('[db.today_attendance_cache.deleteNotDate SQLite Error]:', e);
+          throw e;
+        }
+      } else {
+        try {
+          await dexieDb.today_attendance_cache.where('cached_date').notEqual(todayStr).delete();
+        } catch (e) {
+          console.error('[db.today_attendance_cache.deleteNotDate Dexie Error]:', e);
+          throw e;
+        }
+      }
+    },
     async clear() {
       if (Capacitor.isNativePlatform()) {
         await sqliteClearTodayAttendanceCache();
@@ -445,6 +468,24 @@ export const db = {
         } catch (e) {
           console.warn('[Dexie Attendance Logs getTodayLogs Error]:', e);
           return [];
+        }
+      }
+    },
+    async deleteBefore(beforeISO) {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteDeleteAttendanceLogsBefore(beforeISO);
+      } else {
+        try {
+          const allLogs = await dexieDb.attendance_logs.toArray();
+          const toDeleteIds = allLogs
+            .filter(l => l.timestamp && l.timestamp < beforeISO && (l.is_synced === true || l.is_synced === 1))
+            .map(l => l.id);
+          if (toDeleteIds.length > 0) {
+            await dexieDb.attendance_logs.bulkDelete(toDeleteIds);
+          }
+        } catch (e) {
+          console.error('[db.attendance_logs.deleteBefore Dexie Error]:', e);
+          throw e;
         }
       }
     },
@@ -735,6 +776,24 @@ export const db = {
         }
       }
     },
+    async deleteSynced() {
+      if (Capacitor.isNativePlatform()) {
+        await sqliteClearSyncedAttendanceRequests();
+      } else {
+        try {
+          const allReqs = await dexieDb.attendance_requests.toArray();
+          const syncedIds = allReqs
+            .filter(r => r.is_synced === true || r.is_synced === 1)
+            .map(r => r.id);
+          if (syncedIds.length > 0) {
+            await dexieDb.attendance_requests.bulkDelete(syncedIds);
+          }
+        } catch (e) {
+          console.error('[db.attendance_requests.deleteSynced Error]:', e);
+          throw e;
+        }
+      }
+    },
     async clear() {
       if (Capacitor.isNativePlatform()) {
         await sqliteClearAttendanceRequests();
@@ -820,7 +879,7 @@ export async function cacheUserMasterVector(user) {
     const allMasters = await dexieDb.user_master.toArray();
     const existing = allMasters.find((m) => String(m.employee_id) === String(empId) || (m.nik && String(m.nik) === String(user.nik)));
 
-    const templateVersion = user.template_version !== undefined && user.template_version !== null ? Number(user.template_version) : 1;
+    const templateVersion = (user.template_version !== undefined && user.template_version !== null && user.template_version !== '') ? Number(user.template_version) : null;
     const vectorChecksumVal = user.vector_checksum || (vector ? vectorChecksum(vector) : null);
 
     const payload = {
@@ -1006,7 +1065,7 @@ export async function queueOfflineAttendance(logData) {
       euclidean_distance: logData.euclidean_distance,
       match_cosine: logData.match_cosine !== undefined ? logData.match_cosine : null,
       match_threshold: logData.match_threshold !== undefined ? logData.match_threshold : null,
-      template_version: logData.template_version !== undefined ? logData.template_version : 1,
+      template_version: (logData.template_version !== undefined && logData.template_version !== null && logData.template_version !== '') ? Number(logData.template_version) : null,
       vector_checksum_used: logData.vector_checksum_used || null,
       vector_source: logData.vector_source || null,
       facing_mode: logData.facing_mode || null,
@@ -1435,6 +1494,25 @@ export async function removeSyncedScanAttempts(ids) {
     await dexieDb.scan_attempts_queue.bulkDelete(numIds);
   } catch (err) {
     console.error('[IndexedDB removeSyncedScanAttempts Error]:', err);
+  }
+}
+
+export async function getRecentScanAttempts(employeeId, limit = 50) {
+  if (Capacitor.isNativePlatform()) {
+    const { sqliteGetRecentScanAttempts } = await import('./services/sqliteService');
+    return await sqliteGetRecentScanAttempts(employeeId, limit);
+  }
+  try {
+    const all = await dexieDb.scan_attempts_queue.toArray();
+    const filtered = employeeId 
+      ? all.filter(a => String(a.employee_id) === String(employeeId))
+      : all;
+    return filtered
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, limit);
+  } catch (err) {
+    console.error('[IndexedDB getRecentScanAttempts Error]:', err);
+    return [];
   }
 }
 

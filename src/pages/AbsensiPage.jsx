@@ -3,14 +3,14 @@ import TabFaceVerification from '../components/TabFaceVerification';
 import { useAuth } from '../context/AuthContext';
 import { MapPin, MapPinOff, Navigation, WifiOff } from 'lucide-react';
 
-export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, showToast, refreshLogs, refreshEmployees }) {
+export default function AbsensiPage({ isOnline: isOnlineProp, employees, modelsLoaded, modelStatusText, showToast, refreshLogs, refreshEmployees }) {
   const { user } = useAuth();
   
-  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isOnlineState, setIsOnlineState] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => setIsOnlineState(true);
+    const handleOffline = () => setIsOnlineState(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -18,6 +18,8 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const isOnline = isOnlineProp !== undefined ? isOnlineProp : isOnlineState;
 
   // ── GPS Permission Gate (dijalankan saat halaman Absensi dibuka) ───────────
   // Status: 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable'
@@ -274,6 +276,7 @@ export default function AbsensiPage({ employees, modelsLoaded, modelStatusText, 
       gpsPermission={gpsPermission}
       liveCoords={liveCoords}
       onRefreshEmployees={refreshEmployees}
+      isOnline={isOnline}
     />
   );
 }
