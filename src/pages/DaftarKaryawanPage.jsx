@@ -15,7 +15,7 @@ import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { API_BASE_URL } from '../config';
 import { supabase } from '../supabaseClient';
-import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray, queueScanAttempt, saveEmployeeFaceThumb, getEmployeeFaceThumb } from '../db';
+import { db, cacheUserMasterVector, getAllMasterVectors, cosineSimilarity, hardDeleteLocalEmployee, softDeleteLocalEmployee, toVectorArray, queueScanAttempt, saveEmployeeFaceThumb, getEmployeeFaceThumb, getEmployeeMasterPhoto } from '../db';
 import { useNormalizedFaceMesh } from '../hooks/useNormalizedFaceMesh';
 import { human } from '../humanSingleton';
 import { BIOMETRIC_CONFIG, isGoodFrame, buildTemplate, buildTemplateDetailed, cosine, vectorChecksum, createEnrollmentCollector, selectEnrollmentFrames } from '../biometrics';
@@ -144,6 +144,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [editCameraStatusText, setEditCameraStatusText] = useState('Menunggu Wajah di Kamera...');
   const [editCameraStatusColor, setEditCameraStatusColor] = useState('var(--accent-warning)');
   const [editPhotoPreview, setEditPhotoPreview] = useState(null);
+  const [editCurrentPhotoUrl, setEditCurrentPhotoUrl] = useState(null);
   // null = belum dicek | { isDuplicate, matchedName, similarity } = hasil cek duplikasi
   const [editFaceCheckResult, setEditFaceCheckResult] = useState(null);
   const [editSamplesReady, setEditSamplesReady] = useState(false);
@@ -152,6 +153,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
   const [editFacingMode, setEditFacingMode] = useState('environment');
 
   const editCurrentDescriptorRef = useRef(null);
+  const editCapturedThumbRef = useRef(null);
   const editSamplesRef = useRef([]);
   const editLastSampleTimeRef = useRef(0);
   const editCollectorRef = useRef(createEnrollmentCollector());
@@ -653,6 +655,16 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               setEditCameraStatusColor('var(--accent-success)');
               editReadyRef.current = true;
               setEditSamplesReady(true);
+
+              // Ambil foto master pendaftaran langsung dari stream kamera aktif seketika
+              if (editVideoRef.current) {
+                const thumb = captureEnrollmentPhoto(editVideoRef.current, boundingBox, editFacingMode);
+                if (thumb?.base64) {
+                  editCapturedThumbRef.current = thumb.base64;
+                  setEditPhotoPreview(thumb.base64);
+                }
+              }
+
               if (useFullscreenRef.current) {
                 setTimeout(() => {
                   setEditScannerOpen(false);
@@ -665,6 +677,15 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             setEditCameraStatusColor('var(--accent-success)');
             editReadyRef.current = true;
             setEditSamplesReady(true);
+
+            if (editVideoRef.current) {
+              const thumb = captureEnrollmentPhoto(editVideoRef.current, boundingBox, editFacingMode);
+              if (thumb?.base64) {
+                editCapturedThumbRef.current = thumb.base64;
+                setEditPhotoPreview(thumb.base64);
+              }
+            }
+
             if (useFullscreenRef.current) {
               setTimeout(() => {
                 setEditScannerOpen(false);
@@ -808,6 +829,8 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     setEditStatusTkCustom(emp.status_tk && !['BHL', 'Karyawan Tetap (PKWTT)', 'Karyawan Kontrak (PKWT)'].includes(emp.status_tk) ? emp.status_tk : '');
     setEditUpdateBiometrics(false);
     setEditPhotoPreview(null);
+    setEditCurrentPhotoUrl(null);
+    editCapturedThumbRef.current = null;
     editCurrentDescriptorRef.current = null;
     setEditFaceCheckResult(null);
     editReadyRef.current = false;
@@ -818,6 +841,13 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
     editLastSampleTimeRef.current = 0;
     editCollectorRef.current = createEnrollmentCollector();
     setEditModalOpen(true);
+
+    // Ambil foto master aktif saat ini (Single Source of Truth) untuk preview di Edit modal
+    getEmployeeMasterPhoto(emp.id, emp.nik).then(res => {
+      if (res?.photoUrl) {
+        setEditCurrentPhotoUrl(res.photoUrl);
+      }
+    }).catch(() => {});
   };
 
   // Submit Edit Form
@@ -954,13 +984,26 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
 
       if (descriptorJson && editCurrentDescriptorRef.current) {
         const csVal = vectorChecksum(editCurrentDescriptorRef.current);
-        if (editFormMode === 'camera' && editVideoRef.current) {
-          const thumb = captureEnrollmentPhoto(editVideoRef.current, editFaceCheckResult?.boundingBox, editFacingMode);
-          if (thumb?.base64) {
-            await saveEmployeeFaceThumb(editingEmp.id, thumb.base64, editTemplateVer, null, payload.nik);
+        const newThumb = editCapturedThumbRef.current || editPhotoPreview;
+        if (newThumb) {
+          let thumbBase64 = newThumb;
+          if (thumbBase64.startsWith('blob:')) {
+            try {
+              const resp = await fetch(thumbBase64);
+              const blob = await resp.blob();
+              thumbBase64 = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+            } catch (_) {}
           }
-        } else if (editPhotoPreview) {
-          await saveEmployeeFaceThumb(editingEmp.id, editPhotoPreview, editTemplateVer, null, payload.nik);
+          await saveEmployeeFaceThumb(editingEmp.id, thumbBase64, editTemplateVer, null, payload.nik);
+        } else if (editFormMode === 'camera' && editVideoRef.current) {
+          const fallbackThumb = captureEnrollmentPhoto(editVideoRef.current, editFaceCheckResult?.boundingBox, editFacingMode);
+          if (fallbackThumb?.base64) {
+            await saveEmployeeFaceThumb(editingEmp.id, fallbackThumb.base64, editTemplateVer, null, payload.nik);
+          }
         }
 
         await cacheUserMasterVector({
@@ -997,23 +1040,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         'success'
       );
 
-      // Auto-upload foto master ke Supabase Storage & employee_face_photos di latar belakang jika online
-      if (navigator.onLine && (editCurrentDescriptorRef.current || editPhotoPreview)) {
-        (async () => {
-          try {
-            const { syncPendingEmployeeFaceThumbs } = await import('../syncEngine');
-            const res = await syncPendingEmployeeFaceThumbs();
-            if ((res?.count || res?.syncedCount) > 0) {
-              showToast('Foto Master Diunggah', `Foto wajah ${payload.name} berhasil disimpan di cloud.`, 'success');
-            }
-          } catch (syncErr) {
-            console.warn('[handleEditSubmit] Auto-upload foto master di latar belakang:', syncErr);
-          }
-        })();
-      }
-
       setEditModalOpen(false);
       refreshEmployees();
+      if (previewEmp && String(previewEmp.id) === String(editingEmp.id)) {
+        setPreviewEmp(prev => ({ ...prev, ...payload }));
+      }
       window.dispatchEvent(new CustomEvent('refresh_employees', { detail: { employeeId: editingEmp.id } }));
     } catch (err) {
       showToast('Error', err.message, 'error');
@@ -1693,12 +1724,11 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
             <Table className="enterprise-table compact-mobile-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead style={{ width: '40px', textAlign: 'center' }}>No.</TableHead>
-                  <TableHead>NIK</TableHead>
-                  <TableHead className="col-sticky">Nama</TableHead>
+                  <TableHead className="col-sticky" style={{ minWidth: '120px' }}>Nama</TableHead>
+                  <TableHead style={{ minWidth: '100px' }}>NIK</TableHead>
+                  <TableHead style={{ minWidth: '95px' }}>Status TK</TableHead>
                   <TableHead>Afdeling</TableHead>
                   <TableHead>Nama Kebun</TableHead>
-                  <TableHead>Status TK</TableHead>
                   <TableHead>Perkawinan</TableHead>
                   <TableHead className="no-print">Biometrik</TableHead>
                   <TableHead className="no-print">Aksi</TableHead>
@@ -1707,7 +1737,7 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
               <TableBody>
                 {filteredEmployees.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
+                    <TableCell colSpan={8} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
                       Tidak ada data yang cocok.
                     </TableCell>
                   </TableRow>
@@ -1717,19 +1747,22 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                     const isAktif = emp.status_tk && emp.status_tk !== 'Non-Aktif' && emp.status_tk !== 'OFFBOARDING';
                     return (
                       <TableRow key={emp.id}>
-                        <TableCell data-label="No." style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
-                        <TableCell data-label="NIK" style={{ fontWeight: 600 }}>{emp.nik}</TableCell>
-                        <TableCell data-label="Nama" className="col-sticky" style={{ fontWeight: 600 }}>{emp.name}</TableCell>
-                        <TableCell data-label="Afdeling">{emp.afdeling || '-'}</TableCell>
-                        <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)' }}>{emp.nama_kebun || '-'}</TableCell>
-                        <TableCell data-label="Status TK">
+                        <TableCell data-label="Nama" className="col-sticky" style={{ fontWeight: 600 }}>
+                          <span style={{ display: 'block', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={emp.name}>
+                            {emp.name}
+                          </span>
+                        </TableCell>
+                        <TableCell data-label="NIK" style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{emp.nik}</TableCell>
+                        <TableCell data-label="Status TK" style={{ whiteSpace: 'nowrap' }}>
                           {emp.status_tk ? (
-                            <span className={isAktif ? 'badge-aktif' : 'badge-nonaktif'}>
+                            <span className={isAktif ? 'badge-aktif' : 'badge-nonaktif'} style={{ whiteSpace: 'nowrap', fontSize: '0.7rem', padding: '2px 7px' }}>
                               {emp.status_tk}
                             </span>
                           ) : '-'}
                         </TableCell>
-                        <TableCell data-label="Perkawinan">{emp.status_perkawinan || '-'}</TableCell>
+                        <TableCell data-label="Afdeling" style={{ whiteSpace: 'nowrap' }}>{emp.afdeling || '-'}</TableCell>
+                        <TableCell data-label="Nama Kebun" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{emp.nama_kebun || '-'}</TableCell>
+                        <TableCell data-label="Perkawinan" style={{ whiteSpace: 'nowrap' }}>{emp.status_perkawinan || '-'}</TableCell>
                         <TableCell data-label="Biometrik" className="no-print">
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
                             {isBiometrikReady ? (
@@ -2249,6 +2282,19 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                 </label>
                 {editUpdateBiometrics && (
                   <div style={{ marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                    {editCurrentPhotoUrl && !editPhotoPreview && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: '8px', marginBottom: '10px' }}>
+                        <img
+                          src={editCurrentPhotoUrl}
+                          alt="Foto Master Aktif"
+                          style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-main)' }}>Foto Master Aktif</span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Akan digantikan bila Anda menyimpan hasil scan baru</span>
+                        </div>
+                      </div>
+                    )}
                     {editFormMode === 'camera' ? (
                       <>
                         {!useFullscreen ? (
@@ -2270,6 +2316,12 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                               <canvas ref={editCanvasRef} className="overlay-canvas" style={{ transform: editFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}></canvas>
                               <FaceFrameOverlay mode="register" stateRef={editFrameStateRef} />
                             </div>
+                            {editSamplesReady && editPhotoPreview && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                                <img src={editPhotoPreview} alt="Preview Hasil Scan" style={{ width: '44px', height: '44px', borderRadius: '6px', objectFit: 'cover', border: '2px solid #10b981' }} />
+                                <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600 }}>Foto baru siap disimpan</span>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -2286,6 +2338,13 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
                                   gap: '8px'
                                 }}
                               >
+                                {editPhotoPreview && (
+                                  <img
+                                    src={editPhotoPreview}
+                                    alt="Hasil Scan Baru"
+                                    style={{ width: '80px', height: '80px', borderRadius: '8px', objectFit: 'cover', border: '2px solid #10b981' }}
+                                  />
+                                )}
                                 <span style={{ color: '#10b981', fontWeight: 700, fontSize: '0.85rem' }}>
                                   ✓ Sampel Wajah Berhasil Diambil
                                 </span>
@@ -2500,7 +2559,6 @@ export default function DaftarKaryawanPage({ isOnline, employees, modelsLoaded, 
         isOpen={previewModalOpen}
         onClose={() => setPreviewModalOpen(false)}
         employee={previewEmp}
-        onReScan={(emp) => openScanModal(emp)}
       />
     </div>
   );
